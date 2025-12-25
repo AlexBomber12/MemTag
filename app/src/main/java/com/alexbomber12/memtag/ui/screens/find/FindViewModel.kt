@@ -65,6 +65,7 @@ class FindViewModel(
     private var calculator: ProximityCalculator? = null
     private var currentPower = AppDefaults.UHF_POWER
     private var currentRegion = UhfRegion.fromSettings(AppDefaults.UHF_REGION)
+    private var autoStartConsumedForEpc: String? = null
 
     init {
         viewModelScope.launch {
@@ -86,6 +87,27 @@ class FindViewModel(
         mutableState.update { state ->
             val updated = state.copy(epcInput = value, lastErrorMessage = null)
             updated.copy(status = computeStatus(updated))
+        }
+    }
+
+    fun applyExternalEpc(
+        epcRaw: String,
+        autoStart: Boolean,
+    ) {
+        if (epcRaw.isBlank()) {
+            return
+        }
+        val normalized = runCatching { EpcNormalizer.normalize(epcRaw) }.getOrNull() ?: return
+        val shouldUpdate = uiState.value.epcInput != normalized
+        if (shouldUpdate) {
+            mutableState.update { state ->
+                val updated = state.copy(epcInput = normalized, lastErrorMessage = null)
+                updated.copy(status = computeStatus(updated))
+            }
+        }
+        if (autoStart && autoStartConsumedForEpc != normalized && !uiState.value.isRunning) {
+            autoStartConsumedForEpc = normalized
+            startFind()
         }
     }
 
@@ -120,12 +142,12 @@ class FindViewModel(
         }
         val epcRaw = uiState.value.epcInput
         if (!EpcValidator.isValidEpcHex(epcRaw)) {
-            setError("Invalid EPC. Use hex characters only.")
+            setError("Invalid EPC. Use 8-64 hex characters.")
             return
         }
         val normalized =
             runCatching { EpcNormalizer.normalize(epcRaw) }.getOrElse {
-                setError("Invalid EPC. Use hex characters only.")
+                setError("Invalid EPC. Use 8-64 hex characters.")
                 return
             }
         calculator = ProximityCalculator(normalized)

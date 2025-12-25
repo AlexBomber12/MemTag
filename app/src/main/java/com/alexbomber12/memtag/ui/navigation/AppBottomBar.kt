@@ -19,11 +19,12 @@ fun AppBottomBar(
 ) {
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
+    val currentRoot = currentRoute?.substringBefore("?")?.substringBefore("/")
 
     NavigationBar {
         destinations.forEach { destination ->
             NavigationBarItem(
-                selected = currentRoute == destination.route,
+                selected = currentRoot == destination.route,
                 onClick = {
                     navController.navigate(destination.route) {
                         popUpTo(navController.graph.findStartDestination().id) {

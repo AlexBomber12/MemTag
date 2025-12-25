@@ -1,5 +1,6 @@
 package com.alexbomber12.memtag.ui.navigation
 
+import android.net.Uri
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Build
@@ -61,4 +62,15 @@ object AppDestinations {
         )
 
     val topLevel = listOf(Lookup, Find, RepairWrite, Queue, Settings, Diagnostics)
+
+    const val FIND_ROUTE_PATTERN = "find?epc={epc}&autoStart={autoStart}&fromQueue={fromQueue}"
+
+    fun findRoute(
+        epc: String = "",
+        autoStart: Boolean = false,
+        fromQueue: Boolean = false,
+    ): String {
+        val encoded = Uri.encode(epc)
+        return "find?epc=$encoded&autoStart=$autoStart&fromQueue=$fromQueue"
+    }
 }

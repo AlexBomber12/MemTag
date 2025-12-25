@@ -21,6 +21,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -37,7 +38,13 @@ import java.util.Locale
 import kotlin.math.roundToInt
 
 @Composable
-fun FindScreen(viewModel: FindViewModel) {
+fun FindScreen(
+    viewModel: FindViewModel,
+    initialEpc: String = "",
+    autoStart: Boolean = false,
+    showBackToQueue: Boolean = false,
+    onBackToQueue: () -> Unit = {},
+) {
     val uiState by viewModel.uiState.collectAsState()
     var showDebug by rememberSaveable { mutableStateOf(false) }
 
@@ -50,6 +57,11 @@ fun FindScreen(viewModel: FindViewModel) {
     ) {
         DisposableEffect(Unit) {
             onDispose { viewModel.stopFind() }
+        }
+        LaunchedEffect(initialEpc, autoStart) {
+            if (initialEpc.isNotBlank()) {
+                viewModel.applyExternalEpc(initialEpc, autoStart)
+            }
         }
         val isValid = EpcValidator.isValidEpcHex(uiState.epcInput)
         val showInputError = uiState.epcInput.isNotBlank() && !isValid
@@ -73,7 +85,7 @@ fun FindScreen(viewModel: FindViewModel) {
                 supportingText = {
                     val message =
                         if (showInputError) {
-                            "Invalid EPC. Use hex characters only."
+                            "Invalid EPC. Use 8-64 hex characters."
                         } else {
                             "Paste or type the tag EPC."
                         }
@@ -148,6 +160,13 @@ fun FindScreen(viewModel: FindViewModel) {
                 checked = uiState.hapticEnabled,
                 onCheckedChange = viewModel::setHapticEnabled,
             )
+            if (showBackToQueue) {
+                SecondaryButton(
+                    text = "Back to Queue",
+                    onClick = onBackToQueue,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
         }
     }
 }

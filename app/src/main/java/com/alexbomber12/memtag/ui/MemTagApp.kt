@@ -24,7 +24,8 @@ fun MemTagApp(appContainer: AppContainer) {
     val viewModelFactory = remember(appContainer) { AppViewModelFactory(appContainer) }
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route
-    val currentDestination = destinations.firstOrNull { it.route == currentRoute } ?: destinations.first()
+    val currentRoot = currentRoute?.substringBefore("?")?.substringBefore("/")
+    val currentDestination = destinations.firstOrNull { it.route == currentRoot } ?: destinations.first()
 
     Scaffold(
         topBar = { AppTopBar(title = currentDestination.title) },

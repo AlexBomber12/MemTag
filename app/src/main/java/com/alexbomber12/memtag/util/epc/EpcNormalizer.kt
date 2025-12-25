@@ -1,12 +1,13 @@
 package com.alexbomber12.memtag.util.epc
 
+private const val MIN_EPC_LENGTH = 8
+private const val MAX_EPC_LENGTH = 64
+private val WHITESPACE_REGEX = Regex("\\s+")
+
 private fun normalizeCandidate(raw: String): String {
     return raw
         .trim()
-        .replace(" ", "")
-        .replace("\n", "")
-        .replace("\r", "")
-        .replace("\t", "")
+        .replace(WHITESPACE_REGEX, "")
         .uppercase()
 }
 
@@ -16,10 +17,15 @@ private fun isHexOnly(value: String): Boolean {
     }
 }
 
+private fun isValidLength(value: String): Boolean {
+    return value.length in MIN_EPC_LENGTH..MAX_EPC_LENGTH
+}
+
 object EpcNormalizer {
     fun normalize(raw: String): String {
         val normalized = normalizeCandidate(raw)
         require(normalized.isNotEmpty()) { "EPC cannot be empty." }
+        require(isValidLength(normalized)) { "EPC must be 8-64 hex characters." }
         require(isHexOnly(normalized)) { "EPC must contain only hex characters." }
         return normalized
     }
@@ -28,6 +34,6 @@ object EpcNormalizer {
 object EpcValidator {
     fun isValidEpcHex(epc: String): Boolean {
         val normalized = normalizeCandidate(epc)
-        return normalized.isNotEmpty() && isHexOnly(normalized)
+        return normalized.isNotEmpty() && isValidLength(normalized) && isHexOnly(normalized)
     }
 }
