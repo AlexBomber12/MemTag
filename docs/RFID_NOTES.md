@@ -21,3 +21,8 @@ If you build the device flavor without vendor libraries, Gradle fails fast with 
 4. Tap **Start inventory**, confirm live readings appear, then **Stop inventory**.
 5. Change **Power** and **Region**, verify they apply and persist after app restart.
 6. Leave the screen and confirm inventory stops (no continued scanning).
+
+## Find mode behavior (Geiger)
+- Proximity combines RSSI and hit-rate in a 500 ms rolling window and maps to 0..100.
+- RSSI is treated as dBm; if the SDK reports positive values, they are interpreted as negative magnitude (e.g., `60` -> `-60`).
+- Output uses EMA smoothing (alpha ~0.2) and decays gradually after ~700 ms without target hits.

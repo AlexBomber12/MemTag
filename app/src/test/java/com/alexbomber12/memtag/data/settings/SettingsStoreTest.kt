@@ -48,6 +48,9 @@ class SettingsStoreTest {
             assertEquals(AppDefaults.UHF_POWER, settings.uhfPower)
             assertEquals(AppDefaults.SCAN2D_ACTION, settings.scan2dAction)
             assertEquals(AppDefaults.SCAN2D_EXTRA_KEY, settings.scan2dExtraKey)
+            assertEquals(AppDefaults.FIND_SOUND_ENABLED, settings.findSoundEnabled)
+            assertEquals(AppDefaults.FIND_HAPTIC_ENABLED, settings.findHapticEnabled)
+            assertEquals(AppDefaults.LAST_LOOKUP_EPC, settings.lastLookupEpc)
         }
 
     @Test
@@ -61,6 +64,13 @@ class SettingsStoreTest {
             store.setMemento("https://example.com/", "token12345678", "lib-01")
             store.setUhf("US", 25)
             store.setScan2d("com.example.SCAN", "payload")
+            store.update {
+                it.copy(
+                    findSoundEnabled = true,
+                    findHapticEnabled = true,
+                    lastLookupEpc = "E2000017221101441890ABCD",
+                )
+            }
 
             val settings =
                 store.settingsFlow.first {
@@ -74,5 +84,8 @@ class SettingsStoreTest {
             assertEquals(25, settings.uhfPower)
             assertEquals("com.example.SCAN", settings.scan2dAction)
             assertEquals("payload", settings.scan2dExtraKey)
+            assertEquals(true, settings.findSoundEnabled)
+            assertEquals(true, settings.findHapticEnabled)
+            assertEquals("E2000017221101441890ABCD", settings.lastLookupEpc)
         }
 }
