@@ -207,9 +207,7 @@ class DefaultMementoRepository(
         }
     }
 
-    override suspend fun lookupByEpc(
-        epcRaw: String,
-    ): LookupResult {
+    override suspend fun lookupByEpc(epcRaw: String): LookupResult {
         return withContext(ioDispatcher) {
             val settings = settingsStore.settingsFlow.first()
             val validation =
