@@ -207,10 +207,7 @@ class DefaultMementoRepository(
         }
     }
 
-    override suspend fun lookupByEpc(
-        epcRaw: String,
-        allowNetwork: Boolean,
-    ): LookupResult {
+    override suspend fun lookupByEpc(epcRaw: String): LookupResult {
         return withContext(ioDispatcher) {
             val settings = settingsStore.settingsFlow.first()
             val validation =
@@ -232,9 +229,6 @@ class DefaultMementoRepository(
             val local = inventoryItemDao.getByEpc(normalized)
             if (local != null) {
                 return@withContext LookupResult.Found(local.toDomain())
-            }
-            if (!allowNetwork) {
-                return@withContext LookupResult.NotFound
             }
             LookupResult.NotFound
         }

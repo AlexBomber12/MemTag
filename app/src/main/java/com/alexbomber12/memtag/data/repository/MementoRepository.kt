@@ -13,10 +13,7 @@ interface MementoRepository {
         onProgress: (SyncProgress) -> Unit = {},
     ): SyncResult
 
-    suspend fun lookupByEpc(
-        epcRaw: String,
-        allowNetwork: Boolean = false,
-    ): LookupResult
+    suspend fun lookupByEpc(epcRaw: String): LookupResult
 
     suspend fun searchInventory(
         query: String,

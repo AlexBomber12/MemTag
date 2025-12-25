@@ -228,10 +228,7 @@ private class FakeMementoRepository(
         )
     }
 
-    override suspend fun lookupByEpc(
-        epcRaw: String,
-        allowNetwork: Boolean,
-    ): LookupResult {
+    override suspend fun lookupByEpc(epcRaw: String): LookupResult {
         val found = items.firstOrNull { it.epcNormalized == epcRaw }
         return if (found != null) {
             LookupResult.Found(found)

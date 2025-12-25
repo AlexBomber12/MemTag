@@ -20,6 +20,10 @@ import com.alexbomber12.memtag.integrations.scan2d.Scan2dError
 import com.alexbomber12.memtag.integrations.scan2d.Scan2dException
 import com.alexbomber12.memtag.integrations.scan2d.Scan2dScanner
 import com.alexbomber12.memtag.integrations.scan2d.asException
+import com.alexbomber12.memtag.integrations.uhf.UhfError
+import com.alexbomber12.memtag.integrations.uhf.UhfException
+import com.alexbomber12.memtag.integrations.uhf.UhfReader
+import com.alexbomber12.memtag.integrations.uhf.UhfRegion
 import com.alexbomber12.memtag.util.epc.EpcNormalizer
 import com.alexbomber12.memtag.util.epc.EpcValidator
 import kotlinx.coroutines.CancellationException
@@ -62,6 +66,16 @@ sealed class ScanQrStatus {
     ) : ScanQrStatus()
 }
 
+sealed class ScanUhfStatus {
+    data object Idle : ScanUhfStatus()
+
+    data object Scanning : ScanUhfStatus()
+
+    data class Error(
+        val message: String,
+    ) : ScanUhfStatus()
+}
+
 sealed class SyncStatusState {
     data object Idle : SyncStatusState()
 
@@ -82,6 +96,7 @@ data class LookupUiState(
     val epcInput: String = "",
     val lookupStatus: LookupStatus = LookupStatus.Idle,
     val scanStatus: ScanQrStatus = ScanQrStatus.Idle,
+    val uhfScanStatus: ScanUhfStatus = ScanUhfStatus.Idle,
     val syncStatus: SyncStatusState = SyncStatusState.Idle,
     val lastSyncState: SyncState? = null,
     val lastSyncResult: SyncResult? = null,
@@ -94,6 +109,7 @@ class LookupViewModel(
     private val lookupUseCase: LookupByEpcUseCase,
     private val repository: MementoRepository,
     private val scan2dScanner: Scan2dScanner,
+    private val uhfReader: UhfReader,
 ) : ViewModel() {
     private val mutableState = MutableStateFlow(LookupUiState())
     val uiState: StateFlow<LookupUiState> = mutableState
@@ -101,6 +117,7 @@ class LookupViewModel(
     private var syncJob: Job? = null
     private var lookupJob: Job? = null
     private var scanJob: Job? = null
+    private var scanUhfJob: Job? = null
 
     init {
         viewModelScope.launch {
@@ -126,14 +143,14 @@ class LookupViewModel(
     }
 
     fun onEpcInputChange(value: String) {
-        mutableState.update { it.copy(epcInput = value, scanStatus = ScanQrStatus.Idle) }
+        mutableState.update { it.copy(epcInput = value, scanStatus = ScanQrStatus.Idle, uhfScanStatus = ScanUhfStatus.Idle) }
     }
 
     fun scanQr() {
         if (scanJob != null) {
             return
         }
-        mutableState.update { it.copy(scanStatus = ScanQrStatus.Scanning) }
+        mutableState.update { it.copy(scanStatus = ScanQrStatus.Scanning, uhfScanStatus = ScanUhfStatus.Idle) }
         val job =
             viewModelScope.launch {
                 val result =
@@ -160,6 +177,43 @@ class LookupViewModel(
             }
         scanJob = job
         job.invokeOnCompletion { scanJob = null }
+    }
+
+    fun scanUhf() {
+        if (scanUhfJob != null) {
+            return
+        }
+        mutableState.update { it.copy(uhfScanStatus = ScanUhfStatus.Scanning, scanStatus = ScanQrStatus.Idle) }
+        val job =
+            viewModelScope.launch {
+                val initResult = uhfReader.initialize()
+                if (initResult.isFailure) {
+                    updateUhfError(initResult.exceptionOrNull())
+                    return@launch
+                }
+                if (!applyUhfSettings()) {
+                    return@launch
+                }
+                val readResult = uhfReader.readSingle(UHF_READ_TIMEOUT_MS)
+                if (readResult.isFailure) {
+                    updateUhfError(readResult.exceptionOrNull())
+                    return@launch
+                }
+                val normalized =
+                    runCatching { EpcNormalizer.normalize(readResult.getOrNull().orEmpty()) }.getOrElse { error ->
+                        updateUhfError(error)
+                        return@launch
+                    }
+                mutableState.update { it.copy(epcInput = normalized, uhfScanStatus = ScanUhfStatus.Idle) }
+                lookup()
+            }
+        scanUhfJob = job
+        job.invokeOnCompletion { error ->
+            if (error is CancellationException) {
+                mutableState.update { it.copy(uhfScanStatus = ScanUhfStatus.Idle) }
+            }
+            scanUhfJob = null
+        }
     }
 
     fun lookup() {
@@ -257,6 +311,11 @@ class LookupViewModel(
         job.invokeOnCompletion { syncJob = null }
     }
 
+    override fun onCleared() {
+        cancelUhfScan()
+        super.onCleared()
+    }
+
     private fun scanErrorMessage(error: Throwable?): String {
         val scanError = (error as? Scan2dException)?.error
         return when (scanError) {
@@ -268,5 +327,47 @@ class LookupViewModel(
             is Scan2dError.VendorError -> scanError.message
             null -> error?.message ?: "Unknown QR scan error."
         }
+    }
+
+    private fun updateUhfError(error: Throwable?) {
+        mutableState.update { it.copy(uhfScanStatus = ScanUhfStatus.Error(mapUhfError(error))) }
+    }
+
+    private fun mapUhfError(error: Throwable?): String {
+        val uhfError = (error as? UhfException)?.error
+        return when (uhfError) {
+            UhfError.NotInitialized -> "UHF not initialized."
+            UhfError.HardwareUnavailable -> "UHF hardware unavailable."
+            UhfError.Timeout -> "UHF operation timed out."
+            UhfError.OperationInProgress -> "Another UHF operation is already running."
+            is UhfError.VendorError -> uhfError.message
+            null -> error?.message ?: "Unknown UHF error."
+        }
+    }
+
+    private suspend fun applyUhfSettings(): Boolean {
+        val settings = uiState.value.currentSettings
+        val powerResult = uhfReader.setPower(settings.uhfPower)
+        if (powerResult.isFailure) {
+            updateUhfError(powerResult.exceptionOrNull())
+            return false
+        }
+        val region = UhfRegion.fromSettings(settings.uhfRegion)
+        val regionResult = uhfReader.setRegion(region)
+        if (regionResult.isFailure) {
+            updateUhfError(regionResult.exceptionOrNull())
+            return false
+        }
+        return true
+    }
+
+    fun cancelUhfScan() {
+        scanUhfJob?.cancel()
+        scanUhfJob = null
+        mutableState.update { it.copy(uhfScanStatus = ScanUhfStatus.Idle) }
+    }
+
+    private companion object {
+        const val UHF_READ_TIMEOUT_MS = 4_000L
     }
 }

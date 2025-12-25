@@ -12,6 +12,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -26,6 +27,10 @@ import java.util.Date
 @Composable
 fun LookupScreen(viewModel: LookupViewModel) {
     val state = viewModel.uiState.collectAsStateWithLifecycle().value
+
+    DisposableEffect(Unit) {
+        onDispose { viewModel.cancelUhfScan() }
+    }
 
     LazyColumn(
         modifier =
@@ -63,8 +68,8 @@ fun LookupScreen(viewModel: LookupViewModel) {
                 ) {
                     SecondaryButton(
                         text = "Scan UHF",
-                        onClick = {},
-                        enabled = false,
+                        onClick = viewModel::scanUhf,
+                        enabled = state.uhfScanStatus !is ScanUhfStatus.Scanning,
                         modifier = Modifier.weight(1f),
                     )
                     SecondaryButton(
@@ -73,6 +78,17 @@ fun LookupScreen(viewModel: LookupViewModel) {
                         enabled = state.scanStatus !is ScanQrStatus.Scanning,
                         modifier = Modifier.weight(1f),
                     )
+                }
+                when (val uhfStatus = state.uhfScanStatus) {
+                    is ScanUhfStatus.Scanning -> {
+                        LoadingState(message = "Scanning UHF...")
+                    }
+
+                    is ScanUhfStatus.Error -> {
+                        ErrorState(message = uhfStatus.message)
+                    }
+
+                    is ScanUhfStatus.Idle -> Unit
                 }
                 when (val scanStatus = state.scanStatus) {
                     is ScanQrStatus.Scanning -> {

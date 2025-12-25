@@ -32,6 +32,7 @@ class AppViewModelFactory(
                 lookupUseCase = appContainer.lookupByEpcUseCase,
                 repository = appContainer.mementoRepository,
                 scan2dScanner = appContainer.scan2dScanner,
+                uhfReader = appContainer.uhfReader,
             ) as T
         }
         if (modelClass.isAssignableFrom(FindViewModel::class.java)) {
