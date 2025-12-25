@@ -9,6 +9,7 @@ import com.alexbomber12.memtag.data.repository.DefaultMementoRepository
 import com.alexbomber12.memtag.data.repository.MementoRepository
 import com.alexbomber12.memtag.data.settings.PreferencesSettingsStore
 import com.alexbomber12.memtag.data.settings.SettingsStore
+import com.alexbomber12.memtag.db.MIGRATION_1_2
 import com.alexbomber12.memtag.db.MemTagDatabase
 import com.alexbomber12.memtag.domain.LookupByEpcUseCase
 import com.alexbomber12.memtag.domain.SyncMementoLibraryUseCase
@@ -40,8 +41,10 @@ class AppContainer(context: Context) {
 
     val database: MemTagDatabase =
         Room.databaseBuilder(applicationContext, MemTagDatabase::class.java, "memtag.db")
+            .addMigrations(MIGRATION_1_2)
             .fallbackToDestructiveMigration()
             .build()
+    val actionsLogDao = database.actionsLogDao()
 
     val mementoClient: MementoClient = MementoCloudClient(logger)
     val mementoRepository: MementoRepository =

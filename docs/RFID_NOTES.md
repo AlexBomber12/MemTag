@@ -26,3 +26,9 @@ If you build the device flavor without vendor libraries, Gradle fails fast with 
 - Proximity combines RSSI and hit-rate in a 500 ms rolling window and maps to 0..100.
 - RSSI is treated as dBm; if the SDK reports positive values, they are interpreted as negative magnitude (e.g., `60` -> `-60`).
 - Output uses EMA smoothing (alpha ~0.2) and decays gradually after ~700 ms without target hits.
+
+## Repair & Verify (EPC mismatch tool)
+- Use **Repair** only when a scanned tag EPC does not match the expected EPC for a selected item.
+- A mismatch means the tag you scanned is not encoded with the selected item's EPC (wrong tag or incorrect encoding).
+- Common failure causes: tag locked or not writable, wrong tag type, poor RF power/region, or weak coupling.
+- Write success is confirmed only after a readback verify matches the expected EPC.

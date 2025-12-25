@@ -12,6 +12,22 @@ interface UhfReader {
      */
     suspend fun readSingle(timeoutMs: Long = 2_000): Result<String>
 
+    /**
+     * Writes the EPC to the tag. Returns [UhfError.OperationInProgress] if inventory is running.
+     */
+    suspend fun writeEpc(
+        epcHex: String,
+        timeoutMs: Long = 5_000,
+    ): Result<Unit>
+
+    /**
+     * Reads a tag and compares it to [expectedEpcHex]. Returns [UhfError.OperationInProgress] if inventory is running.
+     */
+    suspend fun verifyEpc(
+        expectedEpcHex: String,
+        timeoutMs: Long = 3_000,
+    ): Result<Boolean>
+
     fun startInventory(filterEpcHex: String? = null): Flow<TagReading>
 
     suspend fun stopInventory(): Result<Unit>

@@ -35,7 +35,7 @@ object AppDestinations {
         AppDestination(
             route = "repair_write",
             label = "Repair",
-            title = "Repair & Write",
+            title = "Verify & Repair",
             icon = Icons.Filled.Build,
         )
     val Queue =

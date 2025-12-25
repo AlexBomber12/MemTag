@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModelProvider
 import com.alexbomber12.memtag.ui.screens.diagnostics.DiagnosticsViewModel
 import com.alexbomber12.memtag.ui.screens.find.FindViewModel
 import com.alexbomber12.memtag.ui.screens.lookup.LookupViewModel
+import com.alexbomber12.memtag.ui.screens.repair.RepairViewModel
 import com.alexbomber12.memtag.ui.screens.settings.SettingsViewModel
 
 class AppViewModelFactory(
@@ -37,6 +38,15 @@ class AppViewModelFactory(
                 settingsStore = appContainer.settingsStore,
                 uhfReader = appContainer.uhfReader,
                 feedbackController = appContainer.findFeedbackController,
+            ) as T
+        }
+        if (modelClass.isAssignableFrom(RepairViewModel::class.java)) {
+            @Suppress("UNCHECKED_CAST")
+            return RepairViewModel(
+                repository = appContainer.mementoRepository,
+                lookupByEpcUseCase = appContainer.lookupByEpcUseCase,
+                uhfReader = appContainer.uhfReader,
+                actionsLogDao = appContainer.actionsLogDao,
             ) as T
         }
         throw IllegalArgumentException("Unknown ViewModel class: ${modelClass.name}")

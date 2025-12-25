@@ -1,6 +1,7 @@
 package com.alexbomber12.memtag.integrations.uhf
 
 import android.content.Context
+import com.alexbomber12.memtag.util.epc.EpcNormalizer
 import com.rscja.deviceapi.RFIDWithUHFUART
 import com.rscja.deviceapi.entity.UHFTAGInfo
 import kotlinx.coroutines.CoroutineScope
@@ -130,6 +131,77 @@ class ChainwayUhfReader(
                     .asException(cause = error),
             )
         }
+    }
+
+    override suspend fun writeEpc(
+        epcHex: String,
+        timeoutMs: Long,
+    ): Result<Unit> {
+        synchronized(lock) {
+            if (!initialized) {
+                return Result.failure(UhfError.NotInitialized.asException())
+            }
+            if (inventoryJob != null) {
+                return Result.failure(UhfError.OperationInProgress.asException())
+            }
+        }
+        val instance = reader ?: return Result.failure(UhfError.HardwareUnavailable.asException())
+        val normalized =
+            runCatching { EpcNormalizer.normalize(epcHex) }.getOrElse { error ->
+                return Result.failure(
+                    UhfError.VendorError(error.message ?: "Invalid EPC").asException(cause = error),
+                )
+            }
+        if (normalized.length % EPC_WORD_HEX_LENGTH != 0) {
+            return Result.failure(
+                UhfError.VendorError("EPC must be a multiple of 4 hex characters.")
+                    .asException(),
+            )
+        }
+        val wordCount = normalized.length / EPC_WORD_HEX_LENGTH
+        return try {
+            withTimeout(timeoutMs) {
+                val success =
+                    withContext(Dispatchers.IO) {
+                        instance.writeData(DEFAULT_ACCESS_PASSWORD, EPC_MEMORY_BANK, EPC_START_WORD, wordCount, normalized)
+                    }
+                if (success) {
+                    Result.success(Unit)
+                } else {
+                    Result.failure(UhfError.VendorError("Failed to write EPC.").asException())
+                }
+            }
+        } catch (_: TimeoutCancellationException) {
+            Result.failure(UhfError.Timeout.asException())
+        } catch (error: Throwable) {
+            Result.failure(
+                UhfError.VendorError(error.message ?: "UHF write error")
+                    .asException(cause = error),
+            )
+        }
+    }
+
+    override suspend fun verifyEpc(
+        expectedEpcHex: String,
+        timeoutMs: Long,
+    ): Result<Boolean> {
+        val normalizedExpected =
+            runCatching { EpcNormalizer.normalize(expectedEpcHex) }.getOrElse { error ->
+                return Result.failure(
+                    UhfError.VendorError(error.message ?: "Invalid EPC").asException(cause = error),
+                )
+            }
+        val readResult = readSingle(timeoutMs)
+        if (readResult.isFailure) {
+            return Result.failure(readResult.exceptionOrNull() ?: UhfError.VendorError("Verify failed").asException())
+        }
+        val normalizedRead =
+            runCatching { EpcNormalizer.normalize(readResult.getOrNull().orEmpty()) }.getOrElse { error ->
+                return Result.failure(
+                    UhfError.VendorError(error.message ?: "Invalid EPC").asException(cause = error),
+                )
+            }
+        return Result.success(normalizedRead == normalizedExpected)
     }
 
     override fun startInventory(filterEpcHex: String?): Flow<TagReading> {
@@ -345,5 +417,12 @@ class ChainwayUhfReader(
                     Result.failure(error)
                 },
             )
+    }
+
+    private companion object {
+        const val EPC_MEMORY_BANK = 1
+        const val EPC_START_WORD = 2
+        const val EPC_WORD_HEX_LENGTH = 4
+        const val DEFAULT_ACCESS_PASSWORD = "00000000"
     }
 }

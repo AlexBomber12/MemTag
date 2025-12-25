@@ -128,6 +128,16 @@ private class FailingUhfReader : UhfReader {
 
     override suspend fun readSingle(timeoutMs: Long): Result<String> = Result.failure(UhfError.NotInitialized.asException())
 
+    override suspend fun writeEpc(
+        epcHex: String,
+        timeoutMs: Long,
+    ): Result<Unit> = Result.failure(UhfError.NotInitialized.asException())
+
+    override suspend fun verifyEpc(
+        expectedEpcHex: String,
+        timeoutMs: Long,
+    ): Result<Boolean> = Result.failure(UhfError.NotInitialized.asException())
+
     override fun startInventory(filterEpcHex: String?): Flow<TagReading> = flow { throw UhfError.NotInitialized.asException() }
 
     override suspend fun stopInventory(): Result<Unit> = Result.success(Unit)

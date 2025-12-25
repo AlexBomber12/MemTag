@@ -1,6 +1,7 @@
 package com.alexbomber12.memtag.integrations.uhf
 
 import com.alexbomber12.memtag.data.AppDefaults
+import com.alexbomber12.memtag.util.epc.EpcNormalizer
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -43,6 +44,15 @@ class FakeUhfReader(
     private var powerDbm = AppDefaults.UHF_POWER
     private var region = UhfRegion.fromSettings(AppDefaults.UHF_REGION)
     private var epcIndex = 0
+    private var lastWrittenEpc: String? = null
+
+    var nextReadResult: Result<String>? = null
+    var writeResultOverride: Result<Unit>? = null
+    var verifyResultOverride: Result<Boolean>? = null
+    var writeCalls: Int = 0
+        private set
+    var verifyCalls: Int = 0
+        private set
 
     override suspend fun initialize(): Result<Unit> =
         synchronized(lock) {
@@ -70,6 +80,10 @@ class FakeUhfReader(
                 return Result.failure(UhfError.OperationInProgress.asException())
             }
         }
+        nextReadResult?.let { result ->
+            nextReadResult = null
+            return result
+        }
         return try {
             withTimeout(timeoutMs) {
                 delay(150)
@@ -77,6 +91,56 @@ class FakeUhfReader(
             }
         } catch (_: TimeoutCancellationException) {
             Result.failure(UhfError.Timeout.asException())
+        }
+    }
+
+    override suspend fun writeEpc(
+        epcHex: String,
+        timeoutMs: Long,
+    ): Result<Unit> {
+        synchronized(lock) {
+            if (!initialized) {
+                return Result.failure(UhfError.NotInitialized.asException())
+            }
+            if (inventoryJob != null) {
+                return Result.failure(UhfError.OperationInProgress.asException())
+            }
+        }
+        writeCalls += 1
+        writeResultOverride?.let { return it }
+        lastWrittenEpc = epcHex
+        return Result.success(Unit)
+    }
+
+    override suspend fun verifyEpc(
+        expectedEpcHex: String,
+        timeoutMs: Long,
+    ): Result<Boolean> {
+        synchronized(lock) {
+            if (!initialized) {
+                return Result.failure(UhfError.NotInitialized.asException())
+            }
+            if (inventoryJob != null) {
+                return Result.failure(UhfError.OperationInProgress.asException())
+            }
+        }
+        verifyCalls += 1
+        verifyResultOverride?.let { return it }
+        val normalizedExpected =
+            runCatching { EpcNormalizer.normalize(expectedEpcHex) }.getOrElse {
+                return Result.failure(UhfError.VendorError("Invalid EPC").asException(cause = it))
+            }
+        val candidate = lastWrittenEpc
+        if (candidate != null) {
+            val normalizedCandidate =
+                runCatching { EpcNormalizer.normalize(candidate) }.getOrElse {
+                    return Result.failure(UhfError.VendorError("Invalid EPC").asException(cause = it))
+                }
+            return Result.success(normalizedCandidate == normalizedExpected)
+        }
+        return readSingle(timeoutMs).mapCatching { read ->
+            val normalizedRead = EpcNormalizer.normalize(read)
+            normalizedRead == normalizedExpected
         }
     }
 
