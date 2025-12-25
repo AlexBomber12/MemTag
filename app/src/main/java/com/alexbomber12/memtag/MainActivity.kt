@@ -24,6 +24,9 @@ class MainActivity : ComponentActivity() {
 
     override fun onStop() {
         super.onStop()
+        if (isChangingConfigurations) {
+            return
+        }
         val appContainer = (application as MemTagApplication).container
         lifecycleScope.launch {
             appContainer.uhfReader.close()

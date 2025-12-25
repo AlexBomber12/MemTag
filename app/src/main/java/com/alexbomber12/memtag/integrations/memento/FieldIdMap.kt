@@ -78,7 +78,7 @@ class FieldIdMap private constructor(
                     cleaned.startsWith("main") -> cleaned.removePrefix("main")
                     else -> null
                 }
-            return if (remainder != null && remainder in supported) {
+            return if (remainder != null && (remainder in supported || remainder == "description")) {
                 remainder
             } else {
                 cleaned
