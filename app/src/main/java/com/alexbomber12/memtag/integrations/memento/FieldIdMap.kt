@@ -67,11 +67,22 @@ class FieldIdMap private constructor(
         fun canonicalNames(): Set<String> = supported
 
         private fun normalizeFieldName(value: String): String {
-            return value
-                .trim()
-                .lowercase()
-                .replace(" ", "")
-                .replace("_", "")
+            val cleaned =
+                value
+                    .trim()
+                    .lowercase()
+                    .filter { it.isLetterOrDigit() }
+            val remainder =
+                when {
+                    cleaned.startsWith("tech") -> cleaned.removePrefix("tech")
+                    cleaned.startsWith("main") -> cleaned.removePrefix("main")
+                    else -> null
+                }
+            return if (remainder != null && remainder in supported) {
+                remainder
+            } else {
+                cleaned
+            }
         }
     }
 
