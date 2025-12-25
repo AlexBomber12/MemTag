@@ -19,6 +19,8 @@ jobs:
           java-version: "17"
       - uses: gradle/actions/setup-gradle@v4
       - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools platforms;android-36
       - name: Build, unit tests, lint
         run: .\gradlew.bat --no-daemon clean :app:assembleMockDebug :app:testMockDebugUnitTest :app:lintMockDebug
 
