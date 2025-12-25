@@ -180,14 +180,14 @@ class LookupViewModel(
         val epcRaw = uiState.value.epcInput
         if (!EpcValidator.isValidEpcHex(epcRaw)) {
             mutableState.update {
-                it.copy(lookupStatus = LookupStatus.Error("Invalid EPC. Use hex characters only."))
+                it.copy(lookupStatus = LookupStatus.Error("Invalid EPC. Use 8-64 hex characters."))
             }
             return
         }
         val normalized =
             runCatching { EpcNormalizer.normalize(epcRaw) }.getOrElse {
                 mutableState.update {
-                    it.copy(lookupStatus = LookupStatus.Error("Invalid EPC. Use hex characters only."))
+                    it.copy(lookupStatus = LookupStatus.Error("Invalid EPC. Use 8-64 hex characters."))
                 }
                 return
             }

@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModelProvider
 import com.alexbomber12.memtag.ui.screens.diagnostics.DiagnosticsViewModel
 import com.alexbomber12.memtag.ui.screens.find.FindViewModel
 import com.alexbomber12.memtag.ui.screens.lookup.LookupViewModel
+import com.alexbomber12.memtag.ui.screens.queue.QueueViewModel
 import com.alexbomber12.memtag.ui.screens.repair.RepairViewModel
 import com.alexbomber12.memtag.ui.screens.settings.SettingsViewModel
 
@@ -48,6 +49,12 @@ class AppViewModelFactory(
                 lookupByEpcUseCase = appContainer.lookupByEpcUseCase,
                 uhfReader = appContainer.uhfReader,
                 actionsLogDao = appContainer.actionsLogDao,
+            ) as T
+        }
+        if (modelClass.isAssignableFrom(QueueViewModel::class.java)) {
+            @Suppress("UNCHECKED_CAST")
+            return QueueViewModel(
+                repository = appContainer.queueRepository,
             ) as T
         }
         throw IllegalArgumentException("Unknown ViewModel class: ${modelClass.name}")

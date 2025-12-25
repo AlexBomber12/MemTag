@@ -5,11 +5,14 @@ import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.room.Room
 import com.alexbomber12.memtag.core.logging.AndroidLogger
 import com.alexbomber12.memtag.core.logging.Logger
+import com.alexbomber12.memtag.data.queue.DefaultQueueRepository
+import com.alexbomber12.memtag.data.queue.QueueRepository
 import com.alexbomber12.memtag.data.repository.DefaultMementoRepository
 import com.alexbomber12.memtag.data.repository.MementoRepository
 import com.alexbomber12.memtag.data.settings.PreferencesSettingsStore
 import com.alexbomber12.memtag.data.settings.SettingsStore
 import com.alexbomber12.memtag.db.MIGRATION_1_2
+import com.alexbomber12.memtag.db.MIGRATION_2_3
 import com.alexbomber12.memtag.db.MemTagDatabase
 import com.alexbomber12.memtag.domain.LookupByEpcUseCase
 import com.alexbomber12.memtag.domain.SyncMementoLibraryUseCase
@@ -41,7 +44,7 @@ class AppContainer(context: Context) {
 
     val database: MemTagDatabase =
         Room.databaseBuilder(applicationContext, MemTagDatabase::class.java, "memtag.db")
-            .addMigrations(MIGRATION_1_2)
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
             .fallbackToDestructiveMigration()
             .build()
     val actionsLogDao = database.actionsLogDao()
@@ -55,6 +58,12 @@ class AppContainer(context: Context) {
             syncStateDao = database.syncStateDao(),
             mementoClient = mementoClient,
             logger = logger,
+        )
+    val queueRepository: QueueRepository =
+        DefaultQueueRepository(
+            database = database,
+            queueDao = database.queueDao(),
+            queueMetaDao = database.queueMetaDao(),
         )
     val syncMementoLibraryUseCase = SyncMementoLibraryUseCase(mementoRepository)
     val lookupByEpcUseCase = LookupByEpcUseCase(mementoRepository)

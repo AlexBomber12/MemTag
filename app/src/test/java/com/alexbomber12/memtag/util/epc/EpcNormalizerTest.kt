@@ -33,6 +33,16 @@ class EpcNormalizerTest {
         assertFalse(EpcValidator.isValidEpcHex(" \n\t"))
     }
 
+    @Test
+    fun validatorRejectsTooShort() {
+        assertFalse(EpcValidator.isValidEpcHex("ABC1234"))
+    }
+
+    @Test
+    fun validatorRejectsTooLong() {
+        assertFalse(EpcValidator.isValidEpcHex("A".repeat(65)))
+    }
+
     @Test(expected = IllegalArgumentException::class)
     fun normalizeRejectsNonHex() {
         EpcNormalizer.normalize("GGGG1234")
@@ -41,5 +51,15 @@ class EpcNormalizerTest {
     @Test(expected = IllegalArgumentException::class)
     fun normalizeRejectsEmpty() {
         EpcNormalizer.normalize(" \n\t")
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun normalizeRejectsTooShort() {
+        EpcNormalizer.normalize("ABC1234")
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun normalizeRejectsTooLong() {
+        EpcNormalizer.normalize("A".repeat(65))
     }
 }

@@ -22,6 +22,21 @@ Open **Settings** in the app and set:
 
 These values are persisted with DataStore and used across app restarts.
 
+## Queue CSV (Find/Geiger)
+- Accepted formats:
+  - One EPC per line
+  - CSV with header where the first column is `EPC` (case-insensitive)
+  - CSV with multiple columns (first non-empty cell is treated as the EPC)
+- EPC normalization rules:
+  - Trim, remove spaces/line breaks, uppercase
+  - Hex only, length 8..64
+- Import behavior:
+  - Duplicates are skipped (within the file and against the queue)
+  - Invalid rows are reported with row numbers
+- Export columns:
+  - `EPC`, `Status`, `UpdatedAt` (ISO-8601 local time), `Note`
+- Suggested workflow: import CSV, start Find on the current item, mark status, export results.
+
 ## Local PowerShell commands
 ```powershell
 .\gradlew.bat --no-daemon clean :app:assembleMockDebug :app:testMockDebugUnitTest :app:lintMockDebug
