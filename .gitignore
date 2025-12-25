@@ -18,3 +18,5 @@ local.properties
 /vendor
 /app/libs
 /app/lib
+.kotlin/
+.kotlin/errors/

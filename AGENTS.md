@@ -13,10 +13,16 @@
 - Commands must be Windows-compatible.
 
 ## Standard Commands (PowerShell, repo root)
-- `.\gradlew.bat testDebugUnitTest`
-- `.\gradlew.bat lintDebug`
-- `.\gradlew.bat ktlintCheck`
-- `.\gradlew.bat assembleDebug`
+- `.\gradlew.bat :app:testMockDebugUnitTest`
+- `.\gradlew.bat :app:lintMockDebug`
+- `.\gradlew.bat :app:ktlintCheck`
+- `.\gradlew.bat :app:assembleMockDebug`
+
+## Device Flavor Commands (vendor SDK required)
+- Device flavor tasks require vendor SDK jars/aars in `app/libs` or `app/lib`.
+- Run only when the SDK files are present locally:
+  - `.\gradlew.bat :app:verifyDeviceLibs`
+  - `.\gradlew.bat :app:assembleDeviceDebug`
 
 ## If JAVA_HOME Is Required in the Current Shell
 - `$env:JAVA_HOME="C:\Program Files\Android\Android Studio\jbr"`
