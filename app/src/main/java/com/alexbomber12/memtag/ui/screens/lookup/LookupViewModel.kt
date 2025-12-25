@@ -16,8 +16,14 @@ import com.alexbomber12.memtag.domain.SyncState
 import com.alexbomber12.memtag.domain.SyncStatus
 import com.alexbomber12.memtag.integrations.memento.MementoSettingsValidation
 import com.alexbomber12.memtag.integrations.memento.MementoSettingsValidator
+import com.alexbomber12.memtag.integrations.scan2d.Scan2dError
+import com.alexbomber12.memtag.integrations.scan2d.Scan2dException
+import com.alexbomber12.memtag.integrations.scan2d.Scan2dScanner
+import com.alexbomber12.memtag.integrations.scan2d.asException
 import com.alexbomber12.memtag.util.epc.EpcNormalizer
 import com.alexbomber12.memtag.util.epc.EpcValidator
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -28,6 +34,7 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 sealed class LookupStatus {
     data object Idle : LookupStatus()
@@ -43,6 +50,16 @@ sealed class LookupStatus {
     data class Error(
         val message: String,
     ) : LookupStatus()
+}
+
+sealed class ScanQrStatus {
+    data object Idle : ScanQrStatus()
+
+    data object Scanning : ScanQrStatus()
+
+    data class Error(
+        val message: String,
+    ) : ScanQrStatus()
 }
 
 sealed class SyncStatusState {
@@ -64,6 +81,7 @@ sealed class SyncStatusState {
 data class LookupUiState(
     val epcInput: String = "",
     val lookupStatus: LookupStatus = LookupStatus.Idle,
+    val scanStatus: ScanQrStatus = ScanQrStatus.Idle,
     val syncStatus: SyncStatusState = SyncStatusState.Idle,
     val lastSyncState: SyncState? = null,
     val lastSyncResult: SyncResult? = null,
@@ -75,12 +93,14 @@ class LookupViewModel(
     private val syncUseCase: SyncMementoLibraryUseCase,
     private val lookupUseCase: LookupByEpcUseCase,
     private val repository: MementoRepository,
+    private val scan2dScanner: Scan2dScanner,
 ) : ViewModel() {
     private val mutableState = MutableStateFlow(LookupUiState())
     val uiState: StateFlow<LookupUiState> = mutableState
 
     private var syncJob: Job? = null
     private var lookupJob: Job? = null
+    private var scanJob: Job? = null
 
     init {
         viewModelScope.launch {
@@ -106,7 +126,40 @@ class LookupViewModel(
     }
 
     fun onEpcInputChange(value: String) {
-        mutableState.update { it.copy(epcInput = value) }
+        mutableState.update { it.copy(epcInput = value, scanStatus = ScanQrStatus.Idle) }
+    }
+
+    fun scanQr() {
+        if (scanJob != null) {
+            return
+        }
+        mutableState.update { it.copy(scanStatus = ScanQrStatus.Scanning) }
+        val job =
+            viewModelScope.launch {
+                val result =
+                    runCatching { withContext(Dispatchers.IO) { scan2dScanner.scanOnce() } }
+                        .getOrElse { error ->
+                            val mapped =
+                                if (error is CancellationException) {
+                                    Scan2dError.Cancelled.asException(message = "QR scan cancelled.", cause = error)
+                                } else {
+                                    error
+                                }
+                            Result.failure(mapped)
+                        }
+                result
+                    .onSuccess { epc ->
+                        mutableState.update { it.copy(epcInput = epc, scanStatus = ScanQrStatus.Idle) }
+                        lookup()
+                    }
+                    .onFailure { error ->
+                        mutableState.update {
+                            it.copy(scanStatus = ScanQrStatus.Error(scanErrorMessage(error)))
+                        }
+                    }
+            }
+        scanJob = job
+        job.invokeOnCompletion { scanJob = null }
     }
 
     fun lookup() {
@@ -202,5 +255,18 @@ class LookupViewModel(
             }
         syncJob = job
         job.invokeOnCompletion { syncJob = null }
+    }
+
+    private fun scanErrorMessage(error: Throwable?): String {
+        val scanError = (error as? Scan2dException)?.error
+        return when (scanError) {
+            Scan2dError.Timeout -> "QR scan timed out."
+            Scan2dError.Cancelled -> "QR scan cancelled."
+            Scan2dError.OperationInProgress -> "Scanner is busy."
+            Scan2dError.HardwareUnavailable -> "QR scanner unavailable."
+            is Scan2dError.InvalidPayload -> scanError.message
+            is Scan2dError.VendorError -> scanError.message
+            null -> error?.message ?: "Unknown QR scan error."
+        }
     }
 }

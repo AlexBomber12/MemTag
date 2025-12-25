@@ -11,7 +11,7 @@ object AppDefaults {
     const val UHF_POWER_MAX = 30
     val UHF_REGIONS = listOf("EU", "US", "JP", "CN", "OTHER")
 
-    const val SCAN2D_ACTION = "com.alexbomber12.inventory.SCAN"
+    const val SCAN2D_ACTION = "com.alexbomber12.memtag.SCAN"
     const val SCAN2D_EXTRA_KEY = "data"
 
     const val FIND_SOUND_ENABLED = false

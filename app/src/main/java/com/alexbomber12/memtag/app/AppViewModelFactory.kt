@@ -30,6 +30,7 @@ class AppViewModelFactory(
                 syncUseCase = appContainer.syncMementoLibraryUseCase,
                 lookupUseCase = appContainer.lookupByEpcUseCase,
                 repository = appContainer.mementoRepository,
+                scan2dScanner = appContainer.scan2dScanner,
             ) as T
         }
         if (modelClass.isAssignableFrom(FindViewModel::class.java)) {
