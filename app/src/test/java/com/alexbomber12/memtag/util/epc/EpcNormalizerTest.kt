@@ -37,4 +37,9 @@ class EpcNormalizerTest {
     fun normalizeRejectsNonHex() {
         EpcNormalizer.normalize("GGGG1234")
     }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun normalizeRejectsEmpty() {
+        EpcNormalizer.normalize(" \n\t")
+    }
 }

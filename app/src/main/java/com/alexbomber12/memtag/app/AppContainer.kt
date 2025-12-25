@@ -17,8 +17,8 @@ import com.alexbomber12.memtag.integrations.feedback.DeviceFindFeedbackControlle
 import com.alexbomber12.memtag.integrations.feedback.FindFeedbackController
 import com.alexbomber12.memtag.integrations.memento.MementoClient
 import com.alexbomber12.memtag.integrations.memento.MementoCloudClient
-import com.alexbomber12.memtag.integrations.scan2d.FakeScan2dService
-import com.alexbomber12.memtag.integrations.scan2d.Scan2dService
+import com.alexbomber12.memtag.integrations.scan2d.Scan2dScanner
+import com.alexbomber12.memtag.integrations.scan2d.Scan2dScannerProvider
 import com.alexbomber12.memtag.integrations.uhf.UhfReader
 import com.alexbomber12.memtag.integrations.uhf.UhfReaderProvider
 import kotlinx.coroutines.CoroutineScope
@@ -59,6 +59,6 @@ class AppContainer(context: Context) {
     val syncMementoLibraryUseCase = SyncMementoLibraryUseCase(mementoRepository)
     val lookupByEpcUseCase = LookupByEpcUseCase(mementoRepository)
     val uhfReader: UhfReader = UhfReaderProvider.create(applicationContext)
-    val scan2dService: Scan2dService = FakeScan2dService()
+    val scan2dScanner: Scan2dScanner = Scan2dScannerProvider.create(applicationContext, settingsStore)
     val findFeedbackController: FindFeedbackController = DeviceFindFeedbackController(applicationContext)
 }

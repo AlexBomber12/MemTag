@@ -69,10 +69,21 @@ fun LookupScreen(viewModel: LookupViewModel) {
                     )
                     SecondaryButton(
                         text = "Scan QR",
-                        onClick = {},
-                        enabled = false,
+                        onClick = viewModel::scanQr,
+                        enabled = state.scanStatus !is ScanQrStatus.Scanning,
                         modifier = Modifier.weight(1f),
                     )
+                }
+                when (val scanStatus = state.scanStatus) {
+                    is ScanQrStatus.Scanning -> {
+                        LoadingState(message = "Scanning QR...")
+                    }
+
+                    is ScanQrStatus.Error -> {
+                        ErrorState(message = scanStatus.message)
+                    }
+
+                    is ScanQrStatus.Idle -> Unit
                 }
                 when (val status = state.lookupStatus) {
                     is LookupStatus.Idle -> {

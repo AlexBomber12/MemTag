@@ -165,13 +165,13 @@ fun SettingsScreen(viewModel: SettingsViewModel) {
             OutlinedTextField(
                 value = scanAction,
                 onValueChange = { scanAction = it },
-                label = { Text(text = "Scan action") },
+                label = { Text(text = "Broadcast action") },
                 modifier = Modifier.fillMaxWidth(),
             )
             OutlinedTextField(
                 value = scanExtraKey,
                 onValueChange = { scanExtraKey = it },
-                label = { Text(text = "Scan extra key") },
+                label = { Text(text = "Broadcast extra key") },
                 modifier = Modifier.fillMaxWidth(),
             )
         }
