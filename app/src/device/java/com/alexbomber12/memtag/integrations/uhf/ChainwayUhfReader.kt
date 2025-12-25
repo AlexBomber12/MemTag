@@ -159,11 +159,57 @@ class ChainwayUhfReader(
             )
         }
         val wordCount = normalized.length / EPC_WORD_HEX_LENGTH
+        if (wordCount > EPC_MAX_WORDS) {
+            return Result.failure(
+                UhfError.VendorError("EPC length exceeds maximum supported size.")
+                    .asException(),
+            )
+        }
         return try {
             withTimeout(timeoutMs) {
+                val pcWord =
+                    withContext(Dispatchers.IO) {
+                        instance.readData(DEFAULT_ACCESS_PASSWORD, EPC_MEMORY_BANK, EPC_PC_WORD, 1)
+                    }
+                val normalizedPc =
+                    runCatching { EpcNormalizer.normalize(pcWord.orEmpty()) }.getOrElse { error ->
+                        return@withTimeout Result.failure(
+                            UhfError.VendorError(error.message ?: "Failed to read PC word.")
+                                .asException(cause = error),
+                        )
+                    }
+                if (normalizedPc.length != EPC_WORD_HEX_LENGTH) {
+                    return@withTimeout Result.failure(
+                        UhfError.VendorError("Failed to read PC word.")
+                            .asException(),
+                    )
+                }
+                val pcValue =
+                    runCatching { normalizedPc.toInt(HEX_RADIX) }.getOrElse { error ->
+                        return@withTimeout Result.failure(
+                            UhfError.VendorError("Invalid PC word.")
+                                .asException(cause = error),
+                        )
+                    }
+                val updatedPc =
+                    (pcValue and EPC_PC_LENGTH_MASK) or
+                        ((wordCount and EPC_MAX_WORDS) shl EPC_PC_LENGTH_SHIFT)
+                val updatedPcHex =
+                    updatedPc
+                        .toString(HEX_RADIX)
+                        .uppercase()
+                        .padStart(EPC_WORD_HEX_LENGTH, '0')
+                val payload = updatedPcHex + normalized
+                val totalWords = wordCount + 1
                 val success =
                     withContext(Dispatchers.IO) {
-                        instance.writeData(DEFAULT_ACCESS_PASSWORD, EPC_MEMORY_BANK, EPC_START_WORD, wordCount, normalized)
+                        instance.writeData(
+                            DEFAULT_ACCESS_PASSWORD,
+                            EPC_MEMORY_BANK,
+                            EPC_PC_WORD,
+                            totalWords,
+                            payload,
+                        )
                     }
                 if (success) {
                     Result.success(Unit)
@@ -421,8 +467,12 @@ class ChainwayUhfReader(
 
     private companion object {
         const val EPC_MEMORY_BANK = 1
-        const val EPC_START_WORD = 2
+        const val EPC_PC_WORD = 1
         const val EPC_WORD_HEX_LENGTH = 4
+        const val EPC_PC_LENGTH_SHIFT = 11
+        const val EPC_PC_LENGTH_MASK = 0x07FF
+        const val EPC_MAX_WORDS = 31
+        const val HEX_RADIX = 16
         const val DEFAULT_ACCESS_PASSWORD = "00000000"
     }
 }
