@@ -240,6 +240,26 @@ class DefaultMementoRepository(
         }
     }
 
+    override suspend fun searchInventory(
+        query: String,
+        limit: Int,
+    ): List<InventoryItem> {
+        return withContext(ioDispatcher) {
+            val trimmed = query.trim()
+            if (trimmed.isBlank()) {
+                return@withContext emptyList()
+            }
+            val normalizedQuery =
+                if (EpcValidator.isValidEpcHex(trimmed)) {
+                    runCatching { EpcNormalizer.normalize(trimmed) }.getOrElse { trimmed }
+                } else {
+                    trimmed
+                }
+            val likeQuery = "%$normalizedQuery%"
+            inventoryItemDao.searchByText(likeQuery, limit).map { it.toDomain() }
+        }
+    }
+
     private fun parseEntry(
         entry: com.alexbomber12.memtag.integrations.memento.MementoEntry,
         fieldIdMap: FieldIdMap,

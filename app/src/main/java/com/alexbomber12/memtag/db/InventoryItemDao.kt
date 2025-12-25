@@ -18,7 +18,12 @@ interface InventoryItemDao {
             "epcNormalized LIKE :query OR " +
             "name LIKE :query OR " +
             "content LIKE :query OR " +
-            "locationPath LIKE :query",
+            "locationPath LIKE :query OR " +
+            "um LIKE :query " +
+            "LIMIT :limit",
     )
-    suspend fun searchByText(query: String): List<InventoryItemEntity>
+    suspend fun searchByText(
+        query: String,
+        limit: Int,
+    ): List<InventoryItemEntity>
 }

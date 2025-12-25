@@ -1,5 +1,6 @@
 package com.alexbomber12.memtag.data.repository
 
+import com.alexbomber12.memtag.domain.InventoryItem
 import com.alexbomber12.memtag.domain.LookupResult
 import com.alexbomber12.memtag.domain.SyncProgress
 import com.alexbomber12.memtag.domain.SyncResult
@@ -16,6 +17,11 @@ interface MementoRepository {
         epcRaw: String,
         allowNetwork: Boolean = false,
     ): LookupResult
+
+    suspend fun searchInventory(
+        query: String,
+        limit: Int = 20,
+    ): List<InventoryItem>
 
     fun observeSyncState(libraryId: String): Flow<SyncState?>
 }
