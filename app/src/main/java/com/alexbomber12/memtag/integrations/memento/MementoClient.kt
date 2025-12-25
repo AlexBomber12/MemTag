@@ -1,11 +1,10 @@
 package com.alexbomber12.memtag.integrations.memento
 
 interface MementoClient {
-    suspend fun ping(): Boolean
-}
+    suspend fun fetchLibrarySchema(config: MementoConfig): MementoLibrarySchema
 
-class FakeMementoClient : MementoClient {
-    override suspend fun ping(): Boolean {
-        throw NotImplementedError("MementoClient is not implemented in PR-01.")
-    }
+    suspend fun fetchEntriesPage(
+        config: MementoConfig,
+        request: MementoEntriesRequest,
+    ): MementoEntriesPage
 }

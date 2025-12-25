@@ -8,8 +8,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.TimeoutCancellationException
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
@@ -260,8 +260,9 @@ class ChainwayUhfReader(
                 return Result.failure(UhfError.NotInitialized.asException())
             }
         }
-        val mode = regionToMode(region)
-            ?: return Result.failure(UhfError.VendorError("Region not supported by SDK").asException())
+        val mode =
+            regionToMode(region)
+                ?: return Result.failure(UhfError.VendorError("Region not supported by SDK").asException())
         val instance = reader ?: return Result.failure(UhfError.HardwareUnavailable.asException())
         return withContext(Dispatchers.IO) {
             runCatching { instance.setFrequencyMode(mode) }

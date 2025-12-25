@@ -25,83 +25,87 @@ class DiagnosticsViewModelTest {
     val mainDispatcherRule = MainDispatcherRule()
 
     @Test
-    fun startInventoryTwiceDoesNotDoubleEmit() = runTest(mainDispatcherRule.dispatcher) {
-        val viewModel = createViewModel()
+    fun startInventoryTwiceDoesNotDoubleEmit() =
+        runTest(mainDispatcherRule.dispatcher) {
+            val viewModel = createViewModel()
 
-        viewModel.initialize()
-        advanceUntilIdle()
+            viewModel.initialize()
+            advanceUntilIdle()
 
-        viewModel.startInventory()
-        viewModel.startInventory()
-        runCurrent()
-        advanceTimeBy(310)
-        runCurrent()
+            viewModel.startInventory()
+            viewModel.startInventory()
+            runCurrent()
+            advanceTimeBy(310)
+            runCurrent()
 
-        val count = viewModel.uiState.value.readings.size
-        assertEquals(3, count)
+            val count = viewModel.uiState.value.readings.size
+            assertEquals(3, count)
 
-        viewModel.stopInventory()
-        advanceUntilIdle()
-    }
-
-    @Test
-    fun stopInventoryIsIdempotent() = runTest(mainDispatcherRule.dispatcher) {
-        val viewModel = createViewModel()
-
-        viewModel.initialize()
-        advanceUntilIdle()
-
-        viewModel.startInventory()
-        runCurrent()
-
-        viewModel.stopInventory()
-        advanceUntilIdle()
-
-        viewModel.stopInventory()
-        advanceUntilIdle()
-
-        assertFalse(viewModel.uiState.value.isInventoryRunning)
-        assertNull(viewModel.uiState.value.lastErrorMessage)
-    }
+            viewModel.stopInventory()
+            advanceUntilIdle()
+        }
 
     @Test
-    fun readSingleWhileInventoryRunningReportsError() = runTest(mainDispatcherRule.dispatcher) {
-        val viewModel = createViewModel()
+    fun stopInventoryIsIdempotent() =
+        runTest(mainDispatcherRule.dispatcher) {
+            val viewModel = createViewModel()
 
-        viewModel.initialize()
-        advanceUntilIdle()
+            viewModel.initialize()
+            advanceUntilIdle()
 
-        viewModel.startInventory()
-        runCurrent()
+            viewModel.startInventory()
+            runCurrent()
 
-        viewModel.readSingle()
-        runCurrent()
+            viewModel.stopInventory()
+            advanceUntilIdle()
 
-        val error = viewModel.uiState.value.lastErrorMessage
-        assertNotNull(error)
+            viewModel.stopInventory()
+            advanceUntilIdle()
 
-        viewModel.stopInventory()
-        advanceUntilIdle()
-    }
+            assertFalse(viewModel.uiState.value.isInventoryRunning)
+            assertNull(viewModel.uiState.value.lastErrorMessage)
+        }
 
     @Test
-    fun readingsAreCapped() = runTest(mainDispatcherRule.dispatcher) {
-        val viewModel = createViewModel()
+    fun readSingleWhileInventoryRunningReportsError() =
+        runTest(mainDispatcherRule.dispatcher) {
+            val viewModel = createViewModel()
 
-        viewModel.initialize()
-        advanceUntilIdle()
+            viewModel.initialize()
+            advanceUntilIdle()
 
-        viewModel.startInventory()
-        runCurrent()
-        advanceTimeBy(8_000)
-        runCurrent()
+            viewModel.startInventory()
+            runCurrent()
 
-        val count = viewModel.uiState.value.readings.size
-        assertEquals(50, count)
+            viewModel.readSingle()
+            runCurrent()
 
-        viewModel.stopInventory()
-        advanceUntilIdle()
-    }
+            val error = viewModel.uiState.value.lastErrorMessage
+            assertNotNull(error)
+
+            viewModel.stopInventory()
+            advanceUntilIdle()
+        }
+
+    @Test
+    fun readingsAreCapped() =
+        runTest(mainDispatcherRule.dispatcher) {
+            val viewModel = createViewModel()
+
+            viewModel.initialize()
+            advanceUntilIdle()
+
+            viewModel.startInventory()
+            runCurrent()
+            advanceTimeBy(8_000)
+            runCurrent()
+
+            val count = viewModel.uiState.value.readings.size
+            assertEquals(50, count)
+
+            viewModel.stopInventory()
+            advanceUntilIdle()
+        }
 
     private fun createViewModel(): DiagnosticsViewModel {
         val settingsStore = FakeSettingsStore()
@@ -132,11 +136,17 @@ private class FakeSettingsStore(
         state.update { it.copy(mementoBaseUrl = baseUrl, mementoToken = token, mementoLibraryId = libraryId).sanitized() }
     }
 
-    override suspend fun setUhf(region: String, power: Int) {
+    override suspend fun setUhf(
+        region: String,
+        power: Int,
+    ) {
         state.update { it.copy(uhfRegion = region, uhfPower = power).sanitized() }
     }
 
-    override suspend fun setScan2d(action: String, extraKey: String) {
+    override suspend fun setScan2d(
+        action: String,
+        extraKey: String,
+    ) {
         state.update { it.copy(scan2dAction = action, scan2dExtraKey = extraKey).sanitized() }
     }
 }

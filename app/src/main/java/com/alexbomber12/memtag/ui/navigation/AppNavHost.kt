@@ -14,6 +14,7 @@ import com.alexbomber12.memtag.ui.screens.diagnostics.DiagnosticsScreen
 import com.alexbomber12.memtag.ui.screens.diagnostics.DiagnosticsViewModel
 import com.alexbomber12.memtag.ui.screens.find.FindScreen
 import com.alexbomber12.memtag.ui.screens.lookup.LookupScreen
+import com.alexbomber12.memtag.ui.screens.lookup.LookupViewModel
 import com.alexbomber12.memtag.ui.screens.queue.QueueScreen
 import com.alexbomber12.memtag.ui.screens.repair.RepairWriteScreen
 import com.alexbomber12.memtag.ui.screens.settings.SettingsScreen
@@ -32,7 +33,8 @@ fun AppNavHost(
         modifier = modifier,
     ) {
         composable(AppDestinations.Lookup.route) {
-            LookupScreen()
+            val viewModel: LookupViewModel = viewModel(factory = viewModelFactory)
+            LookupScreen(viewModel = viewModel)
         }
         composable(AppDestinations.Find.route) {
             FindScreen()
