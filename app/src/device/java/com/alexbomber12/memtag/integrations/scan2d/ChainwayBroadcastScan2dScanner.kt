@@ -36,9 +36,23 @@ class ChainwayBroadcastScan2dScanner(
         var receiver: BroadcastReceiver? = null
         var receiverRegistered = false
         var barcode2d: Barcode2D? = null
-        val utility = BarcodeUtility.getInstance()
+        var utility: BarcodeUtility? = null
 
         try {
+            utility =
+                runCatching { BarcodeUtility.getInstance() }.getOrElse { error ->
+                    return Result.failure(
+                        Scan2dError.HardwareUnavailable.asException(
+                            message = "2D scanner unavailable.",
+                            cause = error,
+                        ),
+                    )
+                }
+            val resolvedUtility =
+                utility ?: return Result.failure(
+                    Scan2dError.HardwareUnavailable.asException(message = "2D scanner unavailable."),
+                )
+
             val settings = settingsStore.settingsFlow.first()
             val action =
                 settings.scan2dAction.trim().ifBlank {
@@ -71,8 +85,8 @@ class ChainwayBroadcastScan2dScanner(
             }
 
             runCatching {
-                utility.open(appContext, BarcodeUtility.ModuleType.BARCODE_2D)
-                configureScanner(utility, action, extraKey)
+                resolvedUtility.open(appContext, BarcodeUtility.ModuleType.BARCODE_2D)
+                configureScanner(resolvedUtility, action, extraKey)
             }.getOrElse { error ->
                 return Result.failure(
                     Scan2dError.VendorError("QR scanner configuration failed.").asException(cause = error),
@@ -101,7 +115,7 @@ class ChainwayBroadcastScan2dScanner(
                             receiverRegistered = true
                             continuation.invokeOnCancellation {
                                 runCatching {
-                                    utility.stopScan(appContext, BarcodeUtility.ModuleType.BARCODE_2D)
+                                    resolvedUtility.stopScan(appContext, BarcodeUtility.ModuleType.BARCODE_2D)
                                 }
                                 runCatching { barcode2d?.stopScan() }
                                 if (receiverRegistered) {
@@ -110,7 +124,7 @@ class ChainwayBroadcastScan2dScanner(
                                 }
                             }
                             try {
-                                utility.startScan(appContext, BarcodeUtility.ModuleType.BARCODE_2D)
+                                resolvedUtility.startScan(appContext, BarcodeUtility.ModuleType.BARCODE_2D)
                             } catch (error: Exception) {
                                 if (continuation.isActive) {
                                     continuation.resumeWithException(error)
@@ -130,12 +144,12 @@ class ChainwayBroadcastScan2dScanner(
 
             return Scan2dPayloadParser.parse(rawResult)
         } finally {
-            runCatching { utility.stopScan(appContext, BarcodeUtility.ModuleType.BARCODE_2D) }
+            runCatching { utility?.stopScan(appContext, BarcodeUtility.ModuleType.BARCODE_2D) }
             runCatching { barcode2d?.stopScan() }
             if (receiverRegistered && receiver != null) {
                 runCatching { appContext.unregisterReceiver(receiver) }
             }
-            runCatching { utility.close(appContext, BarcodeUtility.ModuleType.BARCODE_2D) }
+            runCatching { utility?.close(appContext, BarcodeUtility.ModuleType.BARCODE_2D) }
             runCatching { barcode2d?.close() }
             synchronized(lock) {
                 scanInProgress = false
