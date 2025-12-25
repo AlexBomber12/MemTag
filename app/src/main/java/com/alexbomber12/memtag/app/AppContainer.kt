@@ -10,8 +10,8 @@ import com.alexbomber12.memtag.integrations.memento.FakeMementoClient
 import com.alexbomber12.memtag.integrations.memento.MementoClient
 import com.alexbomber12.memtag.integrations.scan2d.FakeScan2dService
 import com.alexbomber12.memtag.integrations.scan2d.Scan2dService
-import com.alexbomber12.memtag.integrations.uhf.FakeUhfReader
 import com.alexbomber12.memtag.integrations.uhf.UhfReader
+import com.alexbomber12.memtag.integrations.uhf.UhfReaderProvider
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -31,6 +31,6 @@ class AppContainer(context: Context) {
     val logger: Logger = AndroidLogger()
 
     val mementoClient: MementoClient = FakeMementoClient()
-    val uhfReader: UhfReader = FakeUhfReader()
+    val uhfReader: UhfReader = UhfReaderProvider.create(applicationContext)
     val scan2dService: Scan2dService = FakeScan2dService()
 }

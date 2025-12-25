@@ -30,6 +30,15 @@ android {
             )
         }
     }
+    flavorDimensions += "hw"
+    productFlavors {
+        create("mock") {
+            dimension = "hw"
+        }
+        create("device") {
+            dimension = "hw"
+        }
+    }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
@@ -40,6 +49,52 @@ android {
     buildFeatures {
         compose = true
     }
+}
+
+val deviceLibDirs =
+    listOf("libs", "lib").map { dirName ->
+        layout.projectDirectory.dir(dirName).asFile
+    }
+val rawDeviceLibs =
+    deviceLibDirs.flatMap { dir ->
+        dir.listFiles()?.toList().orEmpty()
+    }
+val deviceLibArtifacts =
+    rawDeviceLibs.filter { file ->
+        file.extension.equals("jar", ignoreCase = true) ||
+            file.extension.equals("aar", ignoreCase = true)
+    }
+val hasDeviceApiAar =
+    deviceLibArtifacts.any { file ->
+        file.extension.equals("aar", ignoreCase = true) &&
+            file.name.contains("DeviceAPI", ignoreCase = true)
+    }
+val resolvedDeviceLibs =
+    if (hasDeviceApiAar) {
+        deviceLibArtifacts.filterNot { file ->
+            file.name.startsWith("cw-deviceapi", ignoreCase = true)
+        }
+    } else {
+        deviceLibArtifacts
+    }
+val verifyDeviceLibs =
+    tasks.register("verifyDeviceLibs") {
+        doLast {
+            val libs = resolvedDeviceLibs
+            if (libs.isEmpty()) {
+                throw GradleException(
+                    "Device flavor requires vendor UHF SDK jars/aars in app/libs (preferred) " +
+                        "or app/lib (legacy). Add the Chainway SDK files or build the mock flavor " +
+                        "with :app:assembleMockDebug.",
+                )
+            }
+        }
+    }
+
+tasks.matching { task ->
+    task.name.startsWith("preDevice") && task.name.endsWith("Build")
+}.configureEach {
+    dependsOn(verifyDeviceLibs)
 }
 
 dependencies {
@@ -57,6 +112,7 @@ dependencies {
     implementation(libs.androidx.compose.material.icons.extended)
     implementation(libs.androidx.navigation.compose)
     implementation(libs.androidx.datastore.preferences)
+    add("deviceImplementation", files(resolvedDeviceLibs))
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
     androidTestImplementation(libs.androidx.junit)

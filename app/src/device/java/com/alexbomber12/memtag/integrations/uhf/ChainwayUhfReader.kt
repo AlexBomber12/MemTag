@@ -1,0 +1,348 @@
+package com.alexbomber12.memtag.integrations.uhf
+
+import android.content.Context
+import com.rscja.deviceapi.RFIDWithUHFUART
+import com.rscja.deviceapi.entity.UHFTAGInfo
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
+
+class ChainwayUhfReader(
+    private val context: Context,
+) : UhfReader {
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val lock = Any()
+    private val inventoryFlow =
+        MutableSharedFlow<TagReading>(
+            extraBufferCapacity = 64,
+            onBufferOverflow = BufferOverflow.DROP_OLDEST,
+        )
+    private var reader: RFIDWithUHFUART? = null
+
+    private var initialized = false
+    private var inventoryJob: Job? = null
+
+    override suspend fun initialize(): Result<Unit> {
+        synchronized(lock) {
+            if (initialized) {
+                return Result.success(Unit)
+            }
+        }
+        val instance =
+            getReader()
+                .getOrElse { error ->
+                    return Result.failure(
+                        UhfError.VendorError(error.message ?: "UHF init error").asException(cause = error),
+                    )
+                }
+        return withContext(Dispatchers.IO) {
+            val contextInit =
+                runCatching { instance.init(context) }
+                    .getOrElse { error ->
+                        return@withContext Result.failure(
+                            UhfError.VendorError(error.message ?: "UHF init error")
+                                .asException(cause = error),
+                        )
+                    }
+            val initSuccess =
+                if (contextInit) {
+                    true
+                } else {
+                    runCatching { instance.init() }
+                        .getOrElse { error ->
+                            return@withContext Result.failure(
+                                UhfError.VendorError(error.message ?: "UHF init error")
+                                    .asException(cause = error),
+                            )
+                        }
+                }
+            if (initSuccess) {
+                synchronized(lock) { initialized = true }
+                Result.success(Unit)
+            } else {
+                Result.failure(
+                    UhfError.HardwareUnavailable.asException(
+                        message = "UHF initialization failed.",
+                    ),
+                )
+            }
+        }
+    }
+
+    override suspend fun close(): Result<Unit> {
+        stopInventory()
+        val instance = reader ?: return Result.success(Unit)
+        return withContext(Dispatchers.IO) {
+            runCatching {
+                instance.free()
+                synchronized(lock) { initialized = false }
+                reader = null
+            }.fold(
+                onSuccess = { Result.success(Unit) },
+                onFailure = { error ->
+                    Result.failure(
+                        UhfError.VendorError(error.message ?: "UHF close error")
+                            .asException(cause = error),
+                    )
+                },
+            )
+        }
+    }
+
+    override suspend fun readSingle(timeoutMs: Long): Result<String> {
+        synchronized(lock) {
+            if (!initialized) {
+                return Result.failure(UhfError.NotInitialized.asException())
+            }
+            if (inventoryJob != null) {
+                return Result.failure(UhfError.OperationInProgress.asException())
+            }
+        }
+        val instance = reader ?: return Result.failure(UhfError.HardwareUnavailable.asException())
+        return try {
+            withTimeout(timeoutMs) {
+                val tag = withContext(Dispatchers.IO) { instance.inventorySingleTag() }
+                val epc = tag?.let(::tagToEpc)
+                if (epc.isNullOrBlank()) {
+                    Result.failure(UhfError.Timeout.asException())
+                } else {
+                    Result.success(epc)
+                }
+            }
+        } catch (_: TimeoutCancellationException) {
+            Result.failure(UhfError.Timeout.asException())
+        } catch (error: Throwable) {
+            Result.failure(
+                UhfError.VendorError(error.message ?: "UHF read error")
+                    .asException(cause = error),
+            )
+        }
+    }
+
+    override fun startInventory(filterEpcHex: String?): Flow<TagReading> {
+        synchronized(lock) {
+            if (!initialized) {
+                return flow { throw UhfError.NotInitialized.asException() }
+            }
+            if (inventoryJob == null) {
+                val instance = reader ?: return flow { throw UhfError.HardwareUnavailable.asException() }
+                val started =
+                    runCatching { instance.startInventoryTag() }
+                        .getOrElse { error ->
+                            return flow {
+                                throw UhfError.VendorError(error.message ?: "UHF start error")
+                                    .asException(cause = error)
+                            }
+                        }
+                if (!started) {
+                    return flow { throw UhfError.VendorError("Failed to start inventory").asException() }
+                }
+                inventoryJob =
+                    scope.launch {
+                        while (isActive) {
+                            val tag = runCatching { instance.readTagFromBuffer() }.getOrNull()
+                            val epc = tag?.let(::tagToEpc)
+                            if (!epc.isNullOrBlank()) {
+                                val rssi = tagToRssi(tag)
+                                inventoryFlow.emit(
+                                    TagReading(
+                                        epcHex = epc,
+                                        rssi = rssi,
+                                        timestampMs = System.currentTimeMillis(),
+                                    ),
+                                )
+                            } else {
+                                delay(20)
+                            }
+                        }
+                    }
+            }
+        }
+        val baseFlow = inventoryFlow.asSharedFlow()
+        // Apply EPC filtering in-app; add SDK hardware filtering here if supported.
+        return if (filterEpcHex.isNullOrBlank()) {
+            baseFlow
+        } else {
+            baseFlow.filter { it.epcHex.equals(filterEpcHex, ignoreCase = true) }
+        }
+    }
+
+    override suspend fun stopInventory(): Result<Unit> {
+        val jobToCancel =
+            synchronized(lock) {
+                val job = inventoryJob
+                inventoryJob = null
+                job
+            }
+        if (jobToCancel == null) {
+            return Result.success(Unit)
+        }
+        jobToCancel.cancel()
+        val instance = reader ?: return Result.success(Unit)
+        return withContext(Dispatchers.IO) {
+            runCatching { instance.stopInventory() }
+                .fold(
+                    onSuccess = { Result.success(Unit) },
+                    onFailure = { error ->
+                        Result.failure(
+                            UhfError.VendorError(error.message ?: "UHF stop error")
+                                .asException(cause = error),
+                        )
+                    },
+                )
+        }
+    }
+
+    override suspend fun setPower(dbm: Int): Result<Unit> {
+        synchronized(lock) {
+            if (!initialized) {
+                return Result.failure(UhfError.NotInitialized.asException())
+            }
+        }
+        val instance = reader ?: return Result.failure(UhfError.HardwareUnavailable.asException())
+        return withContext(Dispatchers.IO) {
+            runCatching { instance.setPower(dbm) }
+                .fold(
+                    onSuccess = { success ->
+                        if (success) {
+                            Result.success(Unit)
+                        } else {
+                            Result.failure(UhfError.VendorError("Failed to set power").asException())
+                        }
+                    },
+                    onFailure = { error ->
+                        Result.failure(
+                            UhfError.VendorError(error.message ?: "UHF power error")
+                                .asException(cause = error),
+                        )
+                    },
+                )
+        }
+    }
+
+    override suspend fun getPower(): Result<Int> {
+        synchronized(lock) {
+            if (!initialized) {
+                return Result.failure(UhfError.NotInitialized.asException())
+            }
+        }
+        val instance = reader ?: return Result.failure(UhfError.HardwareUnavailable.asException())
+        return withContext(Dispatchers.IO) {
+            runCatching { instance.power }
+                .fold(
+                    onSuccess = { Result.success(it) },
+                    onFailure = { error ->
+                        Result.failure(
+                            UhfError.VendorError(error.message ?: "UHF get power error")
+                                .asException(cause = error),
+                        )
+                    },
+                )
+        }
+    }
+
+    override suspend fun setRegion(region: UhfRegion): Result<Unit> {
+        synchronized(lock) {
+            if (!initialized) {
+                return Result.failure(UhfError.NotInitialized.asException())
+            }
+        }
+        val mode = regionToMode(region)
+            ?: return Result.failure(UhfError.VendorError("Region not supported by SDK").asException())
+        val instance = reader ?: return Result.failure(UhfError.HardwareUnavailable.asException())
+        return withContext(Dispatchers.IO) {
+            runCatching { instance.setFrequencyMode(mode) }
+                .fold(
+                    onSuccess = { success ->
+                        if (success) {
+                            Result.success(Unit)
+                        } else {
+                            Result.failure(UhfError.VendorError("Failed to set region").asException())
+                        }
+                    },
+                    onFailure = { error ->
+                        Result.failure(
+                            UhfError.VendorError(error.message ?: "UHF region error")
+                                .asException(cause = error),
+                        )
+                    },
+                )
+        }
+    }
+
+    override suspend fun getRegion(): Result<UhfRegion> {
+        synchronized(lock) {
+            if (!initialized) {
+                return Result.failure(UhfError.NotInitialized.asException())
+            }
+        }
+        val instance = reader ?: return Result.failure(UhfError.HardwareUnavailable.asException())
+        return withContext(Dispatchers.IO) {
+            runCatching { instance.frequencyMode }
+                .fold(
+                    onSuccess = { Result.success(modeToRegion(it)) },
+                    onFailure = { error ->
+                        Result.failure(
+                            UhfError.VendorError(error.message ?: "UHF get region error")
+                                .asException(cause = error),
+                        )
+                    },
+                )
+        }
+    }
+
+    private fun tagToEpc(tag: UHFTAGInfo): String? = tag.epc
+
+    private fun tagToRssi(tag: UHFTAGInfo): Int? {
+        return runCatching { tag.rssi.toString().toIntOrNull() }.getOrNull()
+    }
+
+    private fun regionToMode(region: UhfRegion): Int? {
+        return when (region) {
+            UhfRegion.EU -> 2
+            UhfRegion.US -> 1
+            UhfRegion.JP -> 4
+            UhfRegion.CN -> 0
+            UhfRegion.OTHER -> null
+        }
+    }
+
+    private fun modeToRegion(mode: Int): UhfRegion {
+        return when (mode) {
+            2 -> UhfRegion.EU
+            1 -> UhfRegion.US
+            4 -> UhfRegion.JP
+            0 -> UhfRegion.CN
+            else -> UhfRegion.OTHER
+        }
+    }
+
+    private fun getReader(): Result<RFIDWithUHFUART> {
+        synchronized(lock) {
+            reader?.let { return Result.success(it) }
+        }
+        return runCatching { RFIDWithUHFUART.getInstance() }
+            .fold(
+                onSuccess = { instance ->
+                    synchronized(lock) { reader = instance }
+                    Result.success(instance)
+                },
+                onFailure = { error ->
+                    Result.failure(error)
+                },
+            )
+    }
+}

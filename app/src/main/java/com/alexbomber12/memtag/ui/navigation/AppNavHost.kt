@@ -11,6 +11,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import com.alexbomber12.memtag.app.AppContainer
 import com.alexbomber12.memtag.ui.screens.diagnostics.DiagnosticsScreen
+import com.alexbomber12.memtag.ui.screens.diagnostics.DiagnosticsViewModel
 import com.alexbomber12.memtag.ui.screens.find.FindScreen
 import com.alexbomber12.memtag.ui.screens.lookup.LookupScreen
 import com.alexbomber12.memtag.ui.screens.queue.QueueScreen
@@ -47,7 +48,8 @@ fun AppNavHost(
             SettingsScreen(viewModel = viewModel)
         }
         composable(AppDestinations.Diagnostics.route) {
-            DiagnosticsScreen(settingsStore = appContainer.settingsStore)
+            val viewModel: DiagnosticsViewModel = viewModel(factory = viewModelFactory)
+            DiagnosticsScreen(viewModel = viewModel)
         }
     }
 }
