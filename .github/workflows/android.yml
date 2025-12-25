@@ -20,7 +20,10 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
       - uses: android-actions/setup-android@v3
         with:
-          packages: platform-tools platforms;android-36
+          packages: |
+            platform-tools
+            platforms;android-36
+            build-tools;36.0.0
       - name: Build, unit tests, lint
         run: .\gradlew.bat --no-daemon clean :app:assembleMockDebug :app:testMockDebugUnitTest :app:lintMockDebug
 
