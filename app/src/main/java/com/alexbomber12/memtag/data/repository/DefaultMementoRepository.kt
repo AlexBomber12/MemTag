@@ -209,7 +209,6 @@ class DefaultMementoRepository(
 
     override suspend fun lookupByEpc(
         epcRaw: String,
-        allowNetwork: Boolean,
     ): LookupResult {
         return withContext(ioDispatcher) {
             val settings = settingsStore.settingsFlow.first()
@@ -232,9 +231,6 @@ class DefaultMementoRepository(
             val local = inventoryItemDao.getByEpc(normalized)
             if (local != null) {
                 return@withContext LookupResult.Found(local.toDomain())
-            }
-            if (!allowNetwork) {
-                return@withContext LookupResult.NotFound
             }
             LookupResult.NotFound
         }

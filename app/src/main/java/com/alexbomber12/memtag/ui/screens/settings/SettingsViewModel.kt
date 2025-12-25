@@ -22,7 +22,17 @@ class SettingsViewModel(
 
     fun saveSettings(settings: AppSettings) {
         viewModelScope.launch {
-            settingsStore.update { settings }
+            settingsStore.update { current ->
+                current.copy(
+                    mementoBaseUrl = settings.mementoBaseUrl,
+                    mementoToken = settings.mementoToken,
+                    mementoLibraryId = settings.mementoLibraryId,
+                    uhfRegion = settings.uhfRegion,
+                    uhfPower = settings.uhfPower,
+                    scan2dAction = settings.scan2dAction,
+                    scan2dExtraKey = settings.scan2dExtraKey,
+                )
+            }
         }
     }
 

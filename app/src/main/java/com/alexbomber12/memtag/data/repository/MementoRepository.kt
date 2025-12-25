@@ -15,7 +15,6 @@ interface MementoRepository {
 
     suspend fun lookupByEpc(
         epcRaw: String,
-        allowNetwork: Boolean = false,
     ): LookupResult
 
     suspend fun searchInventory(

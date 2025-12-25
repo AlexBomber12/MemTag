@@ -174,7 +174,7 @@ class RepairViewModel(
                         RepairComparison.NotReady -> Unit
                     }
                 } else {
-                    when (val lookupResult = lookupByEpcUseCase.execute(normalized, allowNetwork = false)) {
+                    when (val lookupResult = lookupByEpcUseCase.execute(normalized)) {
                         is LookupResult.Found -> {
                             mutableState.update { it.copy(lookupState = RepairLookupState.Found(lookupResult.item)) }
                             logAction(

@@ -7,8 +7,7 @@ class LookupByEpcUseCase(
 ) {
     suspend fun execute(
         epcRaw: String,
-        allowNetwork: Boolean = false,
     ): LookupResult {
-        return repository.lookupByEpc(epcRaw, allowNetwork)
+        return repository.lookupByEpc(epcRaw)
     }
 }
