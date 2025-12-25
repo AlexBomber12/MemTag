@@ -12,6 +12,8 @@ import com.alexbomber12.memtag.data.settings.SettingsStore
 import com.alexbomber12.memtag.db.MemTagDatabase
 import com.alexbomber12.memtag.domain.LookupByEpcUseCase
 import com.alexbomber12.memtag.domain.SyncMementoLibraryUseCase
+import com.alexbomber12.memtag.integrations.feedback.DeviceFindFeedbackController
+import com.alexbomber12.memtag.integrations.feedback.FindFeedbackController
 import com.alexbomber12.memtag.integrations.memento.MementoClient
 import com.alexbomber12.memtag.integrations.memento.MementoCloudClient
 import com.alexbomber12.memtag.integrations.scan2d.FakeScan2dService
@@ -55,4 +57,5 @@ class AppContainer(context: Context) {
     val lookupByEpcUseCase = LookupByEpcUseCase(mementoRepository)
     val uhfReader: UhfReader = UhfReaderProvider.create(applicationContext)
     val scan2dService: Scan2dService = FakeScan2dService()
+    val findFeedbackController: FindFeedbackController = DeviceFindFeedbackController(applicationContext)
 }

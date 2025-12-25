@@ -3,6 +3,7 @@ package com.alexbomber12.memtag.app
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import com.alexbomber12.memtag.ui.screens.diagnostics.DiagnosticsViewModel
+import com.alexbomber12.memtag.ui.screens.find.FindViewModel
 import com.alexbomber12.memtag.ui.screens.lookup.LookupViewModel
 import com.alexbomber12.memtag.ui.screens.settings.SettingsViewModel
 
@@ -28,6 +29,14 @@ class AppViewModelFactory(
                 syncUseCase = appContainer.syncMementoLibraryUseCase,
                 lookupUseCase = appContainer.lookupByEpcUseCase,
                 repository = appContainer.mementoRepository,
+            ) as T
+        }
+        if (modelClass.isAssignableFrom(FindViewModel::class.java)) {
+            @Suppress("UNCHECKED_CAST")
+            return FindViewModel(
+                settingsStore = appContainer.settingsStore,
+                uhfReader = appContainer.uhfReader,
+                feedbackController = appContainer.findFeedbackController,
             ) as T
         }
         throw IllegalArgumentException("Unknown ViewModel class: ${modelClass.name}")

@@ -2,28 +2,44 @@
 
 package com.alexbomber12.memtag.ui.screens.find
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.alexbomber12.memtag.ui.components.AppCard
-import com.alexbomber12.memtag.ui.components.LoadingState
 import com.alexbomber12.memtag.ui.components.PrimaryButton
 import com.alexbomber12.memtag.ui.components.SecondaryButton
+import com.alexbomber12.memtag.util.epc.EpcValidator
+import java.util.Locale
+import kotlin.math.roundToInt
 
 @Composable
-fun FindScreen() {
-    var scanning by rememberSaveable { mutableStateOf(false) }
+fun FindScreen(viewModel: FindViewModel) {
+    val uiState by viewModel.uiState.collectAsState()
+    var showDebug by rememberSaveable { mutableStateOf(false) }
 
     Column(
         modifier =
@@ -32,28 +48,184 @@ fun FindScreen() {
                 .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        AppCard(title = "Find") {
-            if (scanning) {
-                LoadingState(
-                    message = "Listening for nearby tags...",
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                SecondaryButton(
-                    text = "Stop find",
-                    onClick = { scanning = false },
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            } else {
+        DisposableEffect(Unit) {
+            onDispose { viewModel.stopFind() }
+        }
+        val isValid = EpcValidator.isValidEpcHex(uiState.epcInput)
+        val showInputError = uiState.epcInput.isNotBlank() && !isValid
+        val statusLabel =
+            when (uiState.status) {
+                FindStatus.Idle -> "Idle"
+                FindStatus.Running -> "Running"
+                FindStatus.NoSignal -> "No signal"
+                is FindStatus.Error -> "Error"
+            }
+
+        AppCard(title = "Target EPC") {
+            OutlinedTextField(
+                value = uiState.epcInput,
+                onValueChange = viewModel::onEpcInputChange,
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text(text = "EPC (hex)") },
+                singleLine = true,
+                enabled = !uiState.isRunning,
+                isError = showInputError,
+                supportingText = {
+                    val message =
+                        if (showInputError) {
+                            "Invalid EPC. Use hex characters only."
+                        } else {
+                            "Paste or type the tag EPC."
+                        }
+                    Text(text = message)
+                },
+            )
+            if (uiState.lastLookupEpc.isNotBlank()) {
+                TextButton(onClick = viewModel::useLastLookupEpc, enabled = !uiState.isRunning) {
+                    Text(text = "Use last looked up EPC")
+                }
                 Text(
-                    text = "Start a guided find session to locate a tag.",
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-                PrimaryButton(
-                    text = "Start find",
-                    onClick = { scanning = true },
-                    modifier = Modifier.fillMaxWidth(),
+                    text = uiState.lastLookupEpc,
+                    style = MaterialTheme.typography.bodySmall,
                 )
             }
         }
+
+        AppCard(title = "Proximity") {
+            ProximityMeter(
+                proximity = uiState.proximity,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Text(
+                text = "Status: $statusLabel",
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            if (uiState.status is FindStatus.Error) {
+                Text(
+                    text = uiState.lastErrorMessage.orEmpty(),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+            TextButton(
+                onClick = { showDebug = !showDebug },
+                modifier = Modifier.align(Alignment.End),
+            ) {
+                Text(text = if (showDebug) "Hide debug" else "Show debug")
+            }
+            AnimatedVisibility(visible = showDebug) {
+                DebugPanel(uiState = uiState)
+            }
+        }
+
+        AppCard(title = "Controls") {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                PrimaryButton(
+                    text = "Start",
+                    onClick = viewModel::startFind,
+                    modifier = Modifier.weight(1f),
+                    enabled = isValid && !uiState.isRunning,
+                )
+                SecondaryButton(
+                    text = "Stop",
+                    onClick = viewModel::stopFind,
+                    modifier = Modifier.weight(1f),
+                    enabled = uiState.isRunning,
+                )
+            }
+            ToggleRow(
+                title = "Sound",
+                description = "Ticking audio feedback",
+                checked = uiState.soundEnabled,
+                onCheckedChange = viewModel::setSoundEnabled,
+            )
+            ToggleRow(
+                title = "Haptic",
+                description = "Vibration pulses",
+                checked = uiState.hapticEnabled,
+                onCheckedChange = viewModel::setHapticEnabled,
+            )
+        }
+    }
+}
+
+@Composable
+private fun ProximityMeter(
+    proximity: Int,
+    modifier: Modifier = Modifier,
+) {
+    val animatedProgress by
+        animateFloatAsState(
+            targetValue = proximity / 100f,
+            animationSpec = tween(durationMillis = 200),
+            label = "proximityProgress",
+        )
+    val displayValue = (animatedProgress * 100f).roundToInt()
+    Box(
+        modifier = modifier,
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            modifier = Modifier.size(180.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            CircularProgressIndicator(
+                progress = animatedProgress,
+                modifier = Modifier.fillMaxSize(),
+                strokeWidth = 10.dp,
+            )
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    text = displayValue.toString(),
+                    style = MaterialTheme.typography.displaySmall,
+                )
+                Text(
+                    text = "Proximity",
+                    style = MaterialTheme.typography.labelMedium,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ToggleRow(
+    title: String,
+    description: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(text = title, style = MaterialTheme.typography.bodyMedium)
+            Text(text = description, style = MaterialTheme.typography.bodySmall)
+        }
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+        )
+    }
+}
+
+@Composable
+private fun DebugPanel(uiState: FindUiState) {
+    val formattedRaw = String.format(Locale.US, "%.2f", uiState.rawProximity)
+    val formattedSmoothed = String.format(Locale.US, "%.2f", uiState.smoothedProximity)
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Text(text = "Last RSSI: ${uiState.lastRssi ?: "n/a"}")
+        Text(text = "Hits / window: ${uiState.hitsPerWindow}")
+        Text(text = "Raw proximity: $formattedRaw")
+        Text(text = "Smoothed proximity: $formattedSmoothed")
+        Text(text = "Seen recently: ${uiState.seenRecently}")
     }
 }

@@ -2,6 +2,7 @@ package com.alexbomber12.memtag.data.settings
 
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.intPreferencesKey
@@ -39,6 +40,9 @@ class PreferencesSettingsStore(
             preferences[Keys.UHF_POWER] = updated.uhfPower
             preferences[Keys.SCAN2D_ACTION] = updated.scan2dAction
             preferences[Keys.SCAN2D_EXTRA_KEY] = updated.scan2dExtraKey
+            preferences[Keys.FIND_SOUND_ENABLED] = updated.findSoundEnabled
+            preferences[Keys.FIND_HAPTIC_ENABLED] = updated.findHapticEnabled
+            preferences[Keys.LAST_LOOKUP_EPC] = updated.lastLookupEpc
         }
     }
 
@@ -90,6 +94,9 @@ class PreferencesSettingsStore(
             uhfPower = this[Keys.UHF_POWER] ?: AppDefaults.UHF_POWER,
             scan2dAction = this[Keys.SCAN2D_ACTION] ?: AppDefaults.SCAN2D_ACTION,
             scan2dExtraKey = this[Keys.SCAN2D_EXTRA_KEY] ?: AppDefaults.SCAN2D_EXTRA_KEY,
+            findSoundEnabled = this[Keys.FIND_SOUND_ENABLED] ?: AppDefaults.FIND_SOUND_ENABLED,
+            findHapticEnabled = this[Keys.FIND_HAPTIC_ENABLED] ?: AppDefaults.FIND_HAPTIC_ENABLED,
+            lastLookupEpc = this[Keys.LAST_LOOKUP_EPC] ?: AppDefaults.LAST_LOOKUP_EPC,
         ).sanitized()
     }
 
@@ -101,5 +108,8 @@ class PreferencesSettingsStore(
         val UHF_POWER = intPreferencesKey("uhf_power")
         val SCAN2D_ACTION = stringPreferencesKey("scan2d_action")
         val SCAN2D_EXTRA_KEY = stringPreferencesKey("scan2d_extra_key")
+        val FIND_SOUND_ENABLED = booleanPreferencesKey("find_sound_enabled")
+        val FIND_HAPTIC_ENABLED = booleanPreferencesKey("find_haptic_enabled")
+        val LAST_LOOKUP_EPC = stringPreferencesKey("last_lookup_epc")
     }
 }

@@ -16,6 +16,7 @@ import com.alexbomber12.memtag.domain.SyncState
 import com.alexbomber12.memtag.domain.SyncStatus
 import com.alexbomber12.memtag.integrations.memento.MementoSettingsValidation
 import com.alexbomber12.memtag.integrations.memento.MementoSettingsValidator
+import com.alexbomber12.memtag.util.epc.EpcNormalizer
 import com.alexbomber12.memtag.util.epc.EpcValidator
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -130,10 +131,20 @@ class LookupViewModel(
             }
             return
         }
+        val normalized =
+            runCatching { EpcNormalizer.normalize(epcRaw) }.getOrElse {
+                mutableState.update {
+                    it.copy(lookupStatus = LookupStatus.Error("Invalid EPC. Use hex characters only."))
+                }
+                return
+            }
         mutableState.update { it.copy(lookupStatus = LookupStatus.Loading) }
+        viewModelScope.launch {
+            settingsStore.update { settings -> settings.copy(lastLookupEpc = normalized) }
+        }
         val job =
             viewModelScope.launch {
-                val result = lookupUseCase.execute(epcRaw)
+                val result = lookupUseCase.execute(normalized)
                 mutableState.update {
                     when (result) {
                         is LookupResult.Found -> it.copy(lookupStatus = LookupStatus.Found(result.item))

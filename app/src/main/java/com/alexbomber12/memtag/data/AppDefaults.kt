@@ -14,6 +14,10 @@ object AppDefaults {
     const val SCAN2D_ACTION = "com.alexbomber12.inventory.SCAN"
     const val SCAN2D_EXTRA_KEY = "data"
 
+    const val FIND_SOUND_ENABLED = false
+    const val FIND_HAPTIC_ENABLED = false
+    const val LAST_LOOKUP_EPC = ""
+
     fun normalizeBaseUrl(input: String): String {
         var trimmed = input.trim()
         while (trimmed.endsWith("/")) {
