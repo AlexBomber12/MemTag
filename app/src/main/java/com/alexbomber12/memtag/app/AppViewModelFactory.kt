@@ -2,6 +2,7 @@ package com.alexbomber12.memtag.app
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
+import com.alexbomber12.memtag.ui.screens.diagnostics.DiagnosticsViewModel
 import com.alexbomber12.memtag.ui.screens.settings.SettingsViewModel
 
 class AppViewModelFactory(
@@ -11,6 +12,13 @@ class AppViewModelFactory(
         if (modelClass.isAssignableFrom(SettingsViewModel::class.java)) {
             @Suppress("UNCHECKED_CAST")
             return SettingsViewModel(appContainer.settingsStore) as T
+        }
+        if (modelClass.isAssignableFrom(DiagnosticsViewModel::class.java)) {
+            @Suppress("UNCHECKED_CAST")
+            return DiagnosticsViewModel(
+                settingsStore = appContainer.settingsStore,
+                uhfReader = appContainer.uhfReader,
+            ) as T
         }
         throw IllegalArgumentException("Unknown ViewModel class: ${modelClass.name}")
     }

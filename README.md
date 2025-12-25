@@ -24,12 +24,16 @@ These values are persisted with DataStore and used across app restarts.
 
 ## Local PowerShell commands
 ```powershell
-.\gradlew.bat --no-daemon clean assembleDebug testDebugUnitTest lintDebug
-.\gradlew.bat testDebugUnitTest
-.\gradlew.bat lintDebug
+.\gradlew.bat --no-daemon clean :app:assembleMockDebug :app:testMockDebugUnitTest :app:lintMockDebug
+.\gradlew.bat :app:testMockDebugUnitTest
+.\gradlew.bat :app:lintMockDebug
 .\gradlew.bat ktlintCheck
-.\gradlew.bat assembleDebug
+.\gradlew.bat :app:assembleMockDebug
+.\gradlew.bat :app:assembleDeviceDebug
 ```
 
 ## CI overview
-GitHub Actions runs on `windows-latest`, executes the same PowerShell Gradle commands, and uploads the debug APK artifact.
+GitHub Actions runs on `windows-latest`, builds/tests the mock flavor, and uploads the mock debug APK artifact.
+
+## RFID notes
+See `docs/RFID_NOTES.md` for hardware build steps, vendor SDK placement, and diagnostics checklist.

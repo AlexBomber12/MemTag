@@ -20,10 +20,10 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
       - uses: android-actions/setup-android@v3
       - name: Build, unit tests, lint
-        run: .\gradlew.bat --no-daemon clean assembleDebug testDebugUnitTest lintDebug
+        run: .\gradlew.bat --no-daemon clean :app:assembleMockDebug :app:testMockDebugUnitTest :app:lintMockDebug
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: app-debug
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: app-mock-debug
+          path: app/build/outputs/apk/mock/debug/app-mock-debug.apk

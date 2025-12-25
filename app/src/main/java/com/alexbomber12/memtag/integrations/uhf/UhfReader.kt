@@ -1,17 +1,26 @@
 package com.alexbomber12.memtag.integrations.uhf
 
+import kotlinx.coroutines.flow.Flow
+
 interface UhfReader {
-    fun connect(): Boolean
+    suspend fun initialize(): Result<Unit>
 
-    fun disconnect()
-}
+    suspend fun close(): Result<Unit>
 
-class FakeUhfReader : UhfReader {
-    override fun connect(): Boolean {
-        throw NotImplementedError("UHF reader is not implemented in PR-01.")
-    }
+    /**
+     * Returns [UhfError.OperationInProgress] if inventory is running.
+     */
+    suspend fun readSingle(timeoutMs: Long = 2_000): Result<String>
 
-    override fun disconnect() {
-        throw NotImplementedError("UHF reader is not implemented in PR-01.")
-    }
+    fun startInventory(filterEpcHex: String? = null): Flow<TagReading>
+
+    suspend fun stopInventory(): Result<Unit>
+
+    suspend fun setPower(dbm: Int): Result<Unit>
+
+    suspend fun getPower(): Result<Int>
+
+    suspend fun setRegion(region: UhfRegion): Result<Unit>
+
+    suspend fun getRegion(): Result<UhfRegion>
 }
