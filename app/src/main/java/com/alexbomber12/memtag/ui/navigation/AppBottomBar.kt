@@ -36,6 +36,7 @@ fun AppBottomBar(
                 },
                 icon = { Icon(destination.icon, contentDescription = destination.label) },
                 label = { Text(text = destination.label) },
+                alwaysShowLabel = false,
             )
         }
     }

@@ -3,6 +3,7 @@ package com.alexbomber12.memtag.ui.screens.repair
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.alexbomber12.memtag.data.repository.MementoRepository
+import com.alexbomber12.memtag.data.settings.SettingsStore
 import com.alexbomber12.memtag.db.ActionsLogDao
 import com.alexbomber12.memtag.db.ActionsLogEntity
 import com.alexbomber12.memtag.domain.InventoryItem
@@ -21,6 +22,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
@@ -38,6 +40,7 @@ data class RepairUiState(
     val searchQuery: String = "",
     val searchResults: List<InventoryItem> = emptyList(),
     val selectedItem: InventoryItem? = null,
+    val expectedEpc: String? = null,
     val currentEpc: String? = null,
     val lookupState: RepairLookupState = RepairLookupState.Idle,
     val comparison: RepairComparison = RepairComparison.NotReady,
@@ -56,6 +59,7 @@ class RepairViewModel(
     private val lookupByEpcUseCase: LookupByEpcUseCase,
     private val uhfReader: UhfReader,
     private val actionsLogDao: ActionsLogDao,
+    private val settingsStore: SettingsStore,
     private val decisionUseCase: RepairDecisionUseCase = RepairDecisionUseCase(),
     private val clock: () -> Long = { System.currentTimeMillis() },
 ) : ViewModel() {
@@ -68,6 +72,26 @@ class RepairViewModel(
     init {
         viewModelScope.launch {
             refreshLogs()
+        }
+        viewModelScope.launch {
+            settingsStore.settingsFlow.collect { settings ->
+                mutableState.update { state ->
+                    val prefillCurrent =
+                        state.currentEpc ?: settings.lastScannedEpc.takeIf { it.isNotBlank() }
+                    val prefillExpected =
+                        if (state.selectedItem == null) {
+                            state.expectedEpc ?: settings.lastFindTargetEpc.takeIf { it.isNotBlank() }
+                        } else {
+                            state.selectedItem.epcNormalized
+                        }
+                    val updated =
+                        state.copy(
+                            currentEpc = prefillCurrent,
+                            expectedEpc = prefillExpected,
+                        )
+                    updated.copy(comparison = decisionUseCase.evaluate(resolveExpectedEpc(updated), updated.currentEpc))
+                }
+            }
         }
     }
 
@@ -91,6 +115,7 @@ class RepairViewModel(
         mutableState.update {
             it.copy(
                 selectedItem = item,
+                expectedEpc = item.epcNormalized,
                 lookupState = RepairLookupState.Idle,
                 message = null,
                 errorMessage = null,
@@ -108,6 +133,12 @@ class RepairViewModel(
                 errorMessage = null,
             )
         }
+        updateComparison()
+    }
+
+    fun onExpectedEpcChange(value: String) {
+        mutableState.update { it.copy(expectedEpc = value) }
+        updateComparison()
     }
 
     fun readTag() {
@@ -202,6 +233,7 @@ class RepairViewModel(
                         }
                     }
                 }
+                updateComparison()
             }
         operationJob = job
         job.invokeOnCompletion { operationJob = null }
@@ -211,9 +243,9 @@ class RepairViewModel(
         if (uiState.value.showConfirmation) {
             return
         }
-        val decision = decisionUseCase.evaluate(uiState.value.selectedItem?.epcNormalized, uiState.value.currentEpc)
+        val decision = decisionUseCase.evaluate(resolveExpectedEpc(), uiState.value.currentEpc)
         if (decision !is RepairComparison.Mismatch) {
-            updateError("Repair is only available when the tag EPC does not match the selected item.")
+            updateError("Repair is only available when the tag EPC does not match the expected EPC.")
             return
         }
         mutableState.update { it.copy(showConfirmation = true, confirmEnabled = false, message = null, errorMessage = null) }
@@ -256,7 +288,7 @@ class RepairViewModel(
             )
         }
         if (shouldLogCancel) {
-            val expected = uiState.value.selectedItem?.epcNormalized
+            val expected = resolveExpectedEpc()
             val current = uiState.value.currentEpc
             viewModelScope.launch {
                 logAction(
@@ -282,11 +314,11 @@ class RepairViewModel(
         if (operationJob != null) {
             return
         }
-        val expected = uiState.value.selectedItem?.epcNormalized
+        val expected = resolveExpectedEpc()
         val current = uiState.value.currentEpc
         val decision = decisionUseCase.evaluate(expected, current)
         if (decision !is RepairComparison.Mismatch) {
-            updateError("Repair is only available when the tag EPC does not match the selected item.")
+            updateError("Repair is only available when the tag EPC does not match the expected EPC.")
             return
         }
         val job =
@@ -370,8 +402,12 @@ class RepairViewModel(
 
     private fun updateComparison() {
         val state = uiState.value
-        val decision = decisionUseCase.evaluate(state.selectedItem?.epcNormalized, state.currentEpc)
+        val decision = decisionUseCase.evaluate(resolveExpectedEpc(state), state.currentEpc)
         applyComparison(decision)
+    }
+
+    private fun resolveExpectedEpc(state: RepairUiState = uiState.value): String? {
+        return state.selectedItem?.epcNormalized ?: state.expectedEpc
     }
 
     private fun applyComparison(decision: RepairComparison) {
@@ -390,7 +426,7 @@ class RepairViewModel(
         val friendly = overrideMessage ?: mapWriteError(error)
         mutableState.update { it.copy(isWriting = false, isVerifying = false, errorMessage = friendly) }
         viewModelScope.launch {
-            val expected = uiState.value.selectedItem?.epcNormalized
+            val expected = resolveExpectedEpc()
             val current = uiState.value.currentEpc
             logAction(
                 actionType = RepairActionType.REPAIR_WRITE_FAILED,

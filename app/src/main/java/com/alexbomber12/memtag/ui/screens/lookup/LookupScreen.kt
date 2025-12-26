@@ -9,27 +9,40 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.alexbomber12.memtag.app.HardwareAction
 import com.alexbomber12.memtag.ui.components.AppCard
 import com.alexbomber12.memtag.ui.components.ErrorState
 import com.alexbomber12.memtag.ui.components.LoadingState
-import com.alexbomber12.memtag.ui.components.PrimaryButton
 import com.alexbomber12.memtag.ui.components.SecondaryButton
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.collect
 import java.text.DateFormat
 import java.util.Date
 
 @Composable
-fun LookupScreen(viewModel: LookupViewModel) {
+fun LookupScreen(
+    viewModel: LookupViewModel,
+    hardwareActions: Flow<HardwareAction>,
+) {
     val state = viewModel.uiState.collectAsStateWithLifecycle().value
 
     DisposableEffect(Unit) {
         onDispose { viewModel.cancelUhfScan() }
+    }
+    LaunchedEffect(hardwareActions) {
+        hardwareActions.collect { action ->
+            when (action) {
+                HardwareAction.Rfid -> viewModel.scanUhf()
+                HardwareAction.Scan -> viewModel.scanQr()
+            }
+        }
     }
 
     LazyColumn(
@@ -41,33 +54,12 @@ fun LookupScreen(viewModel: LookupViewModel) {
     ) {
         item {
             AppCard(title = "Lookup") {
-                OutlinedTextField(
-                    value = state.epcInput,
-                    onValueChange = viewModel::onEpcInputChange,
-                    label = { Text(text = "EPC") },
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    PrimaryButton(
-                        text = "Lookup",
-                        onClick = viewModel::lookup,
-                        modifier = Modifier.weight(1f),
-                    )
-                    SecondaryButton(
-                        text = "Sync now",
-                        onClick = viewModel::syncNow,
-                        modifier = Modifier.weight(1f),
-                    )
-                }
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     SecondaryButton(
-                        text = "Scan UHF",
+                        text = "Scan RFID",
                         onClick = viewModel::scanUhf,
                         enabled = state.uhfScanStatus !is ScanUhfStatus.Scanning,
                         modifier = Modifier.weight(1f),
@@ -81,7 +73,7 @@ fun LookupScreen(viewModel: LookupViewModel) {
                 }
                 when (val uhfStatus = state.uhfScanStatus) {
                     is ScanUhfStatus.Scanning -> {
-                        LoadingState(message = "Scanning UHF...")
+                        LoadingState(message = "Scanning RFID...")
                     }
 
                     is ScanUhfStatus.Error -> {
@@ -101,9 +93,19 @@ fun LookupScreen(viewModel: LookupViewModel) {
 
                     is ScanQrStatus.Idle -> Unit
                 }
+                Text(
+                    text = "Last scanned: ${state.lastScannedEpc.ifBlank { "--" }}",
+                    style = MaterialTheme.typography.labelMedium,
+                )
                 when (val status = state.lookupStatus) {
                     is LookupStatus.Idle -> {
-                        Text(text = "Status: Idle", style = MaterialTheme.typography.labelMedium)
+                        val message =
+                            if (state.lastScannedEpc.isBlank()) {
+                                "Scan RFID or QR to look up a tag."
+                            } else {
+                                "Scan another tag to update the lookup."
+                            }
+                        Text(text = message, style = MaterialTheme.typography.labelMedium)
                     }
 
                     is LookupStatus.Loading -> {
@@ -111,7 +113,7 @@ fun LookupScreen(viewModel: LookupViewModel) {
                     }
 
                     is LookupStatus.NotFound -> {
-                        Text(text = "Status: Not found", style = MaterialTheme.typography.labelMedium)
+                        Text(text = "Not found. Sync may be needed.", style = MaterialTheme.typography.labelMedium)
                     }
 
                     is LookupStatus.Error -> {
@@ -155,43 +157,6 @@ fun LookupScreen(viewModel: LookupViewModel) {
                     if (!lastSync.lastErrorMessage.isNullOrBlank()) {
                         Text(text = "Last error: ${lastSync.lastErrorMessage}")
                     }
-                }
-
-                when (val syncStatus = state.syncStatus) {
-                    is SyncStatusState.Idle -> {
-                        Text(text = "Sync status: Idle")
-                    }
-
-                    is SyncStatusState.Running -> {
-                        LoadingState(
-                            message =
-                                "Syncing... fetched=${syncStatus.progress.fetchedCount} " +
-                                    "stored=${syncStatus.progress.storedCount} " +
-                                    "skipped=${syncStatus.progress.skippedCount}",
-                        )
-                    }
-
-                    is SyncStatusState.Completed -> {
-                        Text(text = "Sync complete.")
-                        Text(
-                            text =
-                                "Fetched: ${syncStatus.result.fetchedCount} | " +
-                                    "Stored: ${syncStatus.result.storedCount} | " +
-                                    "Skipped: ${syncStatus.result.skippedCount}",
-                        )
-                    }
-
-                    is SyncStatusState.Error -> {
-                        ErrorState(message = syncStatus.message)
-                    }
-                }
-
-                state.lastSyncResult?.let { result ->
-                    Text(
-                        text =
-                            "Last result: fetched=${result.fetchedCount}, " +
-                                "stored=${result.storedCount}, skipped=${result.skippedCount}",
-                    )
                 }
             }
         }

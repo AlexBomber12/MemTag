@@ -2,15 +2,25 @@ package com.alexbomber12.memtag.ui.screens.settings
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.alexbomber12.memtag.app.SyncCoordinator
+import com.alexbomber12.memtag.app.SyncStatusState
+import com.alexbomber12.memtag.data.repository.MementoRepository
 import com.alexbomber12.memtag.data.settings.AppSettings
 import com.alexbomber12.memtag.data.settings.SettingsStore
+import com.alexbomber12.memtag.domain.SyncState
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 class SettingsViewModel(
     private val settingsStore: SettingsStore,
+    private val repository: MementoRepository,
+    private val syncCoordinator: SyncCoordinator,
 ) : ViewModel() {
     val settingsState: StateFlow<AppSettings> =
         settingsStore.settingsFlow
@@ -18,6 +28,31 @@ class SettingsViewModel(
                 scope = viewModelScope,
                 started = SharingStarted.WhileSubscribed(5_000),
                 initialValue = AppSettings(),
+            )
+
+    val syncStatusState: StateFlow<SyncStatusState> =
+        syncCoordinator.status
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(5_000),
+                initialValue = SyncStatusState.Idle,
+            )
+
+    val lastSyncState: StateFlow<SyncState?> =
+        settingsStore.settingsFlow
+            .map { it.mementoLibraryId }
+            .distinctUntilChanged()
+            .flatMapLatest { libraryId ->
+                if (libraryId.isBlank()) {
+                    flowOf(null)
+                } else {
+                    repository.observeSyncState(libraryId)
+                }
+            }
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(5_000),
+                initialValue = null,
             )
 
     fun saveSettings(settings: AppSettings) {
@@ -31,6 +66,8 @@ class SettingsViewModel(
                     uhfPower = settings.uhfPower,
                     scan2dAction = settings.scan2dAction,
                     scan2dExtraKey = settings.scan2dExtraKey,
+                    rfidKeyCodes = settings.rfidKeyCodes,
+                    scanKeyCodes = settings.scanKeyCodes,
                 )
             }
         }
@@ -62,5 +99,9 @@ class SettingsViewModel(
         viewModelScope.launch {
             settingsStore.setScan2d(action, extraKey)
         }
+    }
+
+    fun syncNow() {
+        syncCoordinator.requestManualSync()
     }
 }

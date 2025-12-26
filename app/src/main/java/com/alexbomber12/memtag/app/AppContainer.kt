@@ -31,11 +31,11 @@ import java.io.File
 
 class AppContainer(context: Context) {
     private val applicationContext = context.applicationContext
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     private val dataStore =
         PreferenceDataStoreFactory.create(
-            scope = scope,
+            scope = appScope,
             produceFile = { File(applicationContext.filesDir, "app_settings.preferences_pb") },
         )
 
@@ -66,8 +66,10 @@ class AppContainer(context: Context) {
             queueMetaDao = database.queueMetaDao(),
         )
     val syncMementoLibraryUseCase = SyncMementoLibraryUseCase(mementoRepository)
+    val syncCoordinator = SyncCoordinator(settingsStore, mementoRepository, syncMementoLibraryUseCase, appScope)
     val lookupByEpcUseCase = LookupByEpcUseCase(mementoRepository)
     val uhfReader: UhfReader = UhfReaderProvider.create(applicationContext)
     val scan2dScanner: Scan2dScanner = Scan2dScannerProvider.create(applicationContext, settingsStore)
     val findFeedbackController: FindFeedbackController = DeviceFindFeedbackController(applicationContext)
+    val hardwareKeyDispatcher = HardwareKeyDispatcher()
 }

@@ -8,14 +8,7 @@ import com.alexbomber12.memtag.data.settings.SettingsStore
 import com.alexbomber12.memtag.domain.InventoryItem
 import com.alexbomber12.memtag.domain.LookupByEpcUseCase
 import com.alexbomber12.memtag.domain.LookupResult
-import com.alexbomber12.memtag.domain.SyncMementoLibraryUseCase
-import com.alexbomber12.memtag.domain.SyncProgress
-import com.alexbomber12.memtag.domain.SyncProgressEvent
-import com.alexbomber12.memtag.domain.SyncResult
 import com.alexbomber12.memtag.domain.SyncState
-import com.alexbomber12.memtag.domain.SyncStatus
-import com.alexbomber12.memtag.integrations.memento.MementoSettingsValidation
-import com.alexbomber12.memtag.integrations.memento.MementoSettingsValidator
 import com.alexbomber12.memtag.integrations.scan2d.Scan2dError
 import com.alexbomber12.memtag.integrations.scan2d.Scan2dException
 import com.alexbomber12.memtag.integrations.scan2d.Scan2dScanner
@@ -25,7 +18,6 @@ import com.alexbomber12.memtag.integrations.uhf.UhfException
 import com.alexbomber12.memtag.integrations.uhf.UhfReader
 import com.alexbomber12.memtag.integrations.uhf.UhfRegion
 import com.alexbomber12.memtag.util.epc.EpcNormalizer
-import com.alexbomber12.memtag.util.epc.EpcValidator
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -76,36 +68,17 @@ sealed class ScanUhfStatus {
     ) : ScanUhfStatus()
 }
 
-sealed class SyncStatusState {
-    data object Idle : SyncStatusState()
-
-    data class Running(
-        val progress: SyncProgress,
-    ) : SyncStatusState()
-
-    data class Completed(
-        val result: SyncResult,
-    ) : SyncStatusState()
-
-    data class Error(
-        val message: String,
-    ) : SyncStatusState()
-}
-
 data class LookupUiState(
-    val epcInput: String = "",
+    val lastScannedEpc: String = "",
     val lookupStatus: LookupStatus = LookupStatus.Idle,
     val scanStatus: ScanQrStatus = ScanQrStatus.Idle,
     val uhfScanStatus: ScanUhfStatus = ScanUhfStatus.Idle,
-    val syncStatus: SyncStatusState = SyncStatusState.Idle,
     val lastSyncState: SyncState? = null,
-    val lastSyncResult: SyncResult? = null,
     val currentSettings: AppSettings = AppSettings(),
 )
 
 class LookupViewModel(
     private val settingsStore: SettingsStore,
-    private val syncUseCase: SyncMementoLibraryUseCase,
     private val lookupUseCase: LookupByEpcUseCase,
     private val repository: MementoRepository,
     private val scan2dScanner: Scan2dScanner,
@@ -114,7 +87,6 @@ class LookupViewModel(
     private val mutableState = MutableStateFlow(LookupUiState())
     val uiState: StateFlow<LookupUiState> = mutableState
 
-    private var syncJob: Job? = null
     private var lookupJob: Job? = null
     private var scanJob: Job? = null
     private var scanUhfJob: Job? = null
@@ -122,7 +94,12 @@ class LookupViewModel(
     init {
         viewModelScope.launch {
             settingsStore.settingsFlow.collect { settings ->
-                mutableState.update { it.copy(currentSettings = settings) }
+                mutableState.update {
+                    it.copy(
+                        currentSettings = settings,
+                        lastScannedEpc = settings.lastScannedEpc,
+                    )
+                }
             }
         }
         viewModelScope.launch {
@@ -140,10 +117,6 @@ class LookupViewModel(
                     mutableState.update { it.copy(lastSyncState = state) }
                 }
         }
-    }
-
-    fun onEpcInputChange(value: String) {
-        mutableState.update { it.copy(epcInput = value, scanStatus = ScanQrStatus.Idle, uhfScanStatus = ScanUhfStatus.Idle) }
     }
 
     fun scanQr() {
@@ -166,8 +139,7 @@ class LookupViewModel(
                         }
                 result
                     .onSuccess { epc ->
-                        mutableState.update { it.copy(epcInput = epc, scanStatus = ScanQrStatus.Idle) }
-                        lookup()
+                        handleScanSuccess(epc, ScanSource.QR)
                     }
                     .onFailure { error ->
                         mutableState.update {
@@ -199,13 +171,7 @@ class LookupViewModel(
                     updateUhfError(readResult.exceptionOrNull())
                     return@launch
                 }
-                val normalized =
-                    runCatching { EpcNormalizer.normalize(readResult.getOrNull().orEmpty()) }.getOrElse { error ->
-                        updateUhfError(error)
-                        return@launch
-                    }
-                mutableState.update { it.copy(epcInput = normalized, uhfScanStatus = ScanUhfStatus.Idle) }
-                lookup()
+                handleScanSuccess(readResult.getOrNull().orEmpty(), ScanSource.RFID)
             }
         scanUhfJob = job
         job.invokeOnCompletion { error ->
@@ -214,101 +180,6 @@ class LookupViewModel(
             }
             scanUhfJob = null
         }
-    }
-
-    fun lookup() {
-        if (lookupJob != null) {
-            return
-        }
-        val settings = uiState.value.currentSettings
-        val validation =
-            MementoSettingsValidator.validate(
-                baseUrl = settings.mementoBaseUrl,
-                token = settings.mementoToken,
-                libraryId = settings.mementoLibraryId,
-            )
-        if (validation is MementoSettingsValidation.Error) {
-            mutableState.update { it.copy(lookupStatus = LookupStatus.Error(validation.message)) }
-            return
-        }
-        val epcRaw = uiState.value.epcInput
-        if (!EpcValidator.isValidEpcHex(epcRaw)) {
-            mutableState.update {
-                it.copy(lookupStatus = LookupStatus.Error("Invalid EPC. Use 8-64 hex characters."))
-            }
-            return
-        }
-        val normalized =
-            runCatching { EpcNormalizer.normalize(epcRaw) }.getOrElse {
-                mutableState.update {
-                    it.copy(lookupStatus = LookupStatus.Error("Invalid EPC. Use 8-64 hex characters."))
-                }
-                return
-            }
-        mutableState.update { it.copy(lookupStatus = LookupStatus.Loading) }
-        viewModelScope.launch {
-            settingsStore.update { settings -> settings.copy(lastLookupEpc = normalized) }
-        }
-        val job =
-            viewModelScope.launch {
-                val result = lookupUseCase.execute(normalized)
-                mutableState.update {
-                    when (result) {
-                        is LookupResult.Found -> it.copy(lookupStatus = LookupStatus.Found(result.item))
-                        is LookupResult.NotFound -> it.copy(lookupStatus = LookupStatus.NotFound)
-                        is LookupResult.Error -> it.copy(lookupStatus = LookupStatus.Error(result.message))
-                    }
-                }
-            }
-        lookupJob = job
-        job.invokeOnCompletion { lookupJob = null }
-    }
-
-    fun syncNow() {
-        if (syncJob != null) {
-            return
-        }
-        val settings = uiState.value.currentSettings
-        val validation =
-            MementoSettingsValidator.validate(
-                baseUrl = settings.mementoBaseUrl,
-                token = settings.mementoToken,
-                libraryId = settings.mementoLibraryId,
-            )
-        if (validation is MementoSettingsValidation.Error) {
-            mutableState.update { it.copy(syncStatus = SyncStatusState.Error(validation.message)) }
-            return
-        }
-        val libraryId = (validation as MementoSettingsValidation.Valid).config.libraryId
-        val job =
-            viewModelScope.launch {
-                syncUseCase.execute(libraryId).collect { event ->
-                    when (event) {
-                        is SyncProgressEvent.Progress -> {
-                            mutableState.update {
-                                it.copy(syncStatus = SyncStatusState.Running(event.progress))
-                            }
-                        }
-
-                        is SyncProgressEvent.Finished -> {
-                            mutableState.update {
-                                val status =
-                                    if (event.result.status == SyncStatus.ERROR) {
-                                        SyncStatusState.Error(event.result.errorMessage ?: "Sync failed.")
-                                    } else {
-                                        SyncStatusState.Completed(event.result)
-                                    }
-                                it.copy(
-                                    syncStatus = status,
-                                    lastSyncResult = event.result,
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        syncJob = job
-        job.invokeOnCompletion { syncJob = null }
     }
 
     override fun onCleared() {
@@ -361,6 +232,53 @@ class LookupViewModel(
         return true
     }
 
+    private fun handleScanSuccess(
+        rawEpc: String,
+        source: ScanSource,
+    ) {
+        lookupJob?.cancel()
+        lookupJob = null
+        val normalized =
+            runCatching { EpcNormalizer.normalize(rawEpc) }.getOrElse { error ->
+                val message = error.message ?: "Invalid EPC. Use 8-64 hex characters."
+                when (source) {
+                    ScanSource.QR ->
+                        mutableState.update {
+                            it.copy(scanStatus = ScanQrStatus.Error(message), uhfScanStatus = ScanUhfStatus.Idle)
+                        }
+                    ScanSource.RFID ->
+                        mutableState.update {
+                            it.copy(uhfScanStatus = ScanUhfStatus.Error(message), scanStatus = ScanQrStatus.Idle)
+                        }
+                }
+                return
+            }
+        mutableState.update {
+            it.copy(
+                lastScannedEpc = normalized,
+                lookupStatus = LookupStatus.Loading,
+                scanStatus = ScanQrStatus.Idle,
+                uhfScanStatus = ScanUhfStatus.Idle,
+            )
+        }
+        viewModelScope.launch {
+            settingsStore.update { settings -> settings.copy(lastScannedEpc = normalized) }
+        }
+        val job =
+            viewModelScope.launch {
+                val result = lookupUseCase.execute(normalized)
+                mutableState.update { state ->
+                    when (result) {
+                        is LookupResult.Found -> state.copy(lookupStatus = LookupStatus.Found(result.item))
+                        is LookupResult.NotFound -> state.copy(lookupStatus = LookupStatus.NotFound)
+                        is LookupResult.Error -> state.copy(lookupStatus = LookupStatus.Error(result.message))
+                    }
+                }
+            }
+        lookupJob = job
+        job.invokeOnCompletion { lookupJob = null }
+    }
+
     fun cancelUhfScan() {
         scanUhfJob?.cancel()
         scanUhfJob = null
@@ -370,4 +288,9 @@ class LookupViewModel(
     private companion object {
         const val UHF_READ_TIMEOUT_MS = 4_000L
     }
+}
+
+private enum class ScanSource {
+    RFID,
+    QR,
 }

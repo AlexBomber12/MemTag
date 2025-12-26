@@ -5,15 +5,17 @@ package com.alexbomber12.memtag.ui.screens.find
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.foundation.layout.width
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
@@ -29,11 +31,15 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
+import com.alexbomber12.memtag.app.HardwareAction
 import com.alexbomber12.memtag.ui.components.AppCard
 import com.alexbomber12.memtag.ui.components.PrimaryButton
 import com.alexbomber12.memtag.ui.components.SecondaryButton
 import com.alexbomber12.memtag.util.epc.EpcValidator
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.collect
 import java.util.Locale
 import kotlin.math.roundToInt
 
@@ -42,8 +48,9 @@ fun FindScreen(
     viewModel: FindViewModel,
     initialEpc: String = "",
     autoStart: Boolean = false,
-    showBackToQueue: Boolean = false,
-    onBackToQueue: () -> Unit = {},
+    showBackToBatch: Boolean = false,
+    onBackToBatch: () -> Unit = {},
+    hardwareActions: Flow<HardwareAction>,
 ) {
     val uiState by viewModel.uiState.collectAsState()
     var showDebug by rememberSaveable { mutableStateOf(false) }
@@ -63,6 +70,13 @@ fun FindScreen(
                 viewModel.applyExternalEpc(initialEpc, autoStart)
             }
         }
+        LaunchedEffect(hardwareActions) {
+            hardwareActions.collect { action ->
+                if (action == HardwareAction.Rfid) {
+                    viewModel.toggleFind()
+                }
+            }
+        }
         val isValid = EpcValidator.isValidEpcHex(uiState.epcInput)
         val showInputError = uiState.epcInput.isNotBlank() && !isValid
         val statusLabel =
@@ -73,12 +87,13 @@ fun FindScreen(
                 is FindStatus.Error -> "Error"
             }
 
-        AppCard(title = "Target EPC") {
+        AppCard(title = "RFID") {
             OutlinedTextField(
                 value = uiState.epcInput,
                 onValueChange = viewModel::onEpcInputChange,
                 modifier = Modifier.fillMaxWidth(),
-                label = { Text(text = "EPC (hex)") },
+                label = { Text(text = "RFID") },
+                placeholder = { Text(text = "RFID (hex)") },
                 singleLine = true,
                 enabled = !uiState.isRunning,
                 isError = showInputError,
@@ -92,12 +107,12 @@ fun FindScreen(
                     Text(text = message)
                 },
             )
-            if (uiState.lastLookupEpc.isNotBlank()) {
-                TextButton(onClick = viewModel::useLastLookupEpc, enabled = !uiState.isRunning) {
-                    Text(text = "Use last looked up EPC")
+            if (uiState.lastScannedEpc.isNotBlank()) {
+                TextButton(onClick = viewModel::useLastScannedEpc, enabled = !uiState.isRunning) {
+                    Text(text = "Use last scanned RFID")
                 }
                 Text(
-                    text = uiState.lastLookupEpc,
+                    text = uiState.lastScannedEpc,
                     style = MaterialTheme.typography.bodySmall,
                 )
             }
@@ -160,10 +175,10 @@ fun FindScreen(
                 checked = uiState.hapticEnabled,
                 onCheckedChange = viewModel::setHapticEnabled,
             )
-            if (showBackToQueue) {
+            if (showBackToBatch) {
                 SecondaryButton(
-                    text = "Back to Queue",
-                    onClick = onBackToQueue,
+                    text = "Back to Batch",
+                    onClick = onBackToBatch,
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
@@ -182,31 +197,60 @@ private fun ProximityMeter(
             animationSpec = tween(durationMillis = 200),
             label = "proximityProgress",
         )
-    val displayValue = (animatedProgress * 100f).roundToInt()
-    Box(
+    val displayValue = (animatedProgress * 100f).roundToInt().coerceIn(0, 100)
+    val barColor =
+        when {
+            displayValue < 35 -> MaterialTheme.colorScheme.error
+            displayValue < 70 -> MaterialTheme.colorScheme.tertiary
+            else -> MaterialTheme.colorScheme.primary
+        }
+    Row(
         modifier = modifier,
-        contentAlignment = Alignment.Center,
+        horizontalArrangement = Arrangement.SpaceEvenly,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(
+                text = displayValue.toString(),
+                style = MaterialTheme.typography.displaySmall,
+                color = barColor,
+            )
+            Text(
+                text = "Proximity",
+                style = MaterialTheme.typography.labelMedium,
+            )
+        }
+        EqualizerBar(
+            progress = animatedProgress,
+            color = barColor,
+        )
+    }
+}
+
+@Composable
+private fun EqualizerBar(
+    progress: Float,
+    color: androidx.compose.ui.graphics.Color,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        modifier =
+            modifier
+                .height(180.dp)
+                .width(32.dp)
+                .clip(MaterialTheme.shapes.small)
+                .background(MaterialTheme.colorScheme.surfaceVariant)
+                .padding(4.dp),
+        contentAlignment = Alignment.BottomCenter,
     ) {
         Box(
-            modifier = Modifier.size(180.dp),
-            contentAlignment = Alignment.Center,
-        ) {
-            CircularProgressIndicator(
-                progress = animatedProgress,
-                modifier = Modifier.fillMaxSize(),
-                strokeWidth = 10.dp,
-            )
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(
-                    text = displayValue.toString(),
-                    style = MaterialTheme.typography.displaySmall,
-                )
-                Text(
-                    text = "Proximity",
-                    style = MaterialTheme.typography.labelMedium,
-                )
-            }
-        }
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .fillMaxHeight(progress.coerceIn(0f, 1f))
+                    .clip(MaterialTheme.shapes.small)
+                    .background(color),
+        )
     }
 }
 

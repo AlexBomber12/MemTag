@@ -1,6 +1,8 @@
 package com.alexbomber12.memtag.ui.screens.repair
 
 import com.alexbomber12.memtag.data.repository.MementoRepository
+import com.alexbomber12.memtag.data.settings.AppSettings
+import com.alexbomber12.memtag.data.settings.SettingsStore
 import com.alexbomber12.memtag.db.ActionsLogDao
 import com.alexbomber12.memtag.db.ActionsLogEntity
 import com.alexbomber12.memtag.domain.InventoryItem
@@ -18,7 +20,9 @@ import com.alexbomber12.memtag.integrations.uhf.asException
 import com.alexbomber12.memtag.testing.MainDispatcherRule
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
@@ -167,12 +171,14 @@ class RepairViewModelTest {
         repository: MementoRepository,
         reader: FakeUhfReader,
         logs: ActionsLogDao,
+        settingsStore: SettingsStore = FakeSettingsStore(),
     ): RepairViewModel {
         return RepairViewModel(
             repository = repository,
             lookupByEpcUseCase = LookupByEpcUseCase(repository),
             uhfReader = reader,
             actionsLogDao = logs,
+            settingsStore = settingsStore,
             clock = { 1_700_000_000_000L },
         )
     }
@@ -250,4 +256,40 @@ private class FakeMementoRepository(
     }
 
     override fun observeSyncState(libraryId: String): Flow<SyncState?> = flowOf(null)
+
+    override suspend fun getSyncState(libraryId: String): SyncState? = null
+}
+
+private class FakeSettingsStore(
+    initial: AppSettings = AppSettings(),
+) : SettingsStore {
+    private val state = MutableStateFlow(initial)
+
+    override val settingsFlow: Flow<AppSettings> = state
+
+    override suspend fun update(transform: (AppSettings) -> AppSettings) {
+        state.update { transform(it).sanitized() }
+    }
+
+    override suspend fun setMemento(
+        baseUrl: String,
+        token: String,
+        libraryId: String,
+    ) {
+        state.update { it.copy(mementoBaseUrl = baseUrl, mementoToken = token, mementoLibraryId = libraryId).sanitized() }
+    }
+
+    override suspend fun setUhf(
+        region: String,
+        power: Int,
+    ) {
+        state.update { it.copy(uhfRegion = region, uhfPower = power).sanitized() }
+    }
+
+    override suspend fun setScan2d(
+        action: String,
+        extraKey: String,
+    ) {
+        state.update { it.copy(scan2dAction = action, scan2dExtraKey = extraKey).sanitized() }
+    }
 }

@@ -49,6 +49,7 @@ class DiagnosticsViewModel(
                 }
             }
         }
+        initialize()
     }
 
     fun initialize() {

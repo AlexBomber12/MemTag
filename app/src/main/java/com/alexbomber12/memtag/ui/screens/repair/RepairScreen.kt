@@ -17,6 +17,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -24,6 +25,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.alexbomber12.memtag.app.HardwareAction
 import com.alexbomber12.memtag.domain.InventoryItem
 import com.alexbomber12.memtag.domain.repair.RepairActionLog
 import com.alexbomber12.memtag.domain.repair.RepairActionResult
@@ -33,21 +35,34 @@ import com.alexbomber12.memtag.ui.components.ErrorState
 import com.alexbomber12.memtag.ui.components.LoadingState
 import com.alexbomber12.memtag.ui.components.PrimaryButton
 import com.alexbomber12.memtag.ui.components.SecondaryButton
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.collect
 import java.text.DateFormat
 import java.util.Date
 
 @Composable
-fun RepairScreen(viewModel: RepairViewModel) {
+fun RepairScreen(
+    viewModel: RepairViewModel,
+    hardwareActions: Flow<HardwareAction>,
+) {
     val state = viewModel.uiState.collectAsStateWithLifecycle().value
 
     if (state.showConfirmation) {
         ConfirmationDialog(state = state, onConfirm = viewModel::confirmRepair, onCancel = viewModel::cancelOperations)
     }
 
+    LaunchedEffect(hardwareActions) {
+        hardwareActions.collect { action ->
+            if (action == HardwareAction.Rfid) {
+                viewModel.readTag()
+            }
+        }
+    }
+
     val isBusy = state.isReading || state.isWriting || state.isVerifying
+    val expectedEpc = state.selectedItem?.epcNormalized ?: state.expectedEpc
     val canRepair =
-        state.selectedItem != null &&
-            state.comparison is RepairComparison.Mismatch &&
+        state.comparison is RepairComparison.Mismatch &&
             !isBusy
 
     LazyColumn(
@@ -81,6 +96,14 @@ fun RepairScreen(viewModel: RepairViewModel) {
                         modifier = Modifier.weight(1f),
                     )
                 }
+                OutlinedTextField(
+                    value = expectedEpc.orEmpty(),
+                    onValueChange = viewModel::onExpectedEpcChange,
+                    label = { Text(text = "Expected EPC") },
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = state.selectedItem == null,
+                    readOnly = state.selectedItem != null,
+                )
                 state.selectedItem?.let { item ->
                     SelectedItemCard(item = item)
                 } ?: run {
@@ -156,7 +179,10 @@ fun RepairScreen(viewModel: RepairViewModel) {
             AppCard(title = "Comparison") {
                 when (val comparison = state.comparison) {
                     RepairComparison.NotReady -> {
-                        Text(text = "Not ready. Select an item and read a tag.", style = MaterialTheme.typography.labelMedium)
+                        Text(
+                            text = "Not ready. Set an expected EPC and read a tag.",
+                            style = MaterialTheme.typography.labelMedium,
+                        )
                     }
                     is RepairComparison.Match -> {
                         Text(
@@ -186,7 +212,10 @@ fun RepairScreen(viewModel: RepairViewModel) {
                     modifier = Modifier.fillMaxWidth(),
                 )
                 if (state.selectedItem == null) {
-                    Text(text = "Select a target item to enable repair.", style = MaterialTheme.typography.labelSmall)
+                    Text(
+                        text = "Select a target item or expected EPC to enable repair.",
+                        style = MaterialTheme.typography.labelSmall,
+                    )
                 }
             }
         }
@@ -211,7 +240,7 @@ private fun ConfirmationDialog(
     onConfirm: () -> Unit,
     onCancel: () -> Unit,
 ) {
-    val expected = state.selectedItem?.epcNormalized.orEmpty()
+    val expected = state.selectedItem?.epcNormalized ?: state.expectedEpc.orEmpty()
     val current = state.currentEpc.orEmpty()
     AlertDialog(
         onDismissRequest = onCancel,

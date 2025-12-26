@@ -35,14 +35,21 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.alexbomber12.memtag.app.SyncStatusState
 import com.alexbomber12.memtag.data.AppDefaults
 import com.alexbomber12.memtag.data.settings.AppSettings
 import com.alexbomber12.memtag.ui.components.AppCard
+import com.alexbomber12.memtag.ui.components.ErrorState
+import com.alexbomber12.memtag.ui.components.LoadingState
 import com.alexbomber12.memtag.ui.components.PrimaryButton
+import java.text.DateFormat
+import java.util.Date
 
 @Composable
 fun SettingsScreen(viewModel: SettingsViewModel) {
     val settings by viewModel.settingsState.collectAsStateWithLifecycle()
+    val syncStatus by viewModel.syncStatusState.collectAsStateWithLifecycle()
+    val lastSyncState by viewModel.lastSyncState.collectAsStateWithLifecycle()
 
     var baseUrl by rememberSaveable { mutableStateOf(settings.mementoBaseUrl) }
     var token by rememberSaveable { mutableStateOf(settings.mementoToken) }
@@ -51,6 +58,8 @@ fun SettingsScreen(viewModel: SettingsViewModel) {
     var power by rememberSaveable { mutableStateOf(settings.uhfPower.toFloat()) }
     var scanAction by rememberSaveable { mutableStateOf(settings.scan2dAction) }
     var scanExtraKey by rememberSaveable { mutableStateOf(settings.scan2dExtraKey) }
+    var rfidKeyCodes by rememberSaveable { mutableStateOf(settings.rfidKeyCodes) }
+    var scanKeyCodes by rememberSaveable { mutableStateOf(settings.scanKeyCodes) }
     var tokenVisible by rememberSaveable { mutableStateOf(false) }
     var regionExpanded by rememberSaveable { mutableStateOf(false) }
 
@@ -62,6 +71,8 @@ fun SettingsScreen(viewModel: SettingsViewModel) {
         power = settings.uhfPower.toFloat()
         scanAction = settings.scan2dAction
         scanExtraKey = settings.scan2dExtraKey
+        rfidKeyCodes = settings.rfidKeyCodes
+        scanKeyCodes = settings.scanKeyCodes
     }
 
     Column(
@@ -176,6 +187,75 @@ fun SettingsScreen(viewModel: SettingsViewModel) {
             )
         }
 
+        AppCard(title = "Hardware keys") {
+            OutlinedTextField(
+                value = rfidKeyCodes,
+                onValueChange = { rfidKeyCodes = it },
+                label = { Text(text = "RFID key codes") },
+                supportingText = { Text(text = "Comma-separated key codes for RFID trigger.") },
+                modifier = Modifier.fillMaxWidth(),
+            )
+            OutlinedTextField(
+                value = scanKeyCodes,
+                onValueChange = { scanKeyCodes = it },
+                label = { Text(text = "Scan key codes") },
+                supportingText = { Text(text = "Comma-separated key codes for QR scan.") },
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+
+        AppCard(title = "Sync") {
+            val lastSync = lastSyncState
+            if (lastSync == null) {
+                Text(text = "Last sync: --")
+            } else {
+                Text(text = "Last sync: ${formatTimestamp(lastSync.lastSyncAt)}")
+                Text(text = "Last status: ${lastSync.lastSyncStatus.name.lowercase()}")
+                if (!lastSync.lastErrorMessage.isNullOrBlank()) {
+                    Text(text = "Last error: ${lastSync.lastErrorMessage}")
+                }
+            }
+
+            when (syncStatus) {
+                is SyncStatusState.Idle -> {
+                    Text(text = "Sync status: Idle")
+                }
+
+                is SyncStatusState.Running -> {
+                    val progress = (syncStatus as SyncStatusState.Running).progress
+                    LoadingState(
+                        message =
+                            "Syncing... fetched=${progress.fetchedCount} " +
+                                "stored=${progress.storedCount} " +
+                                "skipped=${progress.skippedCount}",
+                    )
+                }
+
+                is SyncStatusState.Completed -> {
+                    val result = (syncStatus as SyncStatusState.Completed).result
+                    Text(text = "Sync complete.")
+                    Text(
+                        text =
+                            "Fetched: ${result.fetchedCount} | " +
+                                "Stored: ${result.storedCount} | " +
+                                "Skipped: ${result.skippedCount}",
+                    )
+                }
+
+                is SyncStatusState.Error -> {
+                    val message = (syncStatus as SyncStatusState.Error).message
+                    ErrorState(message = message)
+                }
+            }
+
+            PrimaryButton(
+                text = "Sync Library",
+                onClick = viewModel::syncNow,
+                modifier = Modifier.fillMaxWidth(),
+                enabled = syncStatus !is SyncStatusState.Running,
+            )
+        }
+
         PrimaryButton(
             text = "Save settings",
             onClick = {
@@ -188,10 +268,17 @@ fun SettingsScreen(viewModel: SettingsViewModel) {
                         uhfPower = power.toInt(),
                         scan2dAction = scanAction,
                         scan2dExtraKey = scanExtraKey,
+                        rfidKeyCodes = rfidKeyCodes,
+                        scanKeyCodes = scanKeyCodes,
                     ),
                 )
             },
             modifier = Modifier.fillMaxWidth(),
         )
     }
+}
+
+private fun formatTimestamp(epochMs: Long): String {
+    val formatter = DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT)
+    return formatter.format(Date(epochMs))
 }
