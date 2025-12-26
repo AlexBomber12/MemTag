@@ -34,12 +34,15 @@ fun AppNavHost(
 ) {
     NavHost(
         navController = navController,
-        startDestination = AppDestinations.Lookup.route,
+        startDestination = AppDestinations.findRoute(),
         modifier = modifier,
     ) {
         composable(AppDestinations.Lookup.route) {
             val viewModel: LookupViewModel = viewModel(factory = viewModelFactory)
-            LookupScreen(viewModel = viewModel)
+            LookupScreen(
+                viewModel = viewModel,
+                hardwareActions = appContainer.hardwareKeyDispatcher.actions,
+            )
         }
         composable(
             route = AppDestinations.FIND_ROUTE_PATTERN,
@@ -53,7 +56,7 @@ fun AppNavHost(
                         type = NavType.BoolType
                         defaultValue = false
                     },
-                    navArgument("fromQueue") {
+                    navArgument("fromBatch") {
                         type = NavType.BoolType
                         defaultValue = false
                     },
@@ -62,20 +65,24 @@ fun AppNavHost(
             val viewModel: FindViewModel = viewModel(factory = viewModelFactory)
             val epc = backStackEntry.arguments?.getString("epc").orEmpty()
             val autoStart = backStackEntry.arguments?.getBoolean("autoStart") ?: false
-            val fromQueue = backStackEntry.arguments?.getBoolean("fromQueue") ?: false
+            val fromBatch = backStackEntry.arguments?.getBoolean("fromBatch") ?: false
             FindScreen(
                 viewModel = viewModel,
                 initialEpc = epc,
                 autoStart = autoStart,
-                showBackToQueue = fromQueue,
-                onBackToQueue = { navController.popBackStack() },
+                showBackToBatch = fromBatch,
+                onBackToBatch = { navController.popBackStack() },
+                hardwareActions = appContainer.hardwareKeyDispatcher.actions,
             )
         }
         composable(AppDestinations.RepairWrite.route) {
             val viewModel: RepairViewModel = viewModel(factory = viewModelFactory)
-            RepairScreen(viewModel = viewModel)
+            RepairScreen(
+                viewModel = viewModel,
+                hardwareActions = appContainer.hardwareKeyDispatcher.actions,
+            )
         }
-        composable(AppDestinations.Queue.route) {
+        composable(AppDestinations.Batch.route) {
             val viewModel: QueueViewModel = viewModel(factory = viewModelFactory)
             QueueScreen(
                 viewModel = viewModel,
@@ -84,7 +91,7 @@ fun AppNavHost(
                         AppDestinations.findRoute(
                             epc = epc,
                             autoStart = autoStart,
-                            fromQueue = true,
+                            fromBatch = true,
                         ),
                     )
                 },

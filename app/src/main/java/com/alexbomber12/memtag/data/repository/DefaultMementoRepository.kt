@@ -57,6 +57,15 @@ class DefaultMementoRepository(
         }
     }
 
+    override suspend fun getSyncState(libraryId: String): SyncState? {
+        if (libraryId.isBlank()) {
+            return null
+        }
+        return withContext(ioDispatcher) {
+            syncStateDao.get(libraryId)?.toDomain()
+        }
+    }
+
     override suspend fun syncLibrary(
         libraryId: String,
         onProgress: (SyncProgress) -> Unit,

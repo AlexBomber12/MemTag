@@ -18,19 +18,19 @@ data class AppDestination(
 )
 
 object AppDestinations {
-    val Lookup =
-        AppDestination(
-            route = "lookup",
-            label = "Lookup",
-            title = "Lookup",
-            icon = Icons.Filled.Search,
-        )
     val Find =
         AppDestination(
             route = "find",
             label = "Find",
             title = "Find",
             icon = Icons.Filled.MyLocation,
+        )
+    val Lookup =
+        AppDestination(
+            route = "lookup",
+            label = "Lookup",
+            title = "Lookup",
+            icon = Icons.Filled.Search,
         )
     val RepairWrite =
         AppDestination(
@@ -39,11 +39,11 @@ object AppDestinations {
             title = "Verify & Repair",
             icon = Icons.Filled.Build,
         )
-    val Queue =
+    val Batch =
         AppDestination(
-            route = "queue",
-            label = "Queue",
-            title = "Queue",
+            route = "batch",
+            label = "Batch",
+            title = "Batch",
             icon = Icons.AutoMirrored.Filled.List,
         )
     val Settings =
@@ -56,21 +56,21 @@ object AppDestinations {
     val Diagnostics =
         AppDestination(
             route = "diagnostics",
-            label = "Diagnostics",
+            label = "Diag",
             title = "Diagnostics",
             icon = Icons.Filled.Info,
         )
 
-    val topLevel = listOf(Lookup, Find, RepairWrite, Queue, Settings, Diagnostics)
+    val topLevel = listOf(Find, Lookup, RepairWrite, Batch, Settings, Diagnostics)
 
-    const val FIND_ROUTE_PATTERN = "find?epc={epc}&autoStart={autoStart}&fromQueue={fromQueue}"
+    const val FIND_ROUTE_PATTERN = "find?epc={epc}&autoStart={autoStart}&fromBatch={fromBatch}"
 
     fun findRoute(
         epc: String = "",
         autoStart: Boolean = false,
-        fromQueue: Boolean = false,
+        fromBatch: Boolean = false,
     ): String {
         val encoded = Uri.encode(epc)
-        return "find?epc=$encoded&autoStart=$autoStart&fromQueue=$fromQueue"
+        return "find?epc=$encoded&autoStart=$autoStart&fromBatch=$fromBatch"
     }
 }

@@ -36,7 +36,7 @@ sealed class FindStatus {
 
 data class FindUiState(
     val epcInput: String = "",
-    val lastLookupEpc: String = "",
+    val lastScannedEpc: String = "",
     val isRunning: Boolean = false,
     val status: FindStatus = FindStatus.Idle,
     val proximity: Int = 0,
@@ -72,12 +72,21 @@ class FindViewModel(
             settingsStore.settingsFlow.collect { settings ->
                 currentPower = settings.uhfPower
                 currentRegion = UhfRegion.fromSettings(settings.uhfRegion)
-                mutableState.update {
-                    it.copy(
-                        lastLookupEpc = settings.lastLookupEpc,
-                        soundEnabled = settings.findSoundEnabled,
-                        hapticEnabled = settings.findHapticEnabled,
-                    )
+                mutableState.update { state ->
+                    val updatedTarget =
+                        if (state.epcInput.isBlank() && settings.lastFindTargetEpc.isNotBlank()) {
+                            settings.lastFindTargetEpc
+                        } else {
+                            state.epcInput
+                        }
+                    val updated =
+                        state.copy(
+                            epcInput = updatedTarget,
+                            lastScannedEpc = settings.lastScannedEpc,
+                            soundEnabled = settings.findSoundEnabled,
+                            hapticEnabled = settings.findHapticEnabled,
+                        )
+                    updated.copy(status = computeStatus(updated))
                 }
             }
         }
@@ -88,6 +97,7 @@ class FindViewModel(
             val updated = state.copy(epcInput = value, lastErrorMessage = null)
             updated.copy(status = computeStatus(updated))
         }
+        persistFindTarget(value)
     }
 
     fun applyExternalEpc(
@@ -104,6 +114,7 @@ class FindViewModel(
                 val updated = state.copy(epcInput = normalized, lastErrorMessage = null)
                 updated.copy(status = computeStatus(updated))
             }
+            persistFindTarget(normalized)
         }
         if (autoStart && autoStartConsumedForEpc != normalized && !uiState.value.isRunning) {
             autoStartConsumedForEpc = normalized
@@ -111,8 +122,8 @@ class FindViewModel(
         }
     }
 
-    fun useLastLookupEpc() {
-        val last = uiState.value.lastLookupEpc
+    fun useLastScannedEpc() {
+        val last = uiState.value.lastScannedEpc
         if (last.isBlank()) {
             return
         }
@@ -120,6 +131,7 @@ class FindViewModel(
             val updated = state.copy(epcInput = last, lastErrorMessage = null)
             updated.copy(status = computeStatus(updated))
         }
+        persistFindTarget(last)
     }
 
     fun setSoundEnabled(enabled: Boolean) {
@@ -194,6 +206,14 @@ class FindViewModel(
         }
     }
 
+    fun toggleFind() {
+        if (uiState.value.isRunning) {
+            stopFind()
+        } else {
+            startFind()
+        }
+    }
+
     fun stopFind() {
         inventoryJob?.cancel()
         inventoryJob = null
@@ -257,7 +277,7 @@ class FindViewModel(
                         feedbackController.playSound()
                     }
                     if (state.hapticEnabled) {
-                        feedbackController.vibrate(HAPTIC_DURATION_MS)
+                        feedbackController.vibrate(hapticDurationMs(state.proximity))
                     }
                     delay(interval)
                 }
@@ -354,9 +374,23 @@ class FindViewModel(
         }
     }
 
+    private fun hapticDurationMs(proximity: Int): Long {
+        return when {
+            proximity < 40 -> 25L
+            proximity < 70 -> 45L
+            else -> 70L
+        }
+    }
+
+    private fun persistFindTarget(value: String) {
+        viewModelScope.launch {
+            val normalized = runCatching { EpcNormalizer.normalize(value) }.getOrNull().orEmpty()
+            settingsStore.update { it.copy(lastFindTargetEpc = normalized) }
+        }
+    }
+
     private companion object {
         const val UI_UPDATE_INTERVAL_MS = 100L
         const val FEEDBACK_IDLE_POLL_MS = 200L
-        const val HAPTIC_DURATION_MS = 40L
     }
 }

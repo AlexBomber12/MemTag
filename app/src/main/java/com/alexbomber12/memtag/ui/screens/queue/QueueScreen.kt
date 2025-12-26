@@ -80,8 +80,8 @@ fun QueueScreen(
     if (showClearConfirm) {
         AlertDialog(
             onDismissRequest = { showClearConfirm = false },
-            title = { Text(text = "Clear queue?") },
-            text = { Text(text = "This will remove all queue items and statuses.") },
+            title = { Text(text = "Clear batch?") },
+            text = { Text(text = "This will remove all batch items and statuses.") },
             confirmButton = {
                 TextButton(
                     onClick = {
@@ -110,7 +110,7 @@ fun QueueScreen(
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         item {
-            AppCard(title = "Queue Actions") {
+            AppCard(title = "Batch Actions") {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -124,7 +124,7 @@ fun QueueScreen(
                     SecondaryButton(
                         text = "Export CSV",
                         onClick = {
-                            val name = "queue_export_${exportFormatter.format(Date())}.csv"
+                            val name = "batch_export_${exportFormatter.format(Date())}.csv"
                             exportLauncher.launch(name)
                         },
                         modifier = Modifier.weight(1f),
@@ -132,7 +132,7 @@ fun QueueScreen(
                     )
                 }
                 SecondaryButton(
-                    text = "Clear queue",
+                    text = "Clear batch",
                     onClick = { showClearConfirm = true },
                     modifier = Modifier.fillMaxWidth(),
                     enabled = state.items.isNotEmpty(),
@@ -166,7 +166,7 @@ fun QueueScreen(
         item {
             AppCard(title = "Current Item") {
                 if (currentItem == null) {
-                    Text(text = "No items in the queue.")
+                    Text(text = "No items in the batch.")
                 } else {
                     Text(
                         text = currentItem.epcNormalized,
@@ -260,7 +260,7 @@ fun QueueScreen(
 
         item {
             Text(
-                text = "Queue Items",
+                text = "Batch Items",
                 style = MaterialTheme.typography.titleMedium,
             )
         }

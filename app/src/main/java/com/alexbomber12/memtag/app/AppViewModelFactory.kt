@@ -15,7 +15,11 @@ class AppViewModelFactory(
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         if (modelClass.isAssignableFrom(SettingsViewModel::class.java)) {
             @Suppress("UNCHECKED_CAST")
-            return SettingsViewModel(appContainer.settingsStore) as T
+            return SettingsViewModel(
+                settingsStore = appContainer.settingsStore,
+                repository = appContainer.mementoRepository,
+                syncCoordinator = appContainer.syncCoordinator,
+            ) as T
         }
         if (modelClass.isAssignableFrom(DiagnosticsViewModel::class.java)) {
             @Suppress("UNCHECKED_CAST")
@@ -28,7 +32,6 @@ class AppViewModelFactory(
             @Suppress("UNCHECKED_CAST")
             return LookupViewModel(
                 settingsStore = appContainer.settingsStore,
-                syncUseCase = appContainer.syncMementoLibraryUseCase,
                 lookupUseCase = appContainer.lookupByEpcUseCase,
                 repository = appContainer.mementoRepository,
                 scan2dScanner = appContainer.scan2dScanner,
@@ -50,6 +53,7 @@ class AppViewModelFactory(
                 lookupByEpcUseCase = appContainer.lookupByEpcUseCase,
                 uhfReader = appContainer.uhfReader,
                 actionsLogDao = appContainer.actionsLogDao,
+                settingsStore = appContainer.settingsStore,
             ) as T
         }
         if (modelClass.isAssignableFrom(QueueViewModel::class.java)) {

@@ -13,7 +13,10 @@ data class AppSettings(
     val scan2dExtraKey: String = AppDefaults.SCAN2D_EXTRA_KEY,
     val findSoundEnabled: Boolean = AppDefaults.FIND_SOUND_ENABLED,
     val findHapticEnabled: Boolean = AppDefaults.FIND_HAPTIC_ENABLED,
-    val lastLookupEpc: String = AppDefaults.LAST_LOOKUP_EPC,
+    val lastScannedEpc: String = AppDefaults.LAST_SCANNED_EPC,
+    val lastFindTargetEpc: String = AppDefaults.LAST_FIND_TARGET_EPC,
+    val rfidKeyCodes: String = AppDefaults.RFID_KEY_CODES,
+    val scanKeyCodes: String = AppDefaults.SCAN_KEY_CODES,
 ) {
     fun sanitized(): AppSettings {
         val normalizedRegion =
@@ -23,12 +26,27 @@ data class AppSettings(
                 AppDefaults.UHF_REGION
             }
         val normalizedPower = uhfPower.coerceIn(AppDefaults.UHF_POWER_MIN, AppDefaults.UHF_POWER_MAX)
-        val normalizedLastEpc = runCatching { EpcNormalizer.normalize(lastLookupEpc) }.getOrNull().orEmpty()
+        val normalizedLastScanned = runCatching { EpcNormalizer.normalize(lastScannedEpc) }.getOrNull().orEmpty()
+        val normalizedFindTarget = runCatching { EpcNormalizer.normalize(lastFindTargetEpc) }.getOrNull().orEmpty()
         return copy(
             mementoBaseUrl = AppDefaults.normalizeBaseUrl(mementoBaseUrl),
             uhfRegion = normalizedRegion,
             uhfPower = normalizedPower,
-            lastLookupEpc = normalizedLastEpc,
+            lastScannedEpc = normalizedLastScanned,
+            lastFindTargetEpc = normalizedFindTarget,
+            rfidKeyCodes = rfidKeyCodes.trim(),
+            scanKeyCodes = scanKeyCodes.trim(),
         )
     }
+
+    fun rfidKeyCodeSet(): Set<Int> = parseKeyCodes(rfidKeyCodes)
+
+    fun scanKeyCodeSet(): Set<Int> = parseKeyCodes(scanKeyCodes)
+}
+
+private fun parseKeyCodes(raw: String): Set<Int> {
+    return raw
+        .split(',')
+        .mapNotNull { token -> token.trim().takeIf { it.isNotEmpty() }?.toIntOrNull() }
+        .toSet()
 }
