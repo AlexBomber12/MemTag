@@ -17,6 +17,8 @@ import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeout
 import kotlin.random.Random
 
@@ -24,7 +26,7 @@ class FakeUhfReader(
     dispatcher: CoroutineDispatcher = Dispatchers.Default,
 ) : UhfReader {
     private val scope = CoroutineScope(SupervisorJob() + dispatcher)
-    private val lock = Any()
+    private val mutex = Mutex()
     private val inventoryFlow =
         MutableSharedFlow<TagReading>(
             extraBufferCapacity = 64,
@@ -41,8 +43,10 @@ class FakeUhfReader(
 
     private var initialized = false
     private var inventoryJob: Job? = null
+    private var inventoryRunning = false
     private var powerDbm = AppDefaults.UHF_POWER
     private var region = UhfRegion.fromSettings(AppDefaults.UHF_REGION)
+    private var frequencyMode = region.toFrequencyMode() ?: 0
     private var epcIndex = 0
     private var lastWrittenEpc: String? = null
 
@@ -55,30 +59,32 @@ class FakeUhfReader(
         private set
 
     override suspend fun initialize(): Result<Unit> =
-        synchronized(lock) {
+        mutex.withLock {
             if (initialized) {
-                return Result.success(Unit)
+                return@withLock Result.success(Unit)
             }
             initialized = true
             Result.success(Unit)
         }
 
-    override suspend fun close(): Result<Unit> {
-        stopInventory()
-        synchronized(lock) {
+    override suspend fun close(): Result<Unit> =
+        mutex.withLock {
+            stopInventoryLocked()
             initialized = false
+            Result.success(Unit)
         }
-        return Result.success(Unit)
-    }
 
-    override suspend fun readSingle(timeoutMs: Long): Result<String> {
-        synchronized(lock) {
-            if (!initialized) {
-                return Result.failure(UhfError.NotInitialized.asException())
-            }
-            if (inventoryJob != null) {
-                return Result.failure(UhfError.OperationInProgress.asException())
-            }
+    override suspend fun readSingle(timeoutMs: Long): Result<String> =
+        mutex.withLock {
+            readSingleLocked(timeoutMs)
+        }
+
+    private suspend fun readSingleLocked(timeoutMs: Long): Result<String> {
+        if (!initialized) {
+            return Result.failure(UhfError.NotInitialized.asException())
+        }
+        if (inventoryRunning) {
+            return Result.failure(UhfError.OperationInProgress.asException())
         }
         nextReadResult?.let { result ->
             nextReadResult = null
@@ -87,7 +93,7 @@ class FakeUhfReader(
         return try {
             withTimeout(timeoutMs) {
                 delay(150)
-                Result.success(nextEpc())
+                Result.success(nextEpcLocked())
             }
         } catch (_: TimeoutCancellationException) {
             Result.failure(UhfError.Timeout.asException())
@@ -97,121 +103,235 @@ class FakeUhfReader(
     override suspend fun writeEpc(
         epcHex: String,
         timeoutMs: Long,
-    ): Result<Unit> {
-        synchronized(lock) {
+    ): Result<Unit> =
+        mutex.withLock {
             if (!initialized) {
-                return Result.failure(UhfError.NotInitialized.asException())
+                return@withLock Result.failure(UhfError.NotInitialized.asException())
             }
-            if (inventoryJob != null) {
-                return Result.failure(UhfError.OperationInProgress.asException())
+            if (inventoryRunning) {
+                return@withLock Result.failure(UhfError.OperationInProgress.asException())
             }
+            writeCalls += 1
+            writeResultOverride?.let { return@withLock it }
+            lastWrittenEpc = epcHex
+            Result.success(Unit)
         }
-        writeCalls += 1
-        writeResultOverride?.let { return it }
-        lastWrittenEpc = epcHex
-        return Result.success(Unit)
-    }
 
     override suspend fun verifyEpc(
         expectedEpcHex: String,
         timeoutMs: Long,
-    ): Result<Boolean> {
-        synchronized(lock) {
+    ): Result<Boolean> =
+        mutex.withLock {
             if (!initialized) {
-                return Result.failure(UhfError.NotInitialized.asException())
+                return@withLock Result.failure(UhfError.NotInitialized.asException())
             }
-            if (inventoryJob != null) {
-                return Result.failure(UhfError.OperationInProgress.asException())
+            if (inventoryRunning) {
+                return@withLock Result.failure(UhfError.OperationInProgress.asException())
             }
-        }
-        verifyCalls += 1
-        verifyResultOverride?.let { return it }
-        val normalizedExpected =
-            runCatching { EpcNormalizer.normalize(expectedEpcHex) }.getOrElse {
-                return Result.failure(UhfError.VendorError("Invalid EPC").asException(cause = it))
-            }
-        val candidate = lastWrittenEpc
-        if (candidate != null) {
-            val normalizedCandidate =
-                runCatching { EpcNormalizer.normalize(candidate) }.getOrElse {
-                    return Result.failure(UhfError.VendorError("Invalid EPC").asException(cause = it))
+            verifyCalls += 1
+            verifyResultOverride?.let { return@withLock it }
+            val normalizedExpected =
+                runCatching { EpcNormalizer.normalize(expectedEpcHex) }.getOrElse {
+                    return@withLock Result.failure(UhfError.VendorError("Invalid EPC").asException(cause = it))
                 }
-            return Result.success(normalizedCandidate == normalizedExpected)
+            val candidate = lastWrittenEpc
+            if (candidate != null) {
+                val normalizedCandidate =
+                    runCatching { EpcNormalizer.normalize(candidate) }.getOrElse {
+                        return@withLock Result.failure(UhfError.VendorError("Invalid EPC").asException(cause = it))
+                    }
+                return@withLock Result.success(normalizedCandidate == normalizedExpected)
+            }
+            readSingleLocked(timeoutMs).mapCatching { read ->
+                val normalizedRead = EpcNormalizer.normalize(read)
+                normalizedRead == normalizedExpected
+            }
         }
-        return readSingle(timeoutMs).mapCatching { read ->
-            val normalizedRead = EpcNormalizer.normalize(read)
-            normalizedRead == normalizedExpected
-        }
-    }
 
-    override fun startInventory(filterEpcHex: String?): Flow<TagReading> {
-        synchronized(lock) {
+    override suspend fun startInventory(filterEpcHex: String?): Flow<TagReading> =
+        mutex.withLock {
             if (!initialized) {
-                return flow { throw UhfError.NotInitialized.asException() }
+                return@withLock flow { throw UhfError.NotInitialized.asException() }
+            }
+            if (inventoryRunning) {
+                stopInventoryLocked()
             }
             if (inventoryJob == null) {
-                inventoryJob =
+                inventoryRunning = true
+                val job =
                     scope.launch {
-                        while (isActive) {
-                            val epc = nextEpc()
-                            val rssi = random.nextInt(-70, -35)
-                            inventoryFlow.emit(
-                                TagReading(
-                                    epcHex = epc,
-                                    rssi = rssi,
-                                    timestampMs = System.currentTimeMillis(),
-                                ),
-                            )
-                            delay(150)
+                        val self = coroutineContext[Job]
+                        try {
+                            while (isActive) {
+                                val reading =
+                                    mutex.withLock {
+                                        TagReading(
+                                            epcHex = nextEpcLocked(),
+                                            rssi = random.nextInt(-70, -35),
+                                            timestampMs = System.currentTimeMillis(),
+                                        )
+                                    }
+                                inventoryFlow.emit(reading)
+                                delay(150)
+                            }
+                        } finally {
+                            mutex.withLock {
+                                if (inventoryJob == self) {
+                                    inventoryJob = null
+                                    inventoryRunning = false
+                                }
+                            }
                         }
                     }
+                inventoryJob = job
+            }
+            val baseFlow = inventoryFlow.asSharedFlow()
+            if (filterEpcHex.isNullOrBlank()) {
+                baseFlow
+            } else {
+                baseFlow.filter { it.epcHex.equals(filterEpcHex, ignoreCase = true) }
             }
         }
-        val baseFlow = inventoryFlow.asSharedFlow()
-        return if (filterEpcHex.isNullOrBlank()) {
-            baseFlow
-        } else {
-            baseFlow.filter { it.epcHex.equals(filterEpcHex, ignoreCase = true) }
-        }
-    }
 
-    override suspend fun stopInventory(): Result<Unit> {
-        val jobToCancel =
-            synchronized(lock) {
-                val job = inventoryJob
-                inventoryJob = null
-                job
-            }
+    override suspend fun stopInventory(): Result<Unit> =
+        mutex.withLock {
+            stopInventoryLocked()
+        }
+
+    private suspend fun stopInventoryLocked(): Result<Unit> {
+        val jobToCancel = inventoryJob
+        inventoryJob = null
         jobToCancel?.cancel()
+        inventoryRunning = false
         return Result.success(Unit)
     }
 
     override suspend fun setPower(dbm: Int): Result<Unit> =
-        synchronized(lock) {
+        mutex.withLock {
+            if (inventoryRunning) {
+                return@withLock Result.failure(UhfError.OperationInProgress.asException())
+            }
             powerDbm = dbm.coerceIn(AppDefaults.UHF_POWER_MIN, AppDefaults.UHF_POWER_MAX)
             Result.success(Unit)
         }
 
     override suspend fun getPower(): Result<Int> =
-        synchronized(lock) {
+        mutex.withLock {
+            if (inventoryRunning) {
+                return@withLock Result.failure(UhfError.OperationInProgress.asException())
+            }
             Result.success(powerDbm)
         }
 
     override suspend fun setRegion(region: UhfRegion): Result<Unit> =
-        synchronized(lock) {
+        mutex.withLock {
+            if (inventoryRunning) {
+                return@withLock Result.failure(UhfError.OperationInProgress.asException())
+            }
             this.region = region
+            this.frequencyMode = region.toFrequencyMode() ?: frequencyMode
             Result.success(Unit)
         }
 
     override suspend fun getRegion(): Result<UhfRegion> =
-        synchronized(lock) {
+        mutex.withLock {
+            if (inventoryRunning) {
+                return@withLock Result.failure(UhfError.OperationInProgress.asException())
+            }
             Result.success(region)
         }
 
-    private fun nextEpc(): String =
-        synchronized(lock) {
-            val epc = epcPool[epcIndex % epcPool.size]
-            epcIndex += 1
-            epc
+    override suspend fun getFrequencyMode(): Result<Int> =
+        mutex.withLock {
+            if (inventoryRunning) {
+                return@withLock Result.failure(UhfError.OperationInProgress.asException())
+            }
+            Result.success(frequencyMode)
         }
+
+    override suspend fun applyUhfConfig(reason: String): Result<UhfApplyResult> =
+        mutex.withLock {
+            if (inventoryRunning) {
+                return@withLock Result.failure(UhfError.OperationInProgress.asException())
+            }
+            val result =
+                UhfApplyResult(
+                    reason = reason,
+                    beforeMode = frequencyMode,
+                    beforePower = powerDbm,
+                    desiredMode = frequencyMode,
+                    desiredPower = powerDbm,
+                    setModeOk = true,
+                    setPowerOk = true,
+                    afterMode = frequencyMode,
+                    afterPower = powerDbm,
+                    modeApplied = true,
+                    powerApplied = true,
+                )
+            Result.success(result)
+        }
+
+    override suspend fun applyUhfConfigIfNeeded(reason: String): Result<UhfApplyResult?> =
+        mutex.withLock {
+            if (inventoryRunning) {
+                return@withLock Result.failure(UhfError.OperationInProgress.asException())
+            }
+            Result.success(null)
+        }
+
+    override suspend fun runMatrixProbe(): List<MatrixProbeResult> =
+        mutex.withLock {
+            listOf(
+                MatrixProbeResult(
+                    name = "A: UID inventory",
+                    startOk = true,
+                    stopOk = true,
+                    reads = 10,
+                    nonNullReads = 10,
+                    firstRaw0 = "E2000017221101441890ABCD",
+                    firstRaw1 = null,
+                    firstRssi = null,
+                    note = null,
+                ),
+                MatrixProbeResult(
+                    name = "B: TAG inventory (cnt=0)",
+                    startOk = true,
+                    stopOk = true,
+                    reads = 10,
+                    nonNullReads = 10,
+                    firstRaw0 = "E2000017221101441890ABCE",
+                    firstRaw1 = null,
+                    firstRssi = "-48",
+                    note = null,
+                ),
+                MatrixProbeResult(
+                    name = "C: TAG inventory (cnt=6)",
+                    startOk = true,
+                    stopOk = true,
+                    reads = 10,
+                    nonNullReads = 10,
+                    firstRaw0 = "E2000017221101441890ABCF",
+                    firstRaw1 = "112233445566",
+                    firstRssi = "-46",
+                    note = null,
+                ),
+                MatrixProbeResult(
+                    name = "D: TAG inventory (cnt=0 + protocol/rflink)",
+                    startOk = true,
+                    stopOk = true,
+                    reads = 10,
+                    nonNullReads = 10,
+                    firstRaw0 = "E2000017221101441890ABD0",
+                    firstRaw1 = null,
+                    firstRssi = "-44",
+                    note = "protocol=0 rflink=0",
+                ),
+            )
+        }
+
+    private fun nextEpcLocked(): String {
+        val epc = epcPool[epcIndex % epcPool.size]
+        epcIndex += 1
+        return epc
+    }
 }

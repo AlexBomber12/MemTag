@@ -65,11 +65,19 @@ fun DiagnosticsScreen(viewModel: DiagnosticsViewModel) {
         onDispose { viewModel.stopInventory() }
     }
 
-    val canInitialize = !state.isInitialized && !state.isInitializing
-    val canClose = state.isInitialized && !state.isInitializing
-    val canReadSingle = state.isInitialized && !state.isReadingSingle && !state.isInventoryRunning
-    val canStartInventory = state.isInitialized && !state.isInventoryRunning
-    val canStopInventory = state.isInventoryRunning
+    val matrixProbeBusy = state.isMatrixProbeRunning
+    val canInitialize = !state.isInitialized && !state.isInitializing && !matrixProbeBusy
+    val canClose = state.isInitialized && !state.isInitializing && !matrixProbeBusy
+    val canReadSingle =
+        state.isInitialized &&
+            !state.isReadingSingle &&
+            !state.isInventoryRunning &&
+            !matrixProbeBusy
+    val canStartInventory = state.isInitialized && !state.isInventoryRunning && !matrixProbeBusy
+    val canStopInventory = state.isInventoryRunning && !matrixProbeBusy
+    val canReadConfig = state.isInitialized && !state.isReadingConfig && !matrixProbeBusy
+    val canApplyConfig = state.isInitialized && !state.isApplyingConfig && !matrixProbeBusy
+    val canRunMatrixProbe = state.isInitialized && !matrixProbeBusy
 
     LazyColumn(
         modifier =
@@ -104,6 +112,83 @@ fun DiagnosticsScreen(viewModel: DiagnosticsViewModel) {
             }
         }
 
+        item {
+            AppCard(title = "Inventory diagnostics") {
+                val startOk =
+                    when (state.startInventoryOk) {
+                        true -> "Yes"
+                        false -> "No"
+                        null -> "--"
+                    }
+                val stopOk =
+                    when (state.stopInventoryOk) {
+                        true -> "Yes"
+                        false -> "No"
+                        null -> "--"
+                    }
+                Text(text = "Start inventory ok: $startOk")
+                Text(text = "Stop inventory ok: $stopOk")
+                Text(text = "Buffer reads: ${state.bufferReadsCount}")
+                Text(text = "Tags seen: ${state.tagsSeenCount}")
+                Text(text = "Last raw0: ${state.lastRaw0 ?: "--"}")
+                Text(text = "Last raw1: ${state.lastRaw1 ?: "--"}")
+                Text(text = "Last RSSI: ${state.lastRssi?.toString() ?: "--"}")
+            }
+        }
+
+        item {
+            AppCard(title = "Matrix probe") {
+                PrimaryButton(
+                    text = "Run Matrix Probe (4 x 1s)",
+                    onClick = viewModel::runMatrixProbe,
+                    enabled = canRunMatrixProbe,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                if (state.isMatrixProbeRunning) {
+                    Row(
+                        modifier = Modifier.padding(top = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        CircularProgressIndicator(modifier = Modifier.padding(end = 4.dp))
+                        Text(text = "Running ${state.matrixProbeCurrent ?: "matrix probe"}")
+                    }
+                }
+                if (state.matrixProbeResults.isEmpty() && !state.isMatrixProbeRunning) {
+                    Text(text = "No matrix probe results yet.")
+                } else {
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        state.matrixProbeResults.forEach { result ->
+                            val startOk = if (result.startOk) "Yes" else "No"
+                            val stopOk = if (result.stopOk) "Yes" else "No"
+                            val first0 = trimProbeValue(result.firstRaw0)
+                            val first1 = trimProbeValue(result.firstRaw1)
+                            val rssi = result.firstRssi ?: "--"
+                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text(text = result.name, style = MaterialTheme.typography.labelMedium)
+                                Text(
+                                    text =
+                                        "Start: $startOk | Stop: $stopOk | " +
+                                            "Reads: ${result.reads} | NonNull: ${result.nonNullReads}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                )
+                                Text(
+                                    text = "First0: $first0 | First1: $first1 | RSSI: $rssi",
+                                    style =
+                                        MaterialTheme.typography.bodyMedium.copy(
+                                            fontFamily = FontFamily.Monospace,
+                                        ),
+                                )
+                                result.note?.let { note ->
+                                    Text(text = "Note: $note", style = MaterialTheme.typography.bodySmall)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         if (state.lastErrorMessage != null) {
             item {
                 ErrorState(
@@ -122,6 +207,7 @@ fun DiagnosticsScreen(viewModel: DiagnosticsViewModel) {
                         value = state.currentRegion.settingsValue,
                         onValueChange = {},
                         readOnly = true,
+                        enabled = !matrixProbeBusy,
                         label = { Text(text = "Region") },
                         trailingIcon = {
                             val icon =
@@ -130,14 +216,17 @@ fun DiagnosticsScreen(viewModel: DiagnosticsViewModel) {
                                 } else {
                                     Icons.Filled.KeyboardArrowDown
                                 }
-                            IconButton(onClick = { regionExpanded = !regionExpanded }) {
+                            IconButton(
+                                onClick = { regionExpanded = !regionExpanded },
+                                enabled = !matrixProbeBusy,
+                            ) {
                                 Icon(imageVector = icon, contentDescription = null)
                             }
                         },
                         modifier =
                             Modifier
                                 .fillMaxWidth()
-                                .clickable { regionExpanded = true },
+                                .clickable(enabled = !matrixProbeBusy) { regionExpanded = true },
                     )
                     DropdownMenu(
                         expanded = regionExpanded,
@@ -164,8 +253,79 @@ fun DiagnosticsScreen(viewModel: DiagnosticsViewModel) {
                     onValueChangeFinished = { viewModel.setPower(pendingPower.toInt()) },
                     valueRange = AppDefaults.UHF_POWER_MIN.toFloat()..AppDefaults.UHF_POWER_MAX.toFloat(),
                     steps = (AppDefaults.UHF_POWER_MAX - AppDefaults.UHF_POWER_MIN) - 1,
+                    enabled = !matrixProbeBusy,
                     modifier = Modifier.fillMaxWidth(),
                 )
+            }
+        }
+
+        item {
+            AppCard(title = "UHF Config") {
+                Text(
+                    text =
+                        "Desired: mode=${state.desiredConfig.frequencyMode} " +
+                            "power=${state.desiredConfig.power}",
+                )
+                val current = state.currentConfig
+                Text(
+                    text =
+                        "Current: mode=${current?.frequencyMode?.toString() ?: "--"} " +
+                            "power=${current?.power?.toString() ?: "--"}",
+                )
+                val applyResult = state.lastApplyResult
+                if (applyResult == null) {
+                    Text(text = "Last apply: --")
+                } else {
+                    Text(
+                        text =
+                            "Last apply: setModeOk=${applyResult.setModeOk} " +
+                                "setPowerOk=${applyResult.setPowerOk}",
+                    )
+                    Text(
+                        text =
+                            "After: mode=${applyResult.afterMode} " +
+                                "power=${applyResult.afterPower}",
+                    )
+                    Text(
+                        text =
+                            "Verified: modeApplied=${applyResult.modeApplied} " +
+                                "powerApplied=${applyResult.powerApplied}",
+                    )
+                }
+                state.configStatusMessage?.let { message ->
+                    Text(
+                        text = message,
+                        style = MaterialTheme.typography.labelMedium,
+                    )
+                }
+                if (state.isApplyingConfig || state.isReadingConfig) {
+                    Text(
+                        text =
+                            if (state.isApplyingConfig) {
+                                "Applying config..."
+                            } else {
+                                "Reading config..."
+                            },
+                        style = MaterialTheme.typography.labelMedium,
+                    )
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    PrimaryButton(
+                        text = "Read current config",
+                        onClick = viewModel::readCurrentConfig,
+                        enabled = canReadConfig,
+                        modifier = Modifier.weight(1f),
+                    )
+                    SecondaryButton(
+                        text = "Apply desired config",
+                        onClick = viewModel::applyDesiredConfig,
+                        enabled = canApplyConfig,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
             }
         }
 
@@ -193,7 +353,7 @@ fun DiagnosticsScreen(viewModel: DiagnosticsViewModel) {
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     PrimaryButton(
-                        text = "Read single",
+                        text = "Scan RFID",
                         onClick = { viewModel.readSingle() },
                         enabled = canReadSingle,
                         modifier = Modifier.weight(1f),
@@ -252,4 +412,14 @@ fun DiagnosticsScreen(viewModel: DiagnosticsViewModel) {
             }
         }
     }
+}
+
+private fun trimProbeValue(
+    value: String?,
+    maxChars: Int = 24,
+): String {
+    if (value.isNullOrBlank()) {
+        return "--"
+    }
+    return if (value.length <= maxChars) value else value.take(maxChars)
 }
