@@ -15,8 +15,10 @@ import com.alexbomber12.memtag.integrations.scan2d.Scan2dScanner
 import com.alexbomber12.memtag.integrations.scan2d.asException
 import com.alexbomber12.memtag.integrations.uhf.UhfError
 import com.alexbomber12.memtag.integrations.uhf.UhfException
+import com.alexbomber12.memtag.integrations.uhf.UhfLogger
 import com.alexbomber12.memtag.integrations.uhf.UhfReader
-import com.alexbomber12.memtag.integrations.uhf.UhfRegion
+import com.alexbomber12.memtag.integrations.uhf.asException
+import com.alexbomber12.memtag.integrations.uhf.toErrorMessage
 import com.alexbomber12.memtag.util.epc.EpcNormalizer
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -158,20 +160,35 @@ class LookupViewModel(
         mutableState.update { it.copy(uhfScanStatus = ScanUhfStatus.Scanning, scanStatus = ScanQrStatus.Idle) }
         val job =
             viewModelScope.launch {
+                val startMs = System.currentTimeMillis()
+                UhfLogger.i("ScanRFID start (screen=lookup source=button usedMethod=single)")
+                uhfReader.stopInventory()
                 val initResult = uhfReader.initialize()
                 if (initResult.isFailure) {
                     updateUhfError(initResult.exceptionOrNull())
+                    UhfLogger.i("ScanRFID end (screen=lookup result=init_failed durationMs=${System.currentTimeMillis() - startMs})")
                     return@launch
                 }
-                if (!applyUhfSettings()) {
+                val applyResult = uhfReader.applyDesiredConfigBestEffort("lookup-scan")
+                if (applyResult.isFailure) {
+                    updateUhfError(applyResult.exceptionOrNull())
+                    UhfLogger.i("ScanRFID end (screen=lookup result=config_error durationMs=${System.currentTimeMillis() - startMs})")
+                    return@launch
+                }
+                val applied = applyResult.getOrNull()
+                if (applied != null && !applied.success) {
+                    updateUhfError(UhfError.VendorError(applied.toErrorMessage()).asException())
+                    UhfLogger.i("ScanRFID end (screen=lookup result=config_failed durationMs=${System.currentTimeMillis() - startMs})")
                     return@launch
                 }
                 val readResult = uhfReader.readSingle(UHF_READ_TIMEOUT_MS)
                 if (readResult.isFailure) {
                     updateUhfError(readResult.exceptionOrNull())
+                    UhfLogger.i("ScanRFID end (screen=lookup result=read_failed durationMs=${System.currentTimeMillis() - startMs})")
                     return@launch
                 }
                 handleScanSuccess(readResult.getOrNull().orEmpty(), ScanSource.RFID)
+                UhfLogger.i("ScanRFID end (screen=lookup result=ok durationMs=${System.currentTimeMillis() - startMs})")
             }
         scanUhfJob = job
         job.invokeOnCompletion { error ->
@@ -214,22 +231,6 @@ class LookupViewModel(
             is UhfError.VendorError -> uhfError.message
             null -> error?.message ?: "Unknown UHF error."
         }
-    }
-
-    private suspend fun applyUhfSettings(): Boolean {
-        val settings = uiState.value.currentSettings
-        val powerResult = uhfReader.setPower(settings.uhfPower)
-        if (powerResult.isFailure) {
-            updateUhfError(powerResult.exceptionOrNull())
-            return false
-        }
-        val region = UhfRegion.fromSettings(settings.uhfRegion)
-        val regionResult = uhfReader.setRegion(region)
-        if (regionResult.isFailure) {
-            updateUhfError(regionResult.exceptionOrNull())
-            return false
-        }
-        return true
     }
 
     private fun handleScanSuccess(

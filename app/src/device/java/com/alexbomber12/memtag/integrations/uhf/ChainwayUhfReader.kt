@@ -21,7 +21,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.filter
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
@@ -50,10 +49,15 @@ class ChainwayUhfReader(
     private var initialized = false
     private var initInProgress = false
     private var inventoryJob: Job? = null
+    @Volatile
     private var inventoryRunning = false
+    @Volatile
+    private var scanRunning = false
     private var inventoryLogCount = 0
     private var protocolSupport: ProtocolSupport = ProtocolSupport.Unknown
     private var lastProtocolAttempt: ProtocolAttempt? = null
+    private val busyLogLock = Any()
+    private val busyLogTimestamps = mutableMapOf<String, Long>()
 
     override suspend fun initialize(): Result<Unit> =
         mutex.withLock {
@@ -80,7 +84,7 @@ class ChainwayUhfReader(
                     if (initR2000Result?.getOrNull() == true) {
                         initialized = true
                         Log.i(LOG_TAG, "init success (path=init_R2000)")
-                        val applyResult = applyUhfConfigLocked("post-init")
+                        val applyResult = applyDesiredConfigBestEffortLocked("post-init")
                         logApplyResult(applyResult.getOrNull())
                         return@withContext Result.success(Unit)
                     }
@@ -88,7 +92,7 @@ class ChainwayUhfReader(
                     if (initContextResult.getOrNull() == true) {
                         initialized = true
                         Log.i(LOG_TAG, "init success (path=context)")
-                        val applyResult = applyUhfConfigLocked("post-init")
+                        val applyResult = applyDesiredConfigBestEffortLocked("post-init")
                         logApplyResult(applyResult.getOrNull())
                         return@withContext Result.success(Unit)
                     }
@@ -98,7 +102,7 @@ class ChainwayUhfReader(
                     if (fallbackR2000Result?.getOrNull() == true) {
                         initialized = true
                         Log.i(LOG_TAG, "init success (path=fallback-init_R2000)")
-                        val applyResult = applyUhfConfigLocked("post-init")
+                        val applyResult = applyDesiredConfigBestEffortLocked("post-init")
                         logApplyResult(applyResult.getOrNull())
                         return@withContext Result.success(Unit)
                     }
@@ -107,7 +111,7 @@ class ChainwayUhfReader(
                     if (fallbackContextResult?.getOrNull() == true) {
                         initialized = true
                         Log.i(LOG_TAG, "init success (path=fallback-context)")
-                        val applyResult = applyUhfConfigLocked("post-init")
+                        val applyResult = applyDesiredConfigBestEffortLocked("post-init")
                         logApplyResult(applyResult.getOrNull())
                         return@withContext Result.success(Unit)
                     }
@@ -176,8 +180,12 @@ class ChainwayUhfReader(
         if (inventoryRunning) {
             return Result.failure(UhfError.OperationInProgress.asException())
         }
+        if (scanRunning) {
+            return Result.failure(UhfError.OperationInProgress.asException())
+        }
         val instance = reader ?: return Result.failure(UhfError.HardwareUnavailable.asException())
         Log.i(LOG_TAG, "singleScan start (timeoutMs=$timeoutMs)")
+        scanRunning = true
         return try {
             val parsed =
                 withTimeout(timeoutMs) {
@@ -211,6 +219,8 @@ class ChainwayUhfReader(
                 UhfError.VendorError(error.message ?: "UHF read error")
                     .asException(cause = error),
             )
+        } finally {
+            scanRunning = false
         }
     }
 
@@ -222,8 +232,8 @@ class ChainwayUhfReader(
             if (!initialized) {
                 return@withLock Result.failure(UhfError.NotInitialized.asException())
             }
-            if (inventoryRunning) {
-                return@withLock Result.failure(UhfError.OperationInProgress.asException())
+            if (isUhfBusy()) {
+                return@withLock configBusyResult(op = "setPower", reason = "manual")
             }
             val instance = reader ?: return@withLock Result.failure(UhfError.HardwareUnavailable.asException())
             val normalized =
@@ -492,8 +502,8 @@ class ChainwayUhfReader(
             if (!initialized) {
                 return@withLock Result.failure(UhfError.NotInitialized.asException())
             }
-            if (inventoryRunning) {
-                return@withLock Result.failure(UhfError.OperationInProgress.asException())
+            if (isUhfBusy()) {
+                return@withLock configBusyResult(op = "setRegion", reason = "manual")
             }
             val instance = reader ?: return@withLock Result.failure(UhfError.HardwareUnavailable.asException())
             withContext(Dispatchers.IO) {
@@ -522,20 +532,23 @@ class ChainwayUhfReader(
             }
         }
 
-    override suspend fun getPower(): Result<Int> =
-        mutex.withLock {
+    override suspend fun getPower(reason: String): Result<Int> {
+        if (isUhfBusy()) {
+            return configGetterBusy(op = "getPower", reason = reason)
+        }
+        return mutex.withLock {
             if (!initialized) {
                 return@withLock Result.failure(UhfError.NotInitialized.asException())
             }
-            if (inventoryRunning) {
-                return@withLock Result.failure(UhfError.OperationInProgress.asException())
+            if (isUhfBusy()) {
+                return@withLock configGetterBusy(op = "getPower", reason = reason)
             }
             val instance = reader ?: return@withLock Result.failure(UhfError.HardwareUnavailable.asException())
             withContext(Dispatchers.IO) {
                 uhfMutex.withLock { runCatching { instance.getPower() } }
                     .fold(
                         onSuccess = {
-                            Log.i(LOG_TAG, "getPower -> $it")
+                            Log.i(LOG_TAG, "getPower(reason=$reason) -> $it")
                             Result.success(it)
                         },
                         onFailure = { error ->
@@ -547,21 +560,25 @@ class ChainwayUhfReader(
                     )
             }
         }
+    }
 
-    override suspend fun getFrequencyMode(): Result<Int> =
-        mutex.withLock {
+    override suspend fun getFrequencyMode(reason: String): Result<Int> {
+        if (isUhfBusy()) {
+            return configGetterBusy(op = "getFrequencyMode", reason = reason)
+        }
+        return mutex.withLock {
             if (!initialized) {
                 return@withLock Result.failure(UhfError.NotInitialized.asException())
             }
-            if (inventoryRunning) {
-                return@withLock Result.failure(UhfError.OperationInProgress.asException())
+            if (isUhfBusy()) {
+                return@withLock configGetterBusy(op = "getFrequencyMode", reason = reason)
             }
             val instance = reader ?: return@withLock Result.failure(UhfError.HardwareUnavailable.asException())
             withContext(Dispatchers.IO) {
                 uhfMutex.withLock { runCatching { instance.getFrequencyMode() } }
                     .fold(
                         onSuccess = {
-                            Log.i(LOG_TAG, "getFrequencyMode -> $it")
+                            Log.i(LOG_TAG, "getFrequencyMode(reason=$reason) -> $it")
                             Result.success(it)
                         },
                         onFailure = { error ->
@@ -573,17 +590,21 @@ class ChainwayUhfReader(
                     )
             }
         }
+    }
 
-    override suspend fun getProtocol(): Result<Int> =
-        mutex.withLock {
+    override suspend fun getProtocol(reason: String): Result<Int> {
+        if (isUhfBusy()) {
+            return configGetterBusy(op = "getProtocol", reason = reason)
+        }
+        return mutex.withLock {
             if (!initialized) {
                 return@withLock Result.failure(UhfError.NotInitialized.asException())
             }
-            if (inventoryRunning) {
-                return@withLock Result.failure(UhfError.OperationInProgress.asException())
+            if (isUhfBusy()) {
+                return@withLock configGetterBusy(op = "getProtocol", reason = reason)
             }
             if (protocolSupport == ProtocolSupport.Unsupported) {
-                Log.i(LOG_TAG, "getProtocol skipped (unsupported)")
+                Log.i(LOG_TAG, "getProtocol skipped (unsupported reason=$reason)")
                 return@withLock Result.success(UHF_PROTOCOL_UNSUPPORTED)
             }
             val instance = reader ?: return@withLock Result.failure(UhfError.HardwareUnavailable.asException())
@@ -592,7 +613,7 @@ class ChainwayUhfReader(
                     .fold(
                         onSuccess = {
                             updateProtocolSupportFromGet(it)
-                            Log.i(LOG_TAG, "getProtocol -> $it")
+                            Log.i(LOG_TAG, "getProtocol(reason=$reason) -> $it")
                             Result.success(it)
                         },
                         onFailure = { error ->
@@ -604,21 +625,25 @@ class ChainwayUhfReader(
                     )
             }
         }
+    }
 
-    override suspend fun getRfLink(): Result<Int> =
-        mutex.withLock {
+    override suspend fun getRfLink(reason: String): Result<Int> {
+        if (isUhfBusy()) {
+            return configGetterBusy(op = "getRFLink", reason = reason)
+        }
+        return mutex.withLock {
             if (!initialized) {
                 return@withLock Result.failure(UhfError.NotInitialized.asException())
             }
-            if (inventoryRunning) {
-                return@withLock Result.failure(UhfError.OperationInProgress.asException())
+            if (isUhfBusy()) {
+                return@withLock configGetterBusy(op = "getRFLink", reason = reason)
             }
             val instance = reader ?: return@withLock Result.failure(UhfError.HardwareUnavailable.asException())
             withContext(Dispatchers.IO) {
                 uhfMutex.withLock { runCatching { instance.getRFLink() } }
                     .fold(
                         onSuccess = {
-                            Log.i(LOG_TAG, "getRFLink -> $it")
+                            Log.i(LOG_TAG, "getRFLink(reason=$reason) -> $it")
                             Result.success(it)
                         },
                         onFailure = { error ->
@@ -630,6 +655,7 @@ class ChainwayUhfReader(
                     )
             }
         }
+    }
 
     override suspend fun setRegion(region: UhfRegion): Result<Unit> =
         mutex.withLock {
@@ -665,12 +691,17 @@ class ChainwayUhfReader(
             }
         }
 
-    override suspend fun getRegion(): Result<UhfRegion> =
-        mutex.withLock {
+    override suspend fun getRegion(reason: String): Result<UhfRegion> {
+        if (isUhfBusy()) {
+            logBusySkip(op = "getRegion", reason = reason)
+            return Result.failure(UhfError.OperationInProgress.asException())
+        }
+        return mutex.withLock {
             if (!initialized) {
                 return@withLock Result.failure(UhfError.NotInitialized.asException())
             }
-            if (inventoryRunning) {
+            if (isUhfBusy()) {
+                logBusySkip(op = "getRegion", reason = reason)
                 return@withLock Result.failure(UhfError.OperationInProgress.asException())
             }
             val instance = reader ?: return@withLock Result.failure(UhfError.HardwareUnavailable.asException())
@@ -678,7 +709,7 @@ class ChainwayUhfReader(
                 uhfMutex.withLock { runCatching { instance.getFrequencyMode() } }
                     .fold(
                         onSuccess = {
-                            Log.i(LOG_TAG, "getFrequencyMode -> $it")
+                            Log.i(LOG_TAG, "getRegion(reason=$reason) -> $it")
                             Result.success(UhfRegion.fromFrequencyMode(it))
                         },
                         onFailure = { error ->
@@ -690,24 +721,107 @@ class ChainwayUhfReader(
                     )
             }
         }
+    }
 
-    override suspend fun applyUhfConfig(reason: String): Result<UhfApplyResult> =
-        mutex.withLock {
+    override suspend fun applyDesiredConfigBestEffort(reason: String): Result<UhfApplyResult> {
+        if (isUhfBusy()) {
+            return configBusyResult(op = "apply", reason = reason)
+        }
+        return mutex.withLock {
             if (!initialized) {
                 return@withLock Result.failure(UhfError.NotInitialized.asException())
             }
-            if (inventoryRunning) {
+            if (isUhfBusy()) {
                 return@withLock configBusyResult(op = "apply", reason = reason)
             }
-            applyUhfConfigLocked(reason)
+            applyDesiredConfigBestEffortLocked(reason)
         }
+    }
 
-    private suspend fun applyUhfConfigLocked(reason: String): Result<UhfApplyResult> {
+    private suspend fun applyDesiredConfigBestEffortLocked(reason: String): Result<UhfApplyResult> {
         val instance = reader ?: return Result.failure(UhfError.HardwareUnavailable.asException())
         return withContext(Dispatchers.IO) {
             uhfMutex.withLock { setPowerOnBySystemIfSupported(instance) }
-            val desired = resolveDesiredConfig(instance)
-            val protocolSupportBefore = protocolSupport
+            val desired = resolveDesiredConfig()
+            val setModeOk =
+                uhfMutex.withLock { runCatching { instance.setFrequencyMode(desired.frequencyMode) } }
+                    .getOrElse { error ->
+                        return@withContext Result.failure(
+                            UhfError.VendorError(error.message ?: "UHF set frequency mode error")
+                                .asException(cause = error),
+                        )
+                    }
+            val setRfLinkOk =
+                uhfMutex.withLock { runCatching { instance.setRFLink(desired.rfLink) } }
+                    .getOrElse { error ->
+                        return@withContext Result.failure(
+                            UhfError.VendorError(error.message ?: "UHF set rflink error")
+                                .asException(cause = error),
+                        )
+                    }
+            val setPowerOk =
+                uhfMutex.withLock { runCatching { instance.setPower(desired.powerDbm) } }
+                    .getOrElse { error ->
+                        return@withContext Result.failure(
+                            UhfError.VendorError(error.message ?: "UHF set power error")
+                                .asException(cause = error),
+                        )
+                    }
+            val result =
+                UhfApplyResult(
+                    reason = reason,
+                    beforeMode = null,
+                    beforePower = null,
+                    beforeProtocol = null,
+                    beforeRfLink = null,
+                    desiredMode = desired.frequencyMode,
+                    desiredPower = desired.powerDbm,
+                    desiredProtocol = desired.protocol,
+                    desiredRfLink = desired.rfLink,
+                    setModeOk = setModeOk,
+                    setPowerOk = setPowerOk,
+                    setProtocolOk = null,
+                    setRfLinkOk = setRfLinkOk,
+                    afterMode = null,
+                    afterPower = null,
+                    afterProtocol = null,
+                    afterRfLink = null,
+                    protocolSupport = protocolSupport,
+                    protocolAttempt = null,
+                    modeApplied = setModeOk == true,
+                    powerApplied = setPowerOk == true,
+                    protocolApplied = null,
+                    rfLinkApplied = setRfLinkOk == true,
+                )
+            Log.i(
+                LOG_TAG,
+                "applyUhfConfigBestEffort(reason=$reason setModeOk=$setModeOk setRfLinkOk=$setRfLinkOk " +
+                    "setPowerOk=$setPowerOk protocolSupport=$protocolSupport)",
+            )
+            Result.success(result)
+        }
+    }
+
+    override suspend fun applyDesiredConfigWithReadback(reason: String): Result<UhfApplyResult> {
+        if (isUhfBusy()) {
+            return configBusyResult(op = "apply", reason = reason)
+        }
+        return mutex.withLock {
+            if (!initialized) {
+                return@withLock Result.failure(UhfError.NotInitialized.asException())
+            }
+            if (isUhfBusy()) {
+                return@withLock configBusyResult(op = "apply", reason = reason)
+            }
+            applyDesiredConfigWithReadbackLocked(reason)
+        }
+    }
+
+    private suspend fun applyDesiredConfigWithReadbackLocked(reason: String): Result<UhfApplyResult> {
+        val instance = reader ?: return Result.failure(UhfError.HardwareUnavailable.asException())
+        return withContext(Dispatchers.IO) {
+            uhfMutex.withLock { setPowerOnBySystemIfSupported(instance) }
+            val desired = resolveDesiredConfig()
             val beforeMode =
                 uhfMutex.withLock { runCatching { instance.getFrequencyMode() } }
                     .getOrElse { error ->
@@ -733,7 +847,7 @@ class ChainwayUhfReader(
                         )
                     }
             val beforeProtocol =
-                if (protocolSupport == ProtocolSupport.Supported) {
+                if (protocolSupport != ProtocolSupport.Unsupported) {
                     val value =
                         uhfMutex.withLock { runCatching { instance.getProtocol() } }
                             .getOrElse { error ->
@@ -755,9 +869,15 @@ class ChainwayUhfReader(
                                 .asException(cause = error),
                         )
                     }
+            val canAttemptProtocolSet =
+                when (protocolSupport) {
+                    ProtocolSupport.Supported -> true
+                    ProtocolSupport.Unknown -> lastProtocolAttempt == null
+                    ProtocolSupport.Unsupported -> false
+                }
             var setProtocolOk: Boolean? = null
             var protocolAttempt: ProtocolAttempt? = null
-            if (protocolSupport != ProtocolSupport.Unsupported) {
+            if (canAttemptProtocolSet) {
                 val protocolResult =
                     uhfMutex.withLock { runCatching { instance.setProtocol(desired.protocol) } }
                 val ok = protocolResult.getOrNull() == true
@@ -817,7 +937,7 @@ class ChainwayUhfReader(
                         )
                     }
             val afterProtocol =
-                if (protocolSupportBefore != ProtocolSupport.Unsupported) {
+                if (protocolSupport != ProtocolSupport.Unsupported) {
                     val value =
                         uhfMutex.withLock { runCatching { instance.getProtocol() } }
                             .getOrElse { error ->
@@ -875,7 +995,7 @@ class ChainwayUhfReader(
                 }
             Log.i(
                 LOG_TAG,
-                "applyUhfConfig(" +
+                "applyUhfConfigWithReadback(" +
                     "reason=$reason " +
                     "beforeMode=$beforeMode " +
                     "beforeProtocol=$beforeProtocol " +
@@ -902,99 +1022,6 @@ class ChainwayUhfReader(
                     ")",
             )
             Result.success(result)
-        }
-    }
-
-    override suspend fun applyUhfConfigIfNeeded(reason: String): Result<UhfApplyResult?> =
-        mutex.withLock {
-            if (!initialized) {
-                return@withLock Result.failure(UhfError.NotInitialized.asException())
-            }
-            if (inventoryRunning) {
-                return@withLock configBusyResult(op = "apply", reason = reason)
-            }
-            applyUhfConfigIfNeededLocked(reason)
-        }
-
-    private suspend fun applyUhfConfigIfNeededLocked(reason: String): Result<UhfApplyResult?> {
-        val instance = reader ?: return Result.failure(UhfError.HardwareUnavailable.asException())
-        return withContext(Dispatchers.IO) {
-            val desired = resolveDesiredConfig(instance)
-            val currentMode =
-                uhfMutex.withLock { runCatching { instance.getFrequencyMode() } }
-                    .getOrElse { error ->
-                        return@withContext Result.failure(
-                            UhfError.VendorError(error.message ?: "UHF get frequency mode error")
-                                .asException(cause = error),
-                        )
-                    }
-            val currentRfLink =
-                uhfMutex.withLock { runCatching { instance.getRFLink() } }
-                    .getOrElse { error ->
-                        return@withContext Result.failure(
-                            UhfError.VendorError(error.message ?: "UHF get rflink error")
-                                .asException(cause = error),
-                        )
-                    }
-            val currentPower =
-                uhfMutex.withLock { runCatching { instance.getPower() } }
-                    .getOrElse { error ->
-                        return@withContext Result.failure(
-                            UhfError.VendorError(error.message ?: "UHF get power error")
-                                .asException(cause = error),
-                        )
-                    }
-            val currentProtocol =
-                if (protocolSupport == ProtocolSupport.Unsupported) {
-                    null
-                } else {
-                    val value =
-                        uhfMutex.withLock { runCatching { instance.getProtocol() } }
-                            .getOrElse { error ->
-                                return@withContext Result.failure(
-                                    UhfError.VendorError(error.message ?: "UHF get protocol error")
-                                        .asException(cause = error),
-                                )
-                            }
-                    updateProtocolSupportFromGet(value)
-                    value
-                }
-            val protocolMatches =
-                if (protocolSupport == ProtocolSupport.Supported) {
-                    currentProtocol == desired.protocol
-                } else {
-                    true
-                }
-            val protocolLabel =
-                when {
-                    protocolSupport == ProtocolSupport.Unsupported -> "unsupported"
-                    currentProtocol == UHF_PROTOCOL_UNSUPPORTED -> "unavailable"
-                    currentProtocol != null -> currentProtocol.toString()
-                    else -> "?"
-                }
-            if (currentMode == desired.frequencyMode &&
-                protocolMatches &&
-                currentRfLink == desired.rfLink &&
-                currentPower == desired.powerDbm
-            ) {
-                Log.i(
-                    LOG_TAG,
-                    "applyUhfConfigIfNeeded(reason=$reason) config already OK " +
-                        "(mode=$currentMode protocol=$protocolLabel rfLink=$currentRfLink power=$currentPower " +
-                        "protocolSupport=$protocolSupport)",
-                )
-                Result.success(null)
-            } else {
-                Log.i(
-                    LOG_TAG,
-                    "applyUhfConfigIfNeeded(reason=$reason) mismatch " +
-                        "(mode=$currentMode protocol=$protocolLabel rfLink=$currentRfLink power=$currentPower " +
-                        "protocolSupport=$protocolSupport " +
-                        "desiredMode=${desired.frequencyMode} desiredProtocol=${desired.protocol} " +
-                        "desiredRfLink=${desired.rfLink} desiredPower=${desired.powerDbm})",
-                )
-                applyUhfConfigLocked(reason)
-            }
         }
     }
 
@@ -1157,61 +1184,22 @@ class ChainwayUhfReader(
             Log.w(LOG_TAG, "matrixProbe protocol/rflink skipped: stopInventory failed")
             return "protocol=? rflink=?"
         }
-        val protocolSupportBefore = protocolSupport
-        var protocolSetOk: Boolean? = null
-        if (protocolSupport != ProtocolSupport.Unsupported) {
-            val protocolResult =
-                withContext(Dispatchers.IO) {
-                    uhfMutex.withLock { runCatching { instance.setProtocol(UHF_PROTOCOL_ISO_18000_6C) } }
-                }
-            val ok = protocolResult.getOrNull() == true
-            val errCode =
-                if (ok) {
-                    null
-                } else {
-                    withContext(Dispatchers.IO) {
-                        uhfMutex.withLock { getErrCodeIfSupported(instance) }
-                    }
-                }
-            recordProtocolAttempt(ProtocolAttempt(ok = ok, errorCode = errCode))
-            protocolSetOk = ok
-            if (ok) {
-                updateProtocolSupport(ProtocolSupport.Supported)
-            } else {
-                updateProtocolSupport(ProtocolSupport.Unsupported)
-            }
-        }
         val rflinkSetOk =
             withContext(Dispatchers.IO) {
                 uhfMutex.withLock {
                     runCatching { instance.setRFLink(UHF_RFLINK_DSB_ASK) }.getOrNull() == true
                 }
             }
-        val protocol =
-            if (protocolSupportBefore != ProtocolSupport.Unsupported) {
-                withContext(Dispatchers.IO) {
-                    uhfMutex.withLock { runCatching { instance.getProtocol() }.getOrNull() }
-                }?.also { value ->
-                    updateProtocolSupportFromGet(value)
-                }
-            } else {
-                null
-            }
-        val rflink =
-            withContext(Dispatchers.IO) {
-                uhfMutex.withLock { runCatching { instance.getRFLink() }.getOrNull() }
-            }
         val protocolNote =
-            if (protocolSupport == ProtocolSupport.Unsupported) {
-                "unsupported"
-            } else {
-                protocol?.toString() ?: "?"
+            when (protocolSupport) {
+                ProtocolSupport.Unsupported -> "unsupported"
+                ProtocolSupport.Supported -> "supported"
+                ProtocolSupport.Unknown -> "unknown"
             }
-        val rflinkNote = rflink?.toString() ?: "?"
-        val protocolSetLabel = protocolSetOk?.toString() ?: "skipped"
+        val rflinkNote = if (rflinkSetOk) UHF_RFLINK_DSB_ASK.toString() else "?"
         Log.i(
             LOG_TAG,
-            "matrixProbe protocolSet=$protocolSetLabel rflinkSet=$rflinkSetOk " +
+            "matrixProbe protocolSet=skipped rflinkSet=$rflinkSetOk " +
                 "protocol=$protocolNote rflink=$rflinkNote protocolSupport=$protocolSupport",
         )
         return "protocol=$protocolNote rflink=$rflinkNote"
@@ -1417,7 +1405,7 @@ class ChainwayUhfReader(
         if (initOk) {
             val shouldApply = mutex.withLock { !inventoryRunning }
             if (shouldApply) {
-                val applyResult = applyUhfConfigLocked("stop-recover")
+                val applyResult = applyDesiredConfigBestEffortLocked("stop-recover")
                 if (applyResult.isFailure) {
                     Log.w(
                         LOG_TAG,
@@ -1433,8 +1421,41 @@ class ChainwayUhfReader(
         op: String,
         reason: String,
     ): Result<T> {
-        Log.i(LOG_TAG, "configOp skipped (busy): inventoryRunning=true op=$op reason=$reason")
+        Log.i(
+            LOG_TAG,
+            "configOp skipped (busy): inventoryRunning=$inventoryRunning scanRunning=$scanRunning op=$op reason=$reason",
+        )
         return Result.failure(UhfError.OperationInProgress.asException())
+    }
+
+    private fun isUhfBusy(): Boolean = inventoryRunning || scanRunning
+
+    private fun configGetterBusy(
+        op: String,
+        reason: String,
+    ): Result<Int> {
+        logBusySkip(op = op, reason = reason)
+        return Result.success(UHF_CONFIG_BUSY)
+    }
+
+    private fun logBusySkip(
+        op: String,
+        reason: String,
+    ) {
+        val now = System.currentTimeMillis()
+        val shouldLog =
+            synchronized(busyLogLock) {
+                val last = busyLogTimestamps[op] ?: 0L
+                if (now - last >= BUSY_LOG_THROTTLE_MS) {
+                    busyLogTimestamps[op] = now
+                    true
+                } else {
+                    false
+                }
+            }
+        if (shouldLog) {
+            Log.w(LOG_TAG, "$op skipped busy reason=$reason")
+        }
     }
 
     private fun updateProtocolSupportFromGet(value: Int) {
@@ -1473,23 +1494,7 @@ class ChainwayUhfReader(
         }
     }
 
-    private suspend fun resolveDesiredConfig(instance: IUHF): UhfDesiredConfig {
-        val settings = settingsStore.settingsFlow.first()
-        if (settings.uhfFrequencyMode == null) {
-            val currentMode = uhfMutex.withLock { runCatching { instance.getFrequencyMode() }.getOrNull() }
-            val currentPower = uhfMutex.withLock { runCatching { instance.getPower() }.getOrNull() }
-            if (currentMode != null && currentPower != null) {
-                val mappedRegion = UhfRegion.fromFrequencyMode(currentMode)
-                settingsStore.update {
-                    it.copy(
-                        uhfFrequencyMode = currentMode,
-                        uhfPower = currentPower,
-                        uhfRegion = mappedRegion.settingsValue,
-                    )
-                }
-                Log.i(LOG_TAG, "desired config initialized from device (mode=$currentMode power=$currentPower)")
-            }
-        }
+    private suspend fun resolveDesiredConfig(): UhfDesiredConfig {
         return settingsStore.getDesiredUhfConfig()
     }
 
@@ -1529,11 +1534,27 @@ class ChainwayUhfReader(
         if (result == null) {
             return
         }
+        val hasReadback =
+            result.afterMode != null ||
+                result.afterPower != null ||
+                result.afterRfLink != null ||
+                result.afterProtocol != null
+        if (!hasReadback) {
+            if (!result.success) {
+                Log.w(
+                    LOG_TAG,
+                    "applyUhfConfig best-effort failed (reason=${result.reason} " +
+                        "modeApplied=${result.modeApplied} rfLinkApplied=${result.rfLinkApplied} " +
+                        "powerApplied=${result.powerApplied} protocolSupport=${result.protocolSupport})",
+                )
+            }
+            return
+        }
         if (!result.success) {
             val protocolAppliedLabel = result.protocolApplied?.toString() ?: "N/A"
             Log.w(
                 LOG_TAG,
-                "applyUhfConfig verify failed (reason=${result.reason} " +
+                "applyUhfConfigWithReadback verify failed (reason=${result.reason} " +
                     "modeApplied=${result.modeApplied} protocolApplied=$protocolAppliedLabel " +
                     "rfLinkApplied=${result.rfLinkApplied} powerApplied=${result.powerApplied} " +
                     "protocolSupport=${result.protocolSupport})",
@@ -1586,5 +1607,6 @@ class ChainwayUhfReader(
         const val STOP_RETRY_DELAY_MS = 100L
         const val MATRIX_READS = 10
         const val MATRIX_READ_DELAY_MS = 100L
+        const val BUSY_LOG_THROTTLE_MS = 2_000L
     }
 }

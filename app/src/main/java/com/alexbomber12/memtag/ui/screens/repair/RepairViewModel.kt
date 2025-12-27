@@ -14,10 +14,18 @@ import com.alexbomber12.memtag.domain.repair.RepairActionResult
 import com.alexbomber12.memtag.domain.repair.RepairActionType
 import com.alexbomber12.memtag.domain.repair.RepairComparison
 import com.alexbomber12.memtag.domain.repair.RepairDecisionUseCase
+import com.alexbomber12.memtag.integrations.scan2d.Scan2dError
+import com.alexbomber12.memtag.integrations.scan2d.Scan2dException
+import com.alexbomber12.memtag.integrations.scan2d.Scan2dScanner
+import com.alexbomber12.memtag.integrations.scan2d.asException
 import com.alexbomber12.memtag.integrations.uhf.UhfError
 import com.alexbomber12.memtag.integrations.uhf.UhfException
+import com.alexbomber12.memtag.integrations.uhf.UhfLogger
 import com.alexbomber12.memtag.integrations.uhf.UhfReader
+import com.alexbomber12.memtag.integrations.uhf.toErrorMessage
 import com.alexbomber12.memtag.util.epc.EpcNormalizer
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -25,6 +33,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 sealed class RepairLookupState {
     data object Idle : RepairLookupState()
@@ -45,6 +54,7 @@ data class RepairUiState(
     val lookupState: RepairLookupState = RepairLookupState.Idle,
     val comparison: RepairComparison = RepairComparison.NotReady,
     val isReading: Boolean = false,
+    val isScanningQr: Boolean = false,
     val isWriting: Boolean = false,
     val isVerifying: Boolean = false,
     val showConfirmation: Boolean = false,
@@ -58,6 +68,7 @@ class RepairViewModel(
     private val repository: MementoRepository,
     private val lookupByEpcUseCase: LookupByEpcUseCase,
     private val uhfReader: UhfReader,
+    private val scan2dScanner: Scan2dScanner,
     private val actionsLogDao: ActionsLogDao,
     private val settingsStore: SettingsStore,
     private val decisionUseCase: RepairDecisionUseCase = RepairDecisionUseCase(),
@@ -148,92 +159,94 @@ class RepairViewModel(
         mutableState.update { it.copy(isReading = true, message = null, errorMessage = null) }
         val job =
             viewModelScope.launch {
+                val startMs = System.currentTimeMillis()
+                UhfLogger.i("ScanRFID start (screen=repair source=read usedMethod=single)")
                 val initResult = uhfReader.initialize()
                 if (initResult.isFailure) {
                     updateError(mapUhfError(initResult.exceptionOrNull()))
+                    UhfLogger.i("ScanRFID end (screen=repair result=init_failed durationMs=${System.currentTimeMillis() - startMs})")
+                    return@launch
+                }
+                uhfReader.stopInventory()
+                val applyResult = uhfReader.applyDesiredConfigBestEffort("repair-read")
+                if (applyResult.isFailure) {
+                    updateError(mapUhfError(applyResult.exceptionOrNull()))
+                    UhfLogger.i("ScanRFID end (screen=repair result=config_error durationMs=${System.currentTimeMillis() - startMs})")
+                    return@launch
+                }
+                val applied = applyResult.getOrNull()
+                if (applied != null && !applied.success) {
+                    updateError(applied.toErrorMessage())
+                    UhfLogger.i("ScanRFID end (screen=repair result=config_failed durationMs=${System.currentTimeMillis() - startMs})")
                     return@launch
                 }
                 val readResult = uhfReader.readSingle(READ_TIMEOUT_MS)
                 if (readResult.isFailure) {
                     updateError(mapUhfError(readResult.exceptionOrNull()))
+                    UhfLogger.i("ScanRFID end (screen=repair result=read_failed durationMs=${System.currentTimeMillis() - startMs})")
                     return@launch
                 }
                 val normalized =
                     runCatching { EpcNormalizer.normalize(readResult.getOrNull().orEmpty()) }.getOrElse { error ->
                         updateError(error.message ?: "Invalid EPC read from tag.")
+                        UhfLogger.i("ScanRFID end (screen=repair result=invalid_epc durationMs=${System.currentTimeMillis() - startMs})")
                         return@launch
                     }
-                val selected = uiState.value.selectedItem
                 mutableState.update { state ->
                     state.copy(
                         isReading = false,
                         currentEpc = normalized,
-                        lookupState = if (selected != null) RepairLookupState.Idle else state.lookupState,
+                        lookupState = if (state.selectedItem != null) RepairLookupState.Idle else state.lookupState,
                         message = null,
                         errorMessage = null,
                     )
                 }
-                if (selected != null) {
-                    val decision = decisionUseCase.evaluate(selected.epcNormalized, normalized)
-                    applyComparison(decision)
-                    when (decision) {
-                        is RepairComparison.Match -> {
-                            logAction(
-                                actionType = RepairActionType.VERIFY_MATCH,
-                                expectedEpc = decision.expectedEpc,
-                                currentEpc = decision.currentEpc,
-                                result = RepairActionResult.SUCCESS,
-                                message = null,
-                            )
-                            mutableState.update { it.copy(message = "Already correct.") }
-                        }
+                handleScannedEpc(normalized)
+                UhfLogger.i("ScanRFID end (screen=repair result=$normalized durationMs=${System.currentTimeMillis() - startMs})")
+            }
+        operationJob = job
+        job.invokeOnCompletion { operationJob = null }
+    }
 
-                        is RepairComparison.Mismatch -> {
-                            logAction(
-                                actionType = RepairActionType.VERIFY_MISMATCH,
-                                expectedEpc = decision.expectedEpc,
-                                currentEpc = decision.currentEpc,
-                                result = RepairActionResult.FAILURE,
-                                message = "EPC mismatch.",
-                            )
+    fun scanQrForCurrent() {
+        if (operationJob != null) {
+            return
+        }
+        mutableState.update { it.copy(isScanningQr = true, message = null, errorMessage = null) }
+        val job =
+            viewModelScope.launch {
+                val result =
+                    runCatching { withContext(Dispatchers.IO) { scan2dScanner.scanOnce() } }
+                        .getOrElse { error ->
+                            val mapped =
+                                if (error is CancellationException) {
+                                    Scan2dError.Cancelled.asException(message = "QR scan cancelled.", cause = error)
+                                } else {
+                                    error
+                                }
+                            Result.failure(mapped)
                         }
-
-                        is RepairComparison.Invalid -> {
-                            updateError(decision.message)
-                        }
-
-                        RepairComparison.NotReady -> Unit
-                    }
-                } else {
-                    when (val lookupResult = lookupByEpcUseCase.execute(normalized)) {
-                        is LookupResult.Found -> {
-                            mutableState.update { it.copy(lookupState = RepairLookupState.Found(lookupResult.item)) }
-                            logAction(
-                                actionType = RepairActionType.VERIFY_LOOKUP_FOUND,
-                                expectedEpc = lookupResult.item.epcNormalized,
+                result
+                    .onSuccess { epc ->
+                        val normalized =
+                            runCatching { EpcNormalizer.normalize(epc) }.getOrElse { error ->
+                                updateError(error.message ?: "Invalid EPC read from QR.")
+                                return@onSuccess
+                            }
+                        mutableState.update { state ->
+                            state.copy(
+                                isScanningQr = false,
                                 currentEpc = normalized,
-                                result = RepairActionResult.SUCCESS,
+                                lookupState = if (state.selectedItem != null) RepairLookupState.Idle else state.lookupState,
                                 message = null,
+                                errorMessage = null,
                             )
                         }
-
-                        is LookupResult.NotFound -> {
-                            mutableState.update { it.copy(lookupState = RepairLookupState.NotFound) }
-                            logAction(
-                                actionType = RepairActionType.VERIFY_LOOKUP_NOT_FOUND,
-                                expectedEpc = null,
-                                currentEpc = normalized,
-                                result = RepairActionResult.FAILURE,
-                                message = "No matching item found.",
-                            )
-                        }
-
-                        is LookupResult.Error -> {
-                            updateError(lookupResult.message)
-                        }
+                        handleScannedEpc(normalized)
                     }
-                }
-                updateComparison()
+                    .onFailure { error ->
+                        updateError(mapScanError(error))
+                    }
             }
         operationJob = job
         job.invokeOnCompletion { operationJob = null }
@@ -281,6 +294,7 @@ class RepairViewModel(
         mutableState.update {
             it.copy(
                 isReading = false,
+                isScanningQr = false,
                 isWriting = false,
                 isVerifying = false,
                 showConfirmation = false,
@@ -334,6 +348,18 @@ class RepairViewModel(
                 val initResult = uhfReader.initialize()
                 if (initResult.isFailure) {
                     handleRepairFailure(initResult.exceptionOrNull())
+                    return@launch
+                }
+                uhfReader.stopInventory()
+                val applyResult = uhfReader.applyDesiredConfigBestEffort("repair-write")
+                if (applyResult.isFailure) {
+                    val error = applyResult.exceptionOrNull()
+                    handleRepairFailure(error, mapUhfError(error))
+                    return@launch
+                }
+                val applied = applyResult.getOrNull()
+                if (applied != null && !applied.success) {
+                    handleRepairFailure(null, applied.toErrorMessage())
                     return@launch
                 }
                 val writeResult = uhfReader.writeEpc(decision.expectedEpc, WRITE_TIMEOUT_MS)
@@ -439,7 +465,15 @@ class RepairViewModel(
     }
 
     private fun updateError(message: String) {
-        mutableState.update { it.copy(isReading = false, isWriting = false, isVerifying = false, errorMessage = message) }
+        mutableState.update {
+            it.copy(
+                isReading = false,
+                isScanningQr = false,
+                isWriting = false,
+                isVerifying = false,
+                errorMessage = message,
+            )
+        }
     }
 
     private fun mapUhfError(error: Throwable?): String {
@@ -454,6 +488,19 @@ class RepairViewModel(
         }
     }
 
+    private fun mapScanError(error: Throwable?): String {
+        val scanError = (error as? Scan2dException)?.error
+        return when (scanError) {
+            Scan2dError.Timeout -> "QR scan timed out."
+            Scan2dError.Cancelled -> "QR scan cancelled."
+            Scan2dError.OperationInProgress -> "Scanner is busy."
+            Scan2dError.HardwareUnavailable -> "QR scanner unavailable."
+            is Scan2dError.InvalidPayload -> scanError.message
+            is Scan2dError.VendorError -> scanError.message
+            null -> error?.message ?: "Unknown QR scan error."
+        }
+    }
+
     private fun mapWriteError(error: Throwable?): String {
         val uhfError = (error as? UhfException)?.error
         return when (uhfError) {
@@ -464,6 +511,71 @@ class RepairViewModel(
             is UhfError.VendorError -> "Write failed. Tag may be locked or not writable."
             null -> error?.message ?: "Write failed."
         }
+    }
+
+    private suspend fun handleScannedEpc(normalized: String) {
+        val selected = uiState.value.selectedItem
+        if (selected != null) {
+            val decision = decisionUseCase.evaluate(selected.epcNormalized, normalized)
+            applyComparison(decision)
+            when (decision) {
+                is RepairComparison.Match -> {
+                    logAction(
+                        actionType = RepairActionType.VERIFY_MATCH,
+                        expectedEpc = decision.expectedEpc,
+                        currentEpc = decision.currentEpc,
+                        result = RepairActionResult.SUCCESS,
+                        message = null,
+                    )
+                    mutableState.update { it.copy(message = "Already correct.") }
+                }
+
+                is RepairComparison.Mismatch -> {
+                    logAction(
+                        actionType = RepairActionType.VERIFY_MISMATCH,
+                        expectedEpc = decision.expectedEpc,
+                        currentEpc = decision.currentEpc,
+                        result = RepairActionResult.FAILURE,
+                        message = "EPC mismatch.",
+                    )
+                }
+
+                is RepairComparison.Invalid -> {
+                    updateError(decision.message)
+                }
+
+                RepairComparison.NotReady -> Unit
+            }
+        } else {
+            when (val lookupResult = lookupByEpcUseCase.execute(normalized)) {
+                is LookupResult.Found -> {
+                    mutableState.update { it.copy(lookupState = RepairLookupState.Found(lookupResult.item)) }
+                    logAction(
+                        actionType = RepairActionType.VERIFY_LOOKUP_FOUND,
+                        expectedEpc = lookupResult.item.epcNormalized,
+                        currentEpc = normalized,
+                        result = RepairActionResult.SUCCESS,
+                        message = null,
+                    )
+                }
+
+                is LookupResult.NotFound -> {
+                    mutableState.update { it.copy(lookupState = RepairLookupState.NotFound) }
+                    logAction(
+                        actionType = RepairActionType.VERIFY_LOOKUP_NOT_FOUND,
+                        expectedEpc = null,
+                        currentEpc = normalized,
+                        result = RepairActionResult.FAILURE,
+                        message = "No matching item found.",
+                    )
+                }
+
+                is LookupResult.Error -> {
+                    updateError(lookupResult.message)
+                }
+            }
+        }
+        updateComparison()
     }
 
     private fun ActionsLogEntity.toDomain(): RepairActionLog {

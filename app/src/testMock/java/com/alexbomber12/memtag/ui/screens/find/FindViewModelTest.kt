@@ -156,23 +156,23 @@ private class FailingUhfReader : UhfReader {
 
     override suspend fun setPower(dbm: Int): Result<Unit> = Result.success(Unit)
 
-    override suspend fun getPower(): Result<Int> = Result.success(0)
+    override suspend fun getPower(reason: String): Result<Int> = Result.success(0)
 
-    override suspend fun getFrequencyMode(): Result<Int> = Result.success(0)
+    override suspend fun getFrequencyMode(reason: String): Result<Int> = Result.success(0)
 
-    override suspend fun getProtocol(): Result<Int> = Result.success(0)
+    override suspend fun getProtocol(reason: String): Result<Int> = Result.success(0)
 
-    override suspend fun getRfLink(): Result<Int> = Result.success(0)
+    override suspend fun getRfLink(reason: String): Result<Int> = Result.success(0)
 
     override suspend fun setRegion(region: UhfRegion): Result<Unit> = Result.success(Unit)
 
-    override suspend fun getRegion(): Result<UhfRegion> = Result.success(UhfRegion.OTHER)
+    override suspend fun getRegion(reason: String): Result<UhfRegion> = Result.success(UhfRegion.OTHER)
 
-    override suspend fun applyUhfConfig(reason: String): Result<UhfApplyResult> = Result.failure(UhfError.NotInitialized.asException())
+    override suspend fun applyDesiredConfigBestEffort(reason: String): Result<UhfApplyResult> =
+        Result.failure(UhfError.NotInitialized.asException())
 
-    override suspend fun applyUhfConfigIfNeeded(reason: String): Result<UhfApplyResult?> {
-        return Result.failure(UhfError.NotInitialized.asException())
-    }
+    override suspend fun applyDesiredConfigWithReadback(reason: String): Result<UhfApplyResult> =
+        Result.failure(UhfError.NotInitialized.asException())
 
     override suspend fun runMatrixProbe(): List<MatrixProbeResult> = emptyList()
 }

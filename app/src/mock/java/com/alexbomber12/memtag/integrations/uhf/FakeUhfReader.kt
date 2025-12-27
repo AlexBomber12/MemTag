@@ -44,6 +44,7 @@ class FakeUhfReader(
     private var initialized = false
     private var inventoryJob: Job? = null
     private var inventoryRunning = false
+    private var scanRunning = false
     private var powerDbm = AppDefaults.UHF_POWER
     private var region = UhfRegion.fromSettings(AppDefaults.UHF_REGION)
     private var frequencyMode = region.toFrequencyMode()
@@ -88,10 +89,14 @@ class FakeUhfReader(
         if (inventoryRunning) {
             return Result.failure(UhfError.OperationInProgress.asException())
         }
+        if (scanRunning) {
+            return Result.failure(UhfError.OperationInProgress.asException())
+        }
         nextReadResult?.let { result ->
             nextReadResult = null
             return result
         }
+        scanRunning = true
         return try {
             withTimeout(timeoutMs) {
                 delay(150)
@@ -99,6 +104,8 @@ class FakeUhfReader(
             }
         } catch (_: TimeoutCancellationException) {
             Result.failure(UhfError.Timeout.asException())
+        } finally {
+            scanRunning = false
         }
     }
 
@@ -110,7 +117,7 @@ class FakeUhfReader(
             if (!initialized) {
                 return@withLock Result.failure(UhfError.NotInitialized.asException())
             }
-            if (inventoryRunning) {
+            if (inventoryRunning || scanRunning) {
                 return@withLock Result.failure(UhfError.OperationInProgress.asException())
             }
             writeCalls += 1
@@ -127,7 +134,7 @@ class FakeUhfReader(
             if (!initialized) {
                 return@withLock Result.failure(UhfError.NotInitialized.asException())
             }
-            if (inventoryRunning) {
+            if (inventoryRunning || scanRunning) {
                 return@withLock Result.failure(UhfError.OperationInProgress.asException())
             }
             verifyCalls += 1
@@ -210,24 +217,24 @@ class FakeUhfReader(
 
     override suspend fun setPower(dbm: Int): Result<Unit> =
         mutex.withLock {
-            if (inventoryRunning) {
+            if (inventoryRunning || scanRunning) {
                 return@withLock Result.failure(UhfError.OperationInProgress.asException())
             }
             powerDbm = dbm.coerceIn(AppDefaults.UHF_POWER_MIN, AppDefaults.UHF_POWER_MAX)
             Result.success(Unit)
         }
 
-    override suspend fun getPower(): Result<Int> =
+    override suspend fun getPower(reason: String): Result<Int> =
         mutex.withLock {
-            if (inventoryRunning) {
-                return@withLock Result.failure(UhfError.OperationInProgress.asException())
+            if (inventoryRunning || scanRunning) {
+                return@withLock Result.success(UHF_CONFIG_BUSY)
             }
             Result.success(powerDbm)
         }
 
     override suspend fun setRegion(region: UhfRegion): Result<Unit> =
         mutex.withLock {
-            if (inventoryRunning) {
+            if (inventoryRunning || scanRunning) {
                 return@withLock Result.failure(UhfError.OperationInProgress.asException())
             }
             this.region = region
@@ -235,41 +242,75 @@ class FakeUhfReader(
             Result.success(Unit)
         }
 
-    override suspend fun getRegion(): Result<UhfRegion> =
+    override suspend fun getRegion(reason: String): Result<UhfRegion> =
         mutex.withLock {
-            if (inventoryRunning) {
+            if (inventoryRunning || scanRunning) {
                 return@withLock Result.failure(UhfError.OperationInProgress.asException())
             }
             Result.success(region)
         }
 
-    override suspend fun getFrequencyMode(): Result<Int> =
+    override suspend fun getFrequencyMode(reason: String): Result<Int> =
         mutex.withLock {
-            if (inventoryRunning) {
-                return@withLock Result.failure(UhfError.OperationInProgress.asException())
+            if (inventoryRunning || scanRunning) {
+                return@withLock Result.success(UHF_CONFIG_BUSY)
             }
             Result.success(frequencyMode)
         }
 
-    override suspend fun getProtocol(): Result<Int> =
+    override suspend fun getProtocol(reason: String): Result<Int> =
         mutex.withLock {
-            if (inventoryRunning) {
-                return@withLock Result.failure(UhfError.OperationInProgress.asException())
+            if (inventoryRunning || scanRunning) {
+                return@withLock Result.success(UHF_CONFIG_BUSY)
             }
             Result.success(protocol)
         }
 
-    override suspend fun getRfLink(): Result<Int> =
+    override suspend fun getRfLink(reason: String): Result<Int> =
         mutex.withLock {
-            if (inventoryRunning) {
-                return@withLock Result.failure(UhfError.OperationInProgress.asException())
+            if (inventoryRunning || scanRunning) {
+                return@withLock Result.success(UHF_CONFIG_BUSY)
             }
             Result.success(rfLink)
         }
 
-    override suspend fun applyUhfConfig(reason: String): Result<UhfApplyResult> =
+    override suspend fun applyDesiredConfigBestEffort(reason: String): Result<UhfApplyResult> =
         mutex.withLock {
-            if (inventoryRunning) {
+            if (inventoryRunning || scanRunning) {
+                return@withLock Result.failure(UhfError.OperationInProgress.asException())
+            }
+            val result =
+                UhfApplyResult(
+                    reason = reason,
+                    beforeMode = null,
+                    beforePower = null,
+                    beforeProtocol = null,
+                    beforeRfLink = null,
+                    desiredMode = frequencyMode,
+                    desiredPower = powerDbm,
+                    desiredProtocol = protocol,
+                    desiredRfLink = rfLink,
+                    setModeOk = true,
+                    setPowerOk = true,
+                    setProtocolOk = null,
+                    setRfLinkOk = true,
+                    afterMode = null,
+                    afterPower = null,
+                    afterProtocol = null,
+                    afterRfLink = null,
+                    protocolSupport = ProtocolSupport.Supported,
+                    protocolAttempt = null,
+                    modeApplied = true,
+                    powerApplied = true,
+                    protocolApplied = null,
+                    rfLinkApplied = true,
+                )
+            Result.success(result)
+        }
+
+    override suspend fun applyDesiredConfigWithReadback(reason: String): Result<UhfApplyResult> =
+        mutex.withLock {
+            if (inventoryRunning || scanRunning) {
                 return@withLock Result.failure(UhfError.OperationInProgress.asException())
             }
             val result =
@@ -299,14 +340,6 @@ class FakeUhfReader(
                     rfLinkApplied = true,
                 )
             Result.success(result)
-        }
-
-    override suspend fun applyUhfConfigIfNeeded(reason: String): Result<UhfApplyResult?> =
-        mutex.withLock {
-            if (inventoryRunning) {
-                return@withLock Result.failure(UhfError.OperationInProgress.asException())
-            }
-            Result.success(null)
         }
 
     override suspend fun runMatrixProbe(): List<MatrixProbeResult> =

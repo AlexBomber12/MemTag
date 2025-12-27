@@ -12,11 +12,9 @@ import androidx.activity.enableEdgeToEdge
 import androidx.lifecycle.lifecycleScope
 import com.alexbomber12.memtag.app.HardwareAction
 import com.alexbomber12.memtag.app.MemTagApplication
-import com.alexbomber12.memtag.integrations.uhf.UhfRegion
 import com.alexbomber12.memtag.ui.MemTagApp
 import com.alexbomber12.memtag.ui.theme.MemTagTheme
 import kotlinx.coroutines.flow.collect
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
@@ -44,11 +42,9 @@ class MainActivity : ComponentActivity() {
         super.onStart()
         val appContainer = (application as MemTagApplication).container
         lifecycleScope.launch {
-            val settings = appContainer.settingsStore.settingsFlow.first()
             val initResult = appContainer.uhfReader.initialize()
             if (initResult.isSuccess) {
-                appContainer.uhfReader.setPower(settings.uhfPower)
-                appContainer.uhfReader.setRegion(UhfRegion.fromSettings(settings.uhfRegion))
+                appContainer.uhfReader.applyDesiredConfigBestEffort("activity-start")
             }
         }
         appContainer.syncCoordinator.requestAutoSync(hasNetwork = isNetworkAvailable())

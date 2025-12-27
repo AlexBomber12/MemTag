@@ -34,21 +34,21 @@ interface UhfReader {
 
     suspend fun setPower(dbm: Int): Result<Unit>
 
-    suspend fun getPower(): Result<Int>
+    suspend fun getPower(reason: String): Result<Int>
 
-    suspend fun getFrequencyMode(): Result<Int>
+    suspend fun getFrequencyMode(reason: String): Result<Int>
 
-    suspend fun getProtocol(): Result<Int>
+    suspend fun getProtocol(reason: String): Result<Int>
 
-    suspend fun getRfLink(): Result<Int>
+    suspend fun getRfLink(reason: String): Result<Int>
 
     suspend fun setRegion(region: UhfRegion): Result<Unit>
 
-    suspend fun getRegion(): Result<UhfRegion>
+    suspend fun getRegion(reason: String): Result<UhfRegion>
 
-    suspend fun applyUhfConfig(reason: String): Result<UhfApplyResult>
+    suspend fun applyDesiredConfigBestEffort(reason: String): Result<UhfApplyResult>
 
-    suspend fun applyUhfConfigIfNeeded(reason: String): Result<UhfApplyResult?>
+    suspend fun applyDesiredConfigWithReadback(reason: String): Result<UhfApplyResult>
 
     suspend fun runMatrixProbe(): List<MatrixProbeResult>
 }

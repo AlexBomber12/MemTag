@@ -3,6 +3,7 @@ package com.alexbomber12.memtag.integrations.uhf
 const val UHF_PROTOCOL_ISO_18000_6C = 0x00
 const val UHF_RFLINK_DSB_ASK = 0
 const val UHF_PROTOCOL_UNSUPPORTED = -1
+const val UHF_CONFIG_BUSY = -2
 
 enum class ProtocolSupport {
     Unknown,

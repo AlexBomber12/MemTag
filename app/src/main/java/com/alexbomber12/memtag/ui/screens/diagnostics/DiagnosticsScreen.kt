@@ -38,6 +38,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.alexbomber12.memtag.data.AppDefaults
 import com.alexbomber12.memtag.integrations.uhf.ProtocolSupport
+import com.alexbomber12.memtag.integrations.uhf.UHF_CONFIG_BUSY
 import com.alexbomber12.memtag.integrations.uhf.UHF_PROTOCOL_UNSUPPORTED
 import com.alexbomber12.memtag.integrations.uhf.UhfRegion
 import com.alexbomber12.memtag.ui.components.AppCard
@@ -77,8 +78,9 @@ fun DiagnosticsScreen(viewModel: DiagnosticsViewModel) {
             !matrixProbeBusy
     val canStartInventory = state.isInitialized && !state.isInventoryRunning && !matrixProbeBusy
     val canStopInventory = state.isInventoryRunning && !matrixProbeBusy
-    val canReadConfig = state.isInitialized && !state.isReadingConfig && !matrixProbeBusy
-    val canApplyConfig = state.isInitialized && !state.isApplyingConfig && !matrixProbeBusy
+    val configBusy = state.isInventoryRunning || state.isReadingSingle
+    val canReadConfig = state.isInitialized && !state.isReadingConfig && !matrixProbeBusy && !configBusy
+    val canApplyConfig = state.isInitialized && !state.isApplyingConfig && !matrixProbeBusy && !configBusy
     val canRunMatrixProbe = state.isInitialized && !matrixProbeBusy
 
     LazyColumn(
@@ -282,8 +284,8 @@ fun DiagnosticsScreen(viewModel: DiagnosticsViewModel) {
                     text =
                         "Current: mode=${formatMode(current?.frequencyMode)} " +
                             "protocol=$currentProtocolLabel " +
-                            "rflink=${current?.rfLink?.toString() ?: "--"} " +
-                            "power=${current?.power?.toString() ?: "--"}",
+                            "rflink=${formatConfigValue(current?.rfLink)} " +
+                            "power=${formatConfigValue(current?.power)}",
                 )
                 val applyResult = state.lastApplyResult
                 if (applyResult == null) {
@@ -316,8 +318,8 @@ fun DiagnosticsScreen(viewModel: DiagnosticsViewModel) {
                         text =
                             "After: mode=${formatMode(applyResult.afterMode)} " +
                                 "protocol=$appliedProtocolLabel " +
-                                "rflink=${applyResult.afterRfLink} " +
-                                "power=${applyResult.afterPower}",
+                                "rflink=${formatConfigValue(applyResult.afterRfLink)} " +
+                                "power=${formatConfigValue(applyResult.afterPower)}",
                     )
                     Text(
                         text =
@@ -464,6 +466,7 @@ private fun formatProtocolValue(
     support: ProtocolSupport,
 ): String {
     return when {
+        value == UHF_CONFIG_BUSY -> "busy"
         support == ProtocolSupport.Unsupported -> "unsupported"
         value == null -> "--"
         value == UHF_PROTOCOL_UNSUPPORTED -> "unavailable"
@@ -479,6 +482,17 @@ private fun formatMode(value: Int?): String {
     if (value == null) {
         return "--"
     }
+    if (value == UHF_CONFIG_BUSY) {
+        return "busy"
+    }
     val hex = value.toString(16).uppercase().padStart(2, '0')
     return "0x$hex"
+}
+
+private fun formatConfigValue(value: Int?): String {
+    return when (value) {
+        null -> "--"
+        UHF_CONFIG_BUSY -> "busy"
+        else -> value.toString()
+    }
 }
