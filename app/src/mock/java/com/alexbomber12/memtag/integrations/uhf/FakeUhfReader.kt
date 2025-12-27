@@ -46,7 +46,9 @@ class FakeUhfReader(
     private var inventoryRunning = false
     private var powerDbm = AppDefaults.UHF_POWER
     private var region = UhfRegion.fromSettings(AppDefaults.UHF_REGION)
-    private var frequencyMode = region.toFrequencyMode() ?: 0
+    private var frequencyMode = region.toFrequencyMode()
+    private var protocol = UHF_PROTOCOL_ISO_18000_6C
+    private var rfLink = UHF_RFLINK_DSB_ASK
     private var epcIndex = 0
     private var lastWrittenEpc: String? = null
 
@@ -229,7 +231,7 @@ class FakeUhfReader(
                 return@withLock Result.failure(UhfError.OperationInProgress.asException())
             }
             this.region = region
-            this.frequencyMode = region.toFrequencyMode() ?: frequencyMode
+            this.frequencyMode = region.toFrequencyMode()
             Result.success(Unit)
         }
 
@@ -249,6 +251,22 @@ class FakeUhfReader(
             Result.success(frequencyMode)
         }
 
+    override suspend fun getProtocol(): Result<Int> =
+        mutex.withLock {
+            if (inventoryRunning) {
+                return@withLock Result.failure(UhfError.OperationInProgress.asException())
+            }
+            Result.success(protocol)
+        }
+
+    override suspend fun getRfLink(): Result<Int> =
+        mutex.withLock {
+            if (inventoryRunning) {
+                return@withLock Result.failure(UhfError.OperationInProgress.asException())
+            }
+            Result.success(rfLink)
+        }
+
     override suspend fun applyUhfConfig(reason: String): Result<UhfApplyResult> =
         mutex.withLock {
             if (inventoryRunning) {
@@ -259,14 +277,24 @@ class FakeUhfReader(
                     reason = reason,
                     beforeMode = frequencyMode,
                     beforePower = powerDbm,
+                    beforeProtocol = protocol,
+                    beforeRfLink = rfLink,
                     desiredMode = frequencyMode,
                     desiredPower = powerDbm,
+                    desiredProtocol = protocol,
+                    desiredRfLink = rfLink,
                     setModeOk = true,
                     setPowerOk = true,
+                    setProtocolOk = true,
+                    setRfLinkOk = true,
                     afterMode = frequencyMode,
                     afterPower = powerDbm,
+                    afterProtocol = protocol,
+                    afterRfLink = rfLink,
                     modeApplied = true,
                     powerApplied = true,
+                    protocolApplied = true,
+                    rfLinkApplied = true,
                 )
             Result.success(result)
         }
@@ -283,7 +311,7 @@ class FakeUhfReader(
         mutex.withLock {
             listOf(
                 MatrixProbeResult(
-                    name = "A: UID inventory",
+                    name = "A: TAG inventory (no params)",
                     startOk = true,
                     stopOk = true,
                     reads = 10,

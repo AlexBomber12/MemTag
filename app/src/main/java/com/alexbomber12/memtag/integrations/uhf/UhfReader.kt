@@ -38,6 +38,10 @@ interface UhfReader {
 
     suspend fun getFrequencyMode(): Result<Int>
 
+    suspend fun getProtocol(): Result<Int>
+
+    suspend fun getRfLink(): Result<Int>
+
     suspend fun setRegion(region: UhfRegion): Result<Unit>
 
     suspend fun getRegion(): Result<UhfRegion>

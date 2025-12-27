@@ -9,6 +9,7 @@ import com.alexbomber12.memtag.integrations.uhf.MatrixProbeResult
 import com.alexbomber12.memtag.integrations.uhf.TagReading
 import com.alexbomber12.memtag.integrations.uhf.UhfApplyResult
 import com.alexbomber12.memtag.integrations.uhf.UhfConfig
+import com.alexbomber12.memtag.integrations.uhf.UhfDesiredConfig
 import com.alexbomber12.memtag.integrations.uhf.UhfDiagnosticsSource
 import com.alexbomber12.memtag.integrations.uhf.UhfError
 import com.alexbomber12.memtag.integrations.uhf.UhfException
@@ -42,10 +43,10 @@ data class DiagnosticsUiState(
     val lastRssi: Int? = null,
     val currentPower: Int = AppDefaults.UHF_POWER,
     val currentRegion: UhfRegion = UhfRegion.fromSettings(AppDefaults.UHF_REGION),
-    val desiredConfig: UhfConfig =
-        UhfConfig(
-            frequencyMode = UhfRegion.fromSettings(AppDefaults.UHF_REGION).toFrequencyMode() ?: 2,
-            power = AppDefaults.UHF_POWER,
+    val desiredConfig: UhfDesiredConfig =
+        UhfDesiredConfig(
+            region = UhfRegion.fromSettings(AppDefaults.UHF_REGION),
+            powerDbm = AppDefaults.UHF_POWER,
         ),
     val currentConfig: UhfConfig? = null,
     val lastApplyResult: UhfApplyResult? = null,
@@ -175,26 +176,39 @@ class DiagnosticsViewModel(
                 return@launch
             }
             val modeResult = uhfReader.getFrequencyMode()
+            val protocolResult = uhfReader.getProtocol()
+            val rfLinkResult = uhfReader.getRfLink()
             val powerResult = uhfReader.getPower()
             val modeError = modeResult.exceptionOrNull()
+            val protocolError = protocolResult.exceptionOrNull()
+            val rfLinkError = rfLinkResult.exceptionOrNull()
             val powerError = powerResult.exceptionOrNull()
-            if (isInventoryBusy(modeError) || isInventoryBusy(powerError)) {
+            if (isInventoryBusy(modeError) ||
+                isInventoryBusy(protocolError) ||
+                isInventoryBusy(rfLinkError) ||
+                isInventoryBusy(powerError)
+            ) {
                 UhfLogger.i("configOp skipped (busy): inventoryRunning=true op=read reason=diag-read")
                 mutableState.update { it.copy(isReadingConfig = false, configStatusMessage = BUSY_CONFIG_MESSAGE) }
                 return@launch
             }
-            if (modeResult.isFailure || powerResult.isFailure) {
+            if (modeResult.isFailure || protocolResult.isFailure || rfLinkResult.isFailure || powerResult.isFailure) {
                 mutableState.update { it.copy(isReadingConfig = false) }
-                updateError(modeError ?: powerError)
+                updateError(modeError ?: protocolError ?: rfLinkError ?: powerError)
                 return@launch
             }
             val config =
                 UhfConfig(
                     frequencyMode = modeResult.getOrNull() ?: 0,
                     power = powerResult.getOrNull() ?: 0,
+                    protocol = protocolResult.getOrNull() ?: 0,
+                    rfLink = rfLinkResult.getOrNull() ?: 0,
                 )
             mutableState.update { it.copy(isReadingConfig = false, currentConfig = config, configStatusMessage = null) }
-            UhfLogger.i("UHF config read (mode=${config.frequencyMode} power=${config.power})")
+            UhfLogger.i(
+                "UHF config read (mode=${config.frequencyMode} " +
+                    "protocol=${config.protocol} rfLink=${config.rfLink} power=${config.power})",
+            )
         }
     }
 
@@ -222,7 +236,14 @@ class DiagnosticsViewModel(
             }
             val applyResult = result.getOrNull()
             val updatedConfig =
-                applyResult?.let { UhfConfig(frequencyMode = it.afterMode ?: 0, power = it.afterPower ?: 0) }
+                applyResult?.let {
+                    UhfConfig(
+                        frequencyMode = it.afterMode ?: 0,
+                        power = it.afterPower ?: 0,
+                        protocol = it.afterProtocol ?: 0,
+                        rfLink = it.afterRfLink ?: 0,
+                    )
+                }
             mutableState.update {
                 it.copy(
                     isApplyingConfig = false,
@@ -471,12 +492,9 @@ class DiagnosticsViewModel(
         return (error as? UhfException)?.error == UhfError.OperationInProgress
     }
 
-    private fun desiredConfigFromSettings(settings: AppSettings): UhfConfig {
-        val frequencyMode =
-            settings.uhfFrequencyMode
-                ?: UhfRegion.fromSettings(settings.uhfRegion).toFrequencyMode()
-                ?: (UhfRegion.fromSettings(AppDefaults.UHF_REGION).toFrequencyMode() ?: 2)
-        return UhfConfig(frequencyMode = frequencyMode, power = settings.uhfPower)
+    private fun desiredConfigFromSettings(settings: AppSettings): UhfDesiredConfig {
+        val region = UhfRegion.fromSettings(settings.uhfRegion)
+        return UhfDesiredConfig(region = region, powerDbm = settings.uhfPower)
     }
 
     private companion object {

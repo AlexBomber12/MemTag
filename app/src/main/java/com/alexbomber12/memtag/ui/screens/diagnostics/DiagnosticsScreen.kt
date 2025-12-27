@@ -261,15 +261,21 @@ fun DiagnosticsScreen(viewModel: DiagnosticsViewModel) {
 
         item {
             AppCard(title = "UHF Config") {
+                val desired = state.desiredConfig
                 Text(
                     text =
-                        "Desired: mode=${state.desiredConfig.frequencyMode} " +
-                            "power=${state.desiredConfig.power}",
+                        "Desired: region=${desired.region.settingsValue} " +
+                            "mode=${formatMode(desired.frequencyMode)} " +
+                            "power=${desired.powerDbm} " +
+                            "protocol=${desired.protocol} " +
+                            "rflink=${desired.rfLink}",
                 )
                 val current = state.currentConfig
                 Text(
                     text =
-                        "Current: mode=${current?.frequencyMode?.toString() ?: "--"} " +
+                        "Current: mode=${formatMode(current?.frequencyMode)} " +
+                            "protocol=${current?.protocol?.toString() ?: "--"} " +
+                            "rflink=${current?.rfLink?.toString() ?: "--"} " +
                             "power=${current?.power?.toString() ?: "--"}",
                 )
                 val applyResult = state.lastApplyResult
@@ -279,16 +285,22 @@ fun DiagnosticsScreen(viewModel: DiagnosticsViewModel) {
                     Text(
                         text =
                             "Last apply: setModeOk=${applyResult.setModeOk} " +
+                                "setProtocolOk=${applyResult.setProtocolOk} " +
+                                "setRfLinkOk=${applyResult.setRfLinkOk} " +
                                 "setPowerOk=${applyResult.setPowerOk}",
                     )
                     Text(
                         text =
-                            "After: mode=${applyResult.afterMode} " +
+                            "After: mode=${formatMode(applyResult.afterMode)} " +
+                                "protocol=${applyResult.afterProtocol} " +
+                                "rflink=${applyResult.afterRfLink} " +
                                 "power=${applyResult.afterPower}",
                     )
                     Text(
                         text =
                             "Verified: modeApplied=${applyResult.modeApplied} " +
+                                "protocolApplied=${applyResult.protocolApplied} " +
+                                "rfLinkApplied=${applyResult.rfLinkApplied} " +
                                 "powerApplied=${applyResult.powerApplied}",
                     )
                 }
@@ -422,4 +434,12 @@ private fun trimProbeValue(
         return "--"
     }
     return if (value.length <= maxChars) value else value.take(maxChars)
+}
+
+private fun formatMode(value: Int?): String {
+    if (value == null) {
+        return "--"
+    }
+    val hex = value.toString(16).uppercase().padStart(2, '0')
+    return "0x$hex"
 }

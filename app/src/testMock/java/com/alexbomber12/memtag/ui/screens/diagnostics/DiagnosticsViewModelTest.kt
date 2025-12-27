@@ -3,6 +3,7 @@ package com.alexbomber12.memtag.ui.screens.diagnostics
 import com.alexbomber12.memtag.data.settings.AppSettings
 import com.alexbomber12.memtag.data.settings.SettingsStore
 import com.alexbomber12.memtag.integrations.uhf.FakeUhfReader
+import com.alexbomber12.memtag.integrations.uhf.UhfRegion
 import com.alexbomber12.memtag.testing.MainDispatcherRule
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
@@ -67,7 +68,7 @@ class DiagnosticsViewModelTest {
         }
 
     @Test
-    fun readSingleWhileInventoryRunningReportsError() =
+    fun readSingleWhileInventoryRunningStopsInventory() =
         runTest(mainDispatcherRule.dispatcher) {
             val viewModel = createViewModel()
 
@@ -79,9 +80,12 @@ class DiagnosticsViewModelTest {
 
             viewModel.readSingle()
             runCurrent()
+            advanceTimeBy(200)
+            runCurrent()
 
-            val error = viewModel.uiState.value.lastErrorMessage
-            assertNotNull(error)
+            assertNull(viewModel.uiState.value.lastErrorMessage)
+            assertNotNull(viewModel.uiState.value.lastReadEpc)
+            assertFalse(viewModel.uiState.value.isInventoryRunning)
 
             viewModel.stopInventory()
             advanceUntilIdle()
@@ -140,7 +144,14 @@ private class FakeSettingsStore(
         region: String,
         power: Int,
     ) {
-        state.update { it.copy(uhfRegion = region, uhfPower = power).sanitized() }
+        val frequencyMode = UhfRegion.fromSettings(region).toFrequencyMode()
+        state.update {
+            it.copy(
+                uhfRegion = region,
+                uhfPower = power,
+                uhfFrequencyMode = frequencyMode,
+            ).sanitized()
+        }
     }
 
     override suspend fun setScan2d(

@@ -160,6 +160,10 @@ private class FailingUhfReader : UhfReader {
 
     override suspend fun getFrequencyMode(): Result<Int> = Result.success(0)
 
+    override suspend fun getProtocol(): Result<Int> = Result.success(0)
+
+    override suspend fun getRfLink(): Result<Int> = Result.success(0)
+
     override suspend fun setRegion(region: UhfRegion): Result<Unit> = Result.success(Unit)
 
     override suspend fun getRegion(): Result<UhfRegion> = Result.success(UhfRegion.OTHER)

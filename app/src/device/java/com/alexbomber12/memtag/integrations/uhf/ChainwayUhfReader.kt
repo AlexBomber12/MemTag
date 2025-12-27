@@ -2,12 +2,11 @@ package com.alexbomber12.memtag.integrations.uhf
 
 import android.content.Context
 import android.util.Log
-import com.alexbomber12.memtag.data.AppDefaults
 import com.alexbomber12.memtag.data.settings.SettingsStore
 import com.alexbomber12.memtag.util.epc.EpcNormalizer
-import com.alexbomber12.memtag.util.epc.EpcValidator
 import com.rscja.deviceapi.RFIDWithUHFUART
 import com.rscja.deviceapi.entity.UHFTAGInfo
+import com.rscja.deviceapi.interfaces.IUHF
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -46,12 +45,13 @@ class ChainwayUhfReader(
         )
     private val diagnosticsState = MutableStateFlow(UhfDiagnostics())
     override val diagnosticsFlow: StateFlow<UhfDiagnostics> = diagnosticsState.asStateFlow()
-    private var reader: RFIDWithUHFUART? = null
+    private var reader: IUHF? = null
 
     private var initialized = false
     private var initInProgress = false
     private var inventoryJob: Job? = null
     private var inventoryRunning = false
+    private var inventoryLogCount = 0
 
     override suspend fun initialize(): Result<Unit> =
         mutex.withLock {
@@ -74,10 +74,10 @@ class ChainwayUhfReader(
                 withContext(Dispatchers.IO) {
                     Log.i(LOG_TAG, "init start")
                     uhfMutex.withLock { setPowerOnBySystemIfSupported(instance) }
-                    val initNoArgResult = uhfMutex.withLock { runCatching { instance.init() } }
-                    if (initNoArgResult.getOrNull() == true) {
+                    val initR2000Result = uhfMutex.withLock { initR2000IfSupported(instance) }
+                    if (initR2000Result?.getOrNull() == true) {
                         initialized = true
-                        Log.i(LOG_TAG, "init success (path=no-arg)")
+                        Log.i(LOG_TAG, "init success (path=init_R2000)")
                         val applyResult = applyUhfConfigLocked("post-init")
                         logApplyResult(applyResult.getOrNull())
                         return@withContext Result.success(Unit)
@@ -90,12 +90,12 @@ class ChainwayUhfReader(
                         logApplyResult(applyResult.getOrNull())
                         return@withContext Result.success(Unit)
                     }
-                    val fallbackApplied = disableSystemPowerOnFallback()
-                    val fallbackNoArgResult =
-                        if (fallbackApplied) uhfMutex.withLock { runCatching { instance.init() } } else null
-                    if (fallbackNoArgResult?.getOrNull() == true) {
+                    val fallbackApplied = uhfMutex.withLock { disableSystemPowerOnFallback() }
+                    val fallbackR2000Result =
+                        if (fallbackApplied) uhfMutex.withLock { initR2000IfSupported(instance) } else null
+                    if (fallbackR2000Result?.getOrNull() == true) {
                         initialized = true
-                        Log.i(LOG_TAG, "init success (path=fallback-no-arg)")
+                        Log.i(LOG_TAG, "init success (path=fallback-init_R2000)")
                         val applyResult = applyUhfConfigLocked("post-init")
                         logApplyResult(applyResult.getOrNull())
                         return@withContext Result.success(Unit)
@@ -111,13 +111,14 @@ class ChainwayUhfReader(
                     }
                     val message =
                         buildString {
-                            append("UHF initialization failed: init()=")
-                            append(formatInitResult(initNoArgResult))
+                            append("UHF initialization failed (UART). Module unavailable or busy: ")
+                            append("init_R2000=")
+                            append(formatInitResult(initR2000Result))
                             append(", init(context)=")
                             append(formatInitResult(initContextResult))
                             if (fallbackApplied) {
-                                append(", init(afterDisable)=")
-                                append(formatInitResult(fallbackNoArgResult))
+                                append(", init_R2000(afterDisable)=")
+                                append(formatInitResult(fallbackR2000Result))
                                 append(", init(context afterDisable)=")
                                 append(formatInitResult(fallbackContextResult))
                             }
@@ -174,12 +175,12 @@ class ChainwayUhfReader(
             return Result.failure(UhfError.OperationInProgress.asException())
         }
         val instance = reader ?: return Result.failure(UhfError.HardwareUnavailable.asException())
-        var startedInventory = false
+        Log.i(LOG_TAG, "singleScan start (timeoutMs=$timeoutMs)")
         return try {
-            val epc =
+            val parsed =
                 withTimeout(timeoutMs) {
-                    var resolved: String? = null
-                    while (resolved.isNullOrBlank()) {
+                    var resolved: ParsedTag? = null
+                    while (resolved?.epc.isNullOrBlank()) {
                         val reading =
                             withContext(Dispatchers.IO) {
                                 uhfMutex.withLock { singleReadOnceLocked(instance) }
@@ -187,29 +188,27 @@ class ChainwayUhfReader(
                         if (reading != null) {
                             recordParsedTag(reading)
                         }
-                        val candidate = reading?.epc
-                        if (!candidate.isNullOrBlank()) {
-                            resolved = candidate
-                        } else {
+                        if (reading?.epc.isNullOrBlank()) {
                             delay(SINGLE_READ_RETRY_DELAY_MS)
+                        } else {
+                            resolved = reading
                         }
                     }
                     requireNotNull(resolved)
                 }
-            Result.success(epc)
+            Log.i(
+                LOG_TAG,
+                "singleScan end (result=${parsed.epc ?: "--"} rssi=${parsed.rssi ?: "--"} tid=${parsed.tid ?: "--"})",
+            )
+            Result.success(parsed.epc.orEmpty())
         } catch (_: TimeoutCancellationException) {
             Result.failure(UhfError.Timeout.asException())
         } catch (error: Throwable) {
+            Log.w(LOG_TAG, "singleScan end (result=error message=${error.message})")
             Result.failure(
                 UhfError.VendorError(error.message ?: "UHF read error")
                     .asException(cause = error),
             )
-        } finally {
-            if (startedInventory) {
-                withContext(Dispatchers.IO) {
-                    uhfMutex.withLock { runCatching { instance.stopInventory() } }
-                }
-            }
         }
     }
 
@@ -342,6 +341,9 @@ class ChainwayUhfReader(
             if (!initialized) {
                 return@withLock flow { throw UhfError.NotInitialized.asException() }
             }
+            if (inventoryJob == null && inventoryRunning) {
+                return@withLock flow { throw UhfError.OperationInProgress.asException() }
+            }
             if (inventoryJob == null) {
                 val instance = reader ?: return@withLock flow { throw UhfError.HardwareUnavailable.asException() }
                 Log.i(LOG_TAG, "startInventoryTag called")
@@ -366,7 +368,8 @@ class ChainwayUhfReader(
                     diagnosticsState.update { it.copy(inventoryRunning = false) }
                     return@withLock flow { throw UhfError.VendorError("Failed to start inventory").asException() }
                 }
-                inventoryRunning = true
+                inventoryRunning = started
+                inventoryLogCount = 0
                 diagnosticsState.update { it.copy(inventoryRunning = true) }
                 val job =
                     scope.launch {
@@ -398,8 +401,6 @@ class ChainwayUhfReader(
                             mutex.withLock {
                                 if (inventoryJob == self) {
                                     inventoryJob = null
-                                    inventoryRunning = false
-                                    diagnosticsState.update { it.copy(inventoryRunning = false) }
                                 }
                             }
                         }
@@ -417,7 +418,7 @@ class ChainwayUhfReader(
     }
 
     override suspend fun stopInventory(): Result<Unit> {
-        val instance: RFIDWithUHFUART?
+        val instance: IUHF?
         val wasRunning: Boolean
         val jobToCancel: Job?
         mutex.withLock {
@@ -425,14 +426,16 @@ class ChainwayUhfReader(
             inventoryJob = null
             jobToCancel?.cancel()
             wasRunning = inventoryRunning || jobToCancel != null
-            inventoryRunning = false
-            diagnosticsState.update { it.copy(inventoryRunning = false) }
             instance = reader
         }
         if (!wasRunning) {
             return Result.success(Unit)
         }
         if (instance == null) {
+            mutex.withLock {
+                inventoryRunning = false
+                diagnosticsState.update { it.copy(inventoryRunning = false) }
+            }
             return Result.success(Unit)
         }
         Log.i(LOG_TAG, "stopInventory called")
@@ -456,6 +459,10 @@ class ChainwayUhfReader(
         }
         diagnosticsState.update { it.copy(stopInventoryOk = stopOk) }
         if (stopOk) {
+            mutex.withLock {
+                inventoryRunning = false
+                diagnosticsState.update { it.copy(inventoryRunning = false) }
+            }
             return Result.success(Unit)
         }
         val errCode =
@@ -465,7 +472,13 @@ class ChainwayUhfReader(
         if (errCode != null) {
             Log.w(LOG_TAG, "stopInventory failed errCode=$errCode")
         }
-        recoverAfterStopFailure(instance)
+        val recovered = recoverAfterStopFailure(instance)
+        if (recovered) {
+            mutex.withLock {
+                inventoryRunning = false
+                diagnosticsState.update { it.copy(inventoryRunning = false) }
+            }
+        }
         val suffix = if (errCode != null) " (errCode=$errCode)" else ""
         return Result.failure(
             UhfError.VendorError("Failed to stop inventory$suffix").asException(cause = lastError),
@@ -483,7 +496,7 @@ class ChainwayUhfReader(
             val instance = reader ?: return@withLock Result.failure(UhfError.HardwareUnavailable.asException())
             withContext(Dispatchers.IO) {
                 uhfMutex.withLock { setPowerOnBySystemIfSupported(instance) }
-                val result: Any =
+                val result =
                     uhfMutex.withLock { runCatching { instance.setPower(dbm) } }
                         .getOrElse { error ->
                             return@withContext Result.failure(
@@ -492,12 +505,7 @@ class ChainwayUhfReader(
                             )
                         }
                 Log.i(LOG_TAG, "setPower($dbm) -> $result")
-                val failureMessage =
-                    when (result) {
-                        is Boolean -> if (result) null else "setPower failed: false"
-                        is Int -> if (result >= 0) null else "setPower failed: $result"
-                        else -> null
-                    }
+                val failureMessage = if (result) null else "setPower failed: false"
                 val currentPower = uhfMutex.withLock { runCatching { instance.getPower() }.getOrNull() }
                 Log.i(LOG_TAG, "getPower -> $currentPower")
                 if (failureMessage == null ||
@@ -564,6 +572,58 @@ class ChainwayUhfReader(
             }
         }
 
+    override suspend fun getProtocol(): Result<Int> =
+        mutex.withLock {
+            if (!initialized) {
+                return@withLock Result.failure(UhfError.NotInitialized.asException())
+            }
+            if (inventoryRunning) {
+                return@withLock Result.failure(UhfError.OperationInProgress.asException())
+            }
+            val instance = reader ?: return@withLock Result.failure(UhfError.HardwareUnavailable.asException())
+            withContext(Dispatchers.IO) {
+                uhfMutex.withLock { runCatching { instance.getProtocol() } }
+                    .fold(
+                        onSuccess = {
+                            Log.i(LOG_TAG, "getProtocol -> $it")
+                            Result.success(it)
+                        },
+                        onFailure = { error ->
+                            Result.failure(
+                                UhfError.VendorError(error.message ?: "UHF get protocol error")
+                                    .asException(cause = error),
+                            )
+                        },
+                    )
+            }
+        }
+
+    override suspend fun getRfLink(): Result<Int> =
+        mutex.withLock {
+            if (!initialized) {
+                return@withLock Result.failure(UhfError.NotInitialized.asException())
+            }
+            if (inventoryRunning) {
+                return@withLock Result.failure(UhfError.OperationInProgress.asException())
+            }
+            val instance = reader ?: return@withLock Result.failure(UhfError.HardwareUnavailable.asException())
+            withContext(Dispatchers.IO) {
+                uhfMutex.withLock { runCatching { instance.getRFLink() } }
+                    .fold(
+                        onSuccess = {
+                            Log.i(LOG_TAG, "getRFLink -> $it")
+                            Result.success(it)
+                        },
+                        onFailure = { error ->
+                            Result.failure(
+                                UhfError.VendorError(error.message ?: "UHF get rflink error")
+                                    .asException(cause = error),
+                            )
+                        },
+                    )
+            }
+        }
+
     override suspend fun setRegion(region: UhfRegion): Result<Unit> =
         mutex.withLock {
             if (!initialized) {
@@ -572,13 +632,11 @@ class ChainwayUhfReader(
             if (inventoryRunning) {
                 return@withLock Result.failure(UhfError.OperationInProgress.asException())
             }
-            val mode =
-                region.toFrequencyMode()
-                    ?: return@withLock Result.failure(UhfError.VendorError("Region not supported by SDK").asException())
+            val mode = region.toFrequencyMode()
             val instance = reader ?: return@withLock Result.failure(UhfError.HardwareUnavailable.asException())
             withContext(Dispatchers.IO) {
                 uhfMutex.withLock { setPowerOnBySystemIfSupported(instance) }
-                val result: Any =
+                val result =
                     uhfMutex.withLock { runCatching { instance.setFrequencyMode(mode) } }
                         .getOrElse { error ->
                             return@withContext Result.failure(
@@ -587,12 +645,7 @@ class ChainwayUhfReader(
                             )
                         }
                 Log.i(LOG_TAG, "setFrequencyMode($mode) -> $result")
-                val failureMessage =
-                    when (result) {
-                        is Boolean -> if (result) null else "setRegion failed: false"
-                        is Int -> if (result >= 0) null else "setRegion failed: $result"
-                        else -> null
-                    }
+                val failureMessage = if (result) null else "setRegion failed: false"
                 val currentMode = uhfMutex.withLock { runCatching { instance.getFrequencyMode() }.getOrNull() }
                 Log.i(LOG_TAG, "getFrequencyMode -> $currentMode")
                 if (failureMessage == null || currentMode == mode) {
@@ -655,6 +708,22 @@ class ChainwayUhfReader(
                                 .asException(cause = error),
                         )
                     }
+            val beforeProtocol =
+                uhfMutex.withLock { runCatching { instance.getProtocol() } }
+                    .getOrElse { error ->
+                        return@withContext Result.failure(
+                            UhfError.VendorError(error.message ?: "UHF get protocol error")
+                                .asException(cause = error),
+                        )
+                    }
+            val beforeRfLink =
+                uhfMutex.withLock { runCatching { instance.getRFLink() } }
+                    .getOrElse { error ->
+                        return@withContext Result.failure(
+                            UhfError.VendorError(error.message ?: "UHF get rflink error")
+                                .asException(cause = error),
+                        )
+                    }
             val beforePower =
                 uhfMutex.withLock { runCatching { instance.getPower() } }
                     .getOrElse { error ->
@@ -663,8 +732,6 @@ class ChainwayUhfReader(
                                 .asException(cause = error),
                         )
                     }
-            Log.i(LOG_TAG, "getFrequencyMode -> $beforeMode")
-            Log.i(LOG_TAG, "getPower -> $beforePower")
             val setModeOk =
                 uhfMutex.withLock { runCatching { instance.setFrequencyMode(desired.frequencyMode) } }
                     .getOrElse { error ->
@@ -673,21 +740,51 @@ class ChainwayUhfReader(
                                 .asException(cause = error),
                         )
                     }
+            val setProtocolOk =
+                uhfMutex.withLock { runCatching { instance.setProtocol(desired.protocol) } }
+                    .getOrElse { error ->
+                        return@withContext Result.failure(
+                            UhfError.VendorError(error.message ?: "UHF set protocol error")
+                                .asException(cause = error),
+                        )
+                    }
+            val setRfLinkOk =
+                uhfMutex.withLock { runCatching { instance.setRFLink(desired.rfLink) } }
+                    .getOrElse { error ->
+                        return@withContext Result.failure(
+                            UhfError.VendorError(error.message ?: "UHF set rflink error")
+                                .asException(cause = error),
+                        )
+                    }
             val setPowerOk =
-                uhfMutex.withLock { runCatching { instance.setPower(desired.power) } }
+                uhfMutex.withLock { runCatching { instance.setPower(desired.powerDbm) } }
                     .getOrElse { error ->
                         return@withContext Result.failure(
                             UhfError.VendorError(error.message ?: "UHF set power error")
                                 .asException(cause = error),
                         )
                     }
-            Log.i(LOG_TAG, "setFrequencyMode(${desired.frequencyMode}) -> $setModeOk")
-            Log.i(LOG_TAG, "setPower(${desired.power}) -> $setPowerOk")
             val afterMode =
                 uhfMutex.withLock { runCatching { instance.getFrequencyMode() } }
                     .getOrElse { error ->
                         return@withContext Result.failure(
                             UhfError.VendorError(error.message ?: "UHF get frequency mode error")
+                                .asException(cause = error),
+                        )
+                    }
+            val afterProtocol =
+                uhfMutex.withLock { runCatching { instance.getProtocol() } }
+                    .getOrElse { error ->
+                        return@withContext Result.failure(
+                            UhfError.VendorError(error.message ?: "UHF get protocol error")
+                                .asException(cause = error),
+                        )
+                    }
+            val afterRfLink =
+                uhfMutex.withLock { runCatching { instance.getRFLink() } }
+                    .getOrElse { error ->
+                        return@withContext Result.failure(
+                            UhfError.VendorError(error.message ?: "UHF get rflink error")
                                 .asException(cause = error),
                         )
                     }
@@ -699,37 +796,57 @@ class ChainwayUhfReader(
                                 .asException(cause = error),
                         )
                     }
-            Log.i(LOG_TAG, "getFrequencyMode -> $afterMode")
-            Log.i(LOG_TAG, "getPower -> $afterPower")
             val modeApplied = afterMode == desired.frequencyMode
-            val powerApplied = afterPower == desired.power
+            val protocolApplied = afterProtocol == desired.protocol
+            val rfLinkApplied = afterRfLink == desired.rfLink
+            val powerApplied = afterPower == desired.powerDbm
             val result =
                 UhfApplyResult(
                     reason = reason,
                     beforeMode = beforeMode,
                     beforePower = beforePower,
+                    beforeProtocol = beforeProtocol,
+                    beforeRfLink = beforeRfLink,
                     desiredMode = desired.frequencyMode,
-                    desiredPower = desired.power,
+                    desiredPower = desired.powerDbm,
+                    desiredProtocol = desired.protocol,
+                    desiredRfLink = desired.rfLink,
                     setModeOk = setModeOk,
                     setPowerOk = setPowerOk,
+                    setProtocolOk = setProtocolOk,
+                    setRfLinkOk = setRfLinkOk,
                     afterMode = afterMode,
                     afterPower = afterPower,
+                    afterProtocol = afterProtocol,
+                    afterRfLink = afterRfLink,
                     modeApplied = modeApplied,
                     powerApplied = powerApplied,
+                    protocolApplied = protocolApplied,
+                    rfLinkApplied = rfLinkApplied,
                 )
             Log.i(
                 LOG_TAG,
                 "applyUhfConfig(" +
                     "reason=$reason " +
                     "beforeMode=$beforeMode " +
+                    "beforeProtocol=$beforeProtocol " +
+                    "beforeRfLink=$beforeRfLink " +
                     "beforePower=$beforePower " +
                     "desiredMode=${desired.frequencyMode} " +
-                    "desiredPower=${desired.power} " +
+                    "desiredProtocol=${desired.protocol} " +
+                    "desiredRfLink=${desired.rfLink} " +
+                    "desiredPower=${desired.powerDbm} " +
                     "setModeOk=$setModeOk " +
+                    "setProtocolOk=$setProtocolOk " +
+                    "setRfLinkOk=$setRfLinkOk " +
                     "setPowerOk=$setPowerOk " +
                     "afterMode=$afterMode " +
+                    "afterProtocol=$afterProtocol " +
+                    "afterRfLink=$afterRfLink " +
                     "afterPower=$afterPower " +
                     "modeApplied=$modeApplied " +
+                    "protocolApplied=$protocolApplied " +
+                    "rfLinkApplied=$rfLinkApplied " +
                     "powerApplied=$powerApplied" +
                     ")",
             )
@@ -760,6 +877,22 @@ class ChainwayUhfReader(
                                 .asException(cause = error),
                         )
                     }
+            val currentProtocol =
+                uhfMutex.withLock { runCatching { instance.getProtocol() } }
+                    .getOrElse { error ->
+                        return@withContext Result.failure(
+                            UhfError.VendorError(error.message ?: "UHF get protocol error")
+                                .asException(cause = error),
+                        )
+                    }
+            val currentRfLink =
+                uhfMutex.withLock { runCatching { instance.getRFLink() } }
+                    .getOrElse { error ->
+                        return@withContext Result.failure(
+                            UhfError.VendorError(error.message ?: "UHF get rflink error")
+                                .asException(cause = error),
+                        )
+                    }
             val currentPower =
                 uhfMutex.withLock { runCatching { instance.getPower() } }
                     .getOrElse { error ->
@@ -768,19 +901,24 @@ class ChainwayUhfReader(
                                 .asException(cause = error),
                         )
                     }
-            if (currentMode == desired.frequencyMode && currentPower == desired.power) {
+            if (currentMode == desired.frequencyMode &&
+                currentProtocol == desired.protocol &&
+                currentRfLink == desired.rfLink &&
+                currentPower == desired.powerDbm
+            ) {
                 Log.i(
                     LOG_TAG,
                     "applyUhfConfigIfNeeded(reason=$reason) config already OK " +
-                        "(mode=$currentMode power=$currentPower)",
+                        "(mode=$currentMode protocol=$currentProtocol rfLink=$currentRfLink power=$currentPower)",
                 )
                 Result.success(null)
             } else {
                 Log.i(
                     LOG_TAG,
                     "applyUhfConfigIfNeeded(reason=$reason) mismatch " +
-                        "(mode=$currentMode power=$currentPower desiredMode=${desired.frequencyMode} " +
-                        "desiredPower=${desired.power})",
+                        "(mode=$currentMode protocol=$currentProtocol rfLink=$currentRfLink power=$currentPower " +
+                        "desiredMode=${desired.frequencyMode} desiredProtocol=${desired.protocol} " +
+                        "desiredRfLink=${desired.rfLink} desiredPower=${desired.powerDbm})",
                 )
                 applyUhfConfigLocked(reason)
             }
@@ -797,10 +935,8 @@ class ChainwayUhfReader(
             try {
                 runMatrixProbeLocked(instance)
             } finally {
-                inventoryRunning = false
                 diagnosticsState.update {
                     it.copy(
-                        inventoryRunning = false,
                         matrixProbeRunning = false,
                         matrixProbeCurrent = null,
                     )
@@ -808,23 +944,23 @@ class ChainwayUhfReader(
             }
         }
 
-    private suspend fun runMatrixProbeLocked(instance: RFIDWithUHFUART): List<MatrixProbeResult> {
+    private suspend fun runMatrixProbeLocked(instance: IUHF): List<MatrixProbeResult> {
         val results = mutableListOf<MatrixProbeResult>()
         results +=
             runMatrixProbeStepLocked(
                 instance = instance,
-                name = "A: UID inventory",
+                name = "A: TAG inventory (no params)",
                 note = null,
                 startAction = {
                     withContext(Dispatchers.IO) {
                         uhfMutex.withLock {
-                            startInventoryLocked(instance, "startInventory", byteArrayOf(0, 0))
+                            startInventoryLocked(instance, "startInventoryTag", byteArrayOf())
                         }
                     }
                 },
                 readAction = {
                     withContext(Dispatchers.IO) {
-                        uhfMutex.withLock { readUidFromBufferLocked(instance) }
+                        uhfMutex.withLock { readTagFromBufferDirectLocked(instance) }
                     }
                 },
             )
@@ -887,7 +1023,7 @@ class ChainwayUhfReader(
     }
 
     private suspend fun runMatrixProbeStepLocked(
-        instance: RFIDWithUHFUART,
+        instance: IUHF,
         name: String,
         note: String?,
         startAction: suspend () -> Boolean,
@@ -924,8 +1060,6 @@ class ChainwayUhfReader(
                 }
             }
         } finally {
-            inventoryRunning = false
-            diagnosticsState.update { it.copy(inventoryRunning = false) }
             stopOk = stopInventoryBestEffortLocked(instance)
         }
         val result =
@@ -944,34 +1078,34 @@ class ChainwayUhfReader(
         return result
     }
 
-    private suspend fun applyProtocolRflinkLocked(instance: RFIDWithUHFUART): String? {
+    private suspend fun applyProtocolRflinkLocked(instance: IUHF): String? {
         val stopOk = stopInventoryBestEffortLocked(instance)
         if (!stopOk) {
-            Log.w(MATRIX_LOG_TAG, "matrixProbe protocol/rflink skipped: stopInventory failed")
+            Log.w(LOG_TAG, "matrixProbe protocol/rflink skipped: stopInventory failed")
             return "protocol=? rflink=?"
         }
         val protocolSetOk =
             withContext(Dispatchers.IO) {
                 uhfMutex.withLock {
-                    setProtocolLocked(instance, MATRIX_PROTOCOL_ISO_18000_6C.toByte())
+                    runCatching { instance.setProtocol(UHF_PROTOCOL_ISO_18000_6C) }.getOrNull() == true
                 }
             }
         val rflinkSetOk =
             withContext(Dispatchers.IO) {
                 uhfMutex.withLock {
-                    setRFLinkLocked(instance, MATRIX_RFLINK_DSB_ASK.toByte())
+                    runCatching { instance.setRFLink(UHF_RFLINK_DSB_ASK) }.getOrNull() == true
                 }
             }
         val protocol =
             withContext(Dispatchers.IO) {
-                uhfMutex.withLock { getProtocolLocked(instance) }
+                uhfMutex.withLock { runCatching { instance.getProtocol() }.getOrNull() }
             }
         val rflink =
             withContext(Dispatchers.IO) {
-                uhfMutex.withLock { getRFLinkLocked(instance) }
+                uhfMutex.withLock { runCatching { instance.getRFLink() }.getOrNull() }
             }
         Log.i(
-            MATRIX_LOG_TAG,
+            LOG_TAG,
             "matrixProbe protocolSet=$protocolSetOk rflinkSet=$rflinkSetOk " +
                 "protocol=${protocol ?: "?"} rflink=${rflink ?: "?"}",
         )
@@ -980,14 +1114,16 @@ class ChainwayUhfReader(
         return "protocol=$protocolNote rflink=$rflinkNote"
     }
 
-    private suspend fun stopInventoryBestEffortLocked(instance: RFIDWithUHFUART?): Boolean {
+    private suspend fun stopInventoryBestEffortLocked(instance: IUHF?): Boolean {
         val wasRunning = inventoryRunning || inventoryJob != null
         val jobToCancel = inventoryJob
         inventoryJob = null
         jobToCancel?.cancel()
-        inventoryRunning = false
-        diagnosticsState.update { it.copy(inventoryRunning = false) }
         if (instance == null) {
+            if (wasRunning) {
+                inventoryRunning = false
+                diagnosticsState.update { it.copy(inventoryRunning = false) }
+            }
             return !wasRunning
         }
         var stopOk = false
@@ -1011,6 +1147,10 @@ class ChainwayUhfReader(
         if (!stopOk && lastError != null) {
             Log.w(LOG_TAG, "stopInventory(bestEffort) failed: ${lastError.message}")
         }
+        if (stopOk || !wasRunning) {
+            inventoryRunning = false
+            diagnosticsState.update { it.copy(inventoryRunning = false) }
+        }
         return stopOk || !wasRunning
     }
 
@@ -1021,7 +1161,7 @@ class ChainwayUhfReader(
     )
 
     private fun startInventoryLocked(
-        instance: RFIDWithUHFUART,
+        instance: IUHF,
         methodName: String,
         params: ByteArray,
     ): Boolean {
@@ -1039,58 +1179,6 @@ class ChainwayUhfReader(
             }.toTypedArray()
         val result = runCatching { method.invoke(instance, *coercedArgs) }.getOrNull()
         return resultToBoolean(result)
-    }
-
-    private fun setProtocolLocked(
-        instance: RFIDWithUHFUART,
-        protocol: Byte,
-    ): Boolean {
-        val method =
-            instance.javaClass.methods.firstOrNull {
-                it.name == "setProtocol" && it.parameterTypes.size == 1
-            }
-        if (method == null) {
-            Log.w(LOG_TAG, "matrixProbe setProtocol not supported")
-            return false
-        }
-        val arg = coerceByteArg(protocol, method.parameterTypes[0])
-        val result = runCatching { method.invoke(instance, arg) }.getOrNull()
-        return resultToBoolean(result)
-    }
-
-    private fun getProtocolLocked(instance: RFIDWithUHFUART): Int? {
-        val method =
-            instance.javaClass.methods.firstOrNull {
-                it.name == "getProtocol" && it.parameterTypes.isEmpty()
-            } ?: return null
-        val result = runCatching { method.invoke(instance) }.getOrNull()
-        return resultToInt(result)
-    }
-
-    private fun setRFLinkLocked(
-        instance: RFIDWithUHFUART,
-        rflink: Byte,
-    ): Boolean {
-        val method =
-            instance.javaClass.methods.firstOrNull {
-                it.name == "setRFLink" && it.parameterTypes.size == 1
-            }
-        if (method == null) {
-            Log.w(LOG_TAG, "matrixProbe setRFLink not supported")
-            return false
-        }
-        val arg = coerceByteArg(rflink, method.parameterTypes[0])
-        val result = runCatching { method.invoke(instance, arg) }.getOrNull()
-        return resultToBoolean(result)
-    }
-
-    private fun getRFLinkLocked(instance: RFIDWithUHFUART): Int? {
-        val method =
-            instance.javaClass.methods.firstOrNull {
-                it.name == "getRFLink" && it.parameterTypes.isEmpty()
-            } ?: return null
-        val result = runCatching { method.invoke(instance) }.getOrNull()
-        return resultToInt(result)
     }
 
     private fun normalizeProbeField(value: String?): String? {
@@ -1123,22 +1211,13 @@ class ChainwayUhfReader(
         }
     }
 
-    private fun resultToInt(result: Any?): Int? {
-        return when (result) {
-            is Number -> result.toInt()
-            is Boolean -> if (result) 1 else 0
-            is String -> result.toIntOrNull()
-            else -> null
-        }
-    }
-
     private fun logMatrixProbeResult(result: MatrixProbeResult) {
         val probeCode = result.name.substringBefore(":").trim()
         val first0 = result.firstRaw0 ?: "--"
         val first1 = result.firstRaw1 ?: "--"
         val note = result.note ?: "--"
         Log.i(
-            MATRIX_LOG_TAG,
+            LOG_TAG,
             "probe=$probeCode " +
                 "startOk=${result.startOk} " +
                 "stopOk=${result.stopOk} " +
@@ -1151,205 +1230,60 @@ class ChainwayUhfReader(
     }
 
     private data class ParsedTag(
-        val raw: Array<String>,
         val epc: String?,
+        val tid: String?,
         val rssi: Int?,
-        val uiiIndex: Int?,
+        val rssiRaw: String?,
     )
 
-    private data class UiiSelection(
-        val index: Int?,
-        val uii: String?,
-        val epc: String?,
-    )
-
-    private fun readBufferOnceLocked(instance: RFIDWithUHFUART): ParsedTag? {
-        val raw = readTagFromAnyBufferLocked(instance) ?: return null
-        return parseRawLocked(instance, raw, source = "buffer")
+    private fun readBufferOnceLocked(instance: IUHF): ParsedTag? {
+        val info = runCatching { instance.readTagFromBuffer() }.getOrNull() ?: return null
+        return parseTagInfo(info, source = "buffer")
     }
 
-    private fun singleReadOnceLocked(instance: RFIDWithUHFUART): ParsedTag? {
-        val r2000Raw = inventorySingleTagWithR2000Locked(instance)
-        if (r2000Raw != null) {
-            return parseRawLocked(instance, r2000Raw, source = "single-r2000")
-        }
-        val legacy = runCatching { instance.inventorySingleTag() }.getOrNull() ?: return null
-        return parseRawLocked(instance, tagInfoToRaw(legacy), source = "single")
+    private fun singleReadOnceLocked(instance: IUHF): ParsedTag? {
+        val info = runCatching { instance.inventorySingleTag() }.getOrNull() ?: return null
+        return parseTagInfo(info, source = "single")
     }
 
-    private fun readTagFromAnyBufferLocked(instance: RFIDWithUHFUART): Array<String>? {
-        val r2000Raw = readTagFromR2000BufferLocked(instance)
-        if (r2000Raw != null) {
-            return r2000Raw
-        }
-        val legacy = runCatching { instance.readTagFromBuffer() }.getOrNull() ?: return null
-        return when (legacy) {
-            is UHFTAGInfo -> tagInfoToRaw(legacy)
-            is Array<*> -> castStringArray(legacy)
-            else -> null
-        }
+    private fun readTagFromBufferDirectLocked(instance: IUHF): ProbeRead? {
+        val info = runCatching { instance.readTagFromBuffer() }.getOrNull() ?: return null
+        return ProbeRead(
+            raw0 = normalizeProbeField(info.getEPC()),
+            raw1 = normalizeProbeField(info.getTid()),
+            rssi = normalizeProbeField(info.getRssi()),
+        )
     }
 
-    private fun readTagFromBufferDirectLocked(instance: RFIDWithUHFUART): ProbeRead? {
-        val legacy = runCatching { instance.readTagFromBuffer() }.getOrNull() ?: return null
-        return when (legacy) {
-            is UHFTAGInfo ->
-                ProbeRead(
-                    raw0 = normalizeProbeField(legacy.epc),
-                    raw1 = normalizeProbeField(legacy.tid),
-                    rssi = normalizeProbeField(legacy.rssi),
-                )
-            is Array<*> -> {
-                val raw0 = normalizeProbeField(legacy.getOrNull(0) as? String)
-                val raw1 = normalizeProbeField(legacy.getOrNull(1) as? String)
-                val raw2 = normalizeProbeField(legacy.getOrNull(2) as? String)
-                ProbeRead(raw0 = raw0, raw1 = raw1, rssi = raw2)
-            }
-            else -> null
-        }
-    }
-
-    private fun readUidFromBufferLocked(instance: RFIDWithUHFUART): ProbeRead? {
-        val result =
-            runCatching {
-                val method = instance.javaClass.getMethod("readUidFromBuffer")
-                method.invoke(instance)
-            }.getOrNull() ?: return null
-        return when (result) {
-            is String ->
-                ProbeRead(
-                    raw0 = normalizeProbeField(result),
-                    raw1 = null,
-                    rssi = null,
-                )
-            is Array<*> -> {
-                val raw0 = normalizeProbeField(result.getOrNull(0) as? String)
-                val rssi = normalizeProbeField(result.getOrNull(1) as? String)
-                ProbeRead(
-                    raw0 = raw0,
-                    raw1 = null,
-                    rssi = rssi,
-                )
-            }
-            is UHFTAGInfo ->
-                ProbeRead(
-                    raw0 = normalizeProbeField(result.epc),
-                    raw1 = null,
-                    rssi = normalizeProbeField(result.rssi),
-                )
-            else -> null
-        }
-    }
-
-    private fun readTagFromR2000BufferLocked(instance: RFIDWithUHFUART): Array<String>? {
-        val result =
-            runCatching {
-                val method = instance.javaClass.getMethod("readTagFromR2000Buffer")
-                method.invoke(instance)
-            }.getOrNull()
-        return castStringArray(result)
-    }
-
-    private fun inventorySingleTagWithR2000Locked(instance: RFIDWithUHFUART): Array<String>? {
-        val result =
-            runCatching {
-                val method = instance.javaClass.getMethod("inventorySingleTagWithR2000")
-                method.invoke(instance)
-            }.getOrNull()
-        return castStringArray(result)
-    }
-
-    private fun castStringArray(value: Any?): Array<String>? {
-        val array = value as? Array<*> ?: return null
-        val strings = array.map { it as? String ?: "" }.toTypedArray()
-        return strings.takeIf { it.isNotEmpty() }
-    }
-
-    private fun parseRawLocked(
-        instance: RFIDWithUHFUART,
-        raw: Array<String>,
+    private fun parseTagInfo(
+        tagInfo: UHFTAGInfo,
         source: String,
     ): ParsedTag {
-        val raw0 = raw.getOrNull(0)
-        val raw1 = raw.getOrNull(1)
-        val raw2 = raw.getOrNull(2)
-        Log.i(
-            LOG_TAG,
-            "tagRead source=$source " +
-                "raw0=$raw0 len0=${raw0?.length ?: 0} " +
-                "raw1=$raw1 len1=${raw1?.length ?: 0} " +
-                "raw2=$raw2 len2=${raw2?.length ?: 0}",
-        )
-        val selection = selectUiiCandidateLocked(instance, raw)
-        Log.i(
-            LOG_TAG,
-            "tagRead source=$source uiiIndex=${selection.index} epc=${selection.epc ?: "(null)"}",
-        )
-        val rssi = parseRssi(raw)
+        val epc = normalizeProbeField(tagInfo.getEPC())
+        val tid = normalizeProbeField(tagInfo.getTid())
+        val rssiRaw = normalizeProbeField(tagInfo.getRssi())
+        val rssi = rssiRaw?.toIntOrNull()
+        if (!epc.isNullOrBlank() && inventoryRunning && inventoryLogCount < INVENTORY_LOG_LIMIT) {
+            Log.i(
+                LOG_TAG,
+                "inventory tag source=$source epc=$epc rssi=${rssi ?: "--"} tid=${tid ?: "--"}",
+            )
+            inventoryLogCount += 1
+        }
         return ParsedTag(
-            raw = raw,
-            epc = selection.epc,
+            epc = epc,
+            tid = tid,
             rssi = rssi,
-            uiiIndex = selection.index,
+            rssiRaw = rssiRaw,
         )
-    }
-
-    private fun selectUiiCandidateLocked(
-        instance: RFIDWithUHFUART,
-        raw: Array<String>,
-    ): UiiSelection {
-        val maxIndex = minOf(raw.size, MAX_RAW_FIELDS)
-        for (index in 0 until maxIndex) {
-            val candidate = raw[index].trim()
-            if (candidate.isBlank()) {
-                continue
-            }
-            val converted = convertUiiToEpcLocked(instance, candidate)
-            if (!converted.isNullOrBlank() && EpcValidator.isValidEpcHex(converted)) {
-                return UiiSelection(index = index, uii = candidate, epc = converted)
-            }
-        }
-        for (index in 0 until maxIndex) {
-            val candidate = raw[index].trim()
-            if (candidate.isBlank()) {
-                continue
-            }
-            if (EpcValidator.isValidEpcHex(candidate)) {
-                return UiiSelection(index = index, uii = candidate, epc = candidate)
-            }
-        }
-        val fallbackIndex = (0 until maxIndex).firstOrNull { raw[it].trim().isNotBlank() }
-        val fallback = fallbackIndex?.let { raw[it].trim() }
-        return UiiSelection(
-            index = fallbackIndex,
-            uii = fallback,
-            epc = fallback?.takeIf { it.isNotBlank() },
-        )
-    }
-
-    private fun convertUiiToEpcLocked(
-        instance: RFIDWithUHFUART,
-        uii: String,
-    ): String? {
-        val result =
-            runCatching {
-                val method = instance.javaClass.getMethod("convertUiiToEPC", String::class.java)
-                method.invoke(instance, uii) as? String
-            }.getOrNull()
-        return result?.trim()?.takeIf { it.isNotBlank() }
-    }
-
-    private fun parseRssi(raw: Array<String>): Int? {
-        val candidates = listOf(raw.getOrNull(2), raw.getOrNull(1), raw.getOrNull(0))
-        return candidates.firstNotNullOfOrNull { it?.trim()?.toIntOrNull() }
     }
 
     private fun recordParsedTag(parsed: ParsedTag) {
         diagnosticsState.update { current ->
             val tagFound = !parsed.epc.isNullOrBlank()
             current.copy(
-                lastRaw0 = parsed.raw.getOrNull(0),
-                lastRaw1 = parsed.raw.getOrNull(1),
+                lastRaw0 = parsed.epc,
+                lastRaw1 = parsed.tid,
                 lastRssi = parsed.rssi ?: current.lastRssi,
                 lastReadEpc = if (tagFound) parsed.epc else current.lastReadEpc,
                 tagsSeenCount = if (tagFound) current.tagsSeenCount + 1 else current.tagsSeenCount,
@@ -1357,21 +1291,19 @@ class ChainwayUhfReader(
         }
     }
 
-    private fun tagInfoToRaw(tag: UHFTAGInfo): Array<String> = arrayOf(tag.epc.orEmpty(), tag.tid.orEmpty(), tag.rssi.orEmpty())
-
-    private suspend fun recoverAfterStopFailure(instance: RFIDWithUHFUART) {
+    private suspend fun recoverAfterStopFailure(instance: IUHF): Boolean {
         val initOk =
             withContext(Dispatchers.IO) {
                 uhfMutex.withLock {
                     val freeOk = runCatching { instance.free() }.getOrNull()
                     Log.w(LOG_TAG, "stopInventory recovery free ok=$freeOk")
-                    val initR2000Ok = runCatching { instance.init_R2000() }.getOrNull()
+                    val initR2000Ok = initR2000IfSupported(instance)?.getOrNull() == true
                     Log.w(LOG_TAG, "stopInventory recovery init_R2000 ok=$initR2000Ok")
-                    if (initR2000Ok == true) {
+                    if (initR2000Ok) {
                         true
                     } else {
-                        val initOk = runCatching { instance.init() }.getOrNull()
-                        Log.w(LOG_TAG, "stopInventory recovery init ok=$initOk")
+                        val initOk = runCatching { instance.init(context) }.getOrNull()
+                        Log.w(LOG_TAG, "stopInventory recovery init(context) ok=$initOk")
                         initOk == true
                     }
                 }
@@ -1391,6 +1323,7 @@ class ChainwayUhfReader(
                 }
             }
         }
+        return initOk
     }
 
     private fun <T> configBusyResult(
@@ -1401,34 +1334,29 @@ class ChainwayUhfReader(
         return Result.failure(UhfError.OperationInProgress.asException())
     }
 
-    private suspend fun resolveDesiredConfig(instance: RFIDWithUHFUART): UhfConfig {
+    private suspend fun resolveDesiredConfig(instance: IUHF): UhfDesiredConfig {
         val settings = settingsStore.settingsFlow.first()
-        val storedMode = settings.uhfFrequencyMode
-        if (storedMode != null) {
-            return UhfConfig(storedMode, settings.uhfPower)
-        }
-        val currentMode = uhfMutex.withLock { runCatching { instance.getFrequencyMode() }.getOrNull() }
-        val currentPower = uhfMutex.withLock { runCatching { instance.getPower() }.getOrNull() }
-        if (currentMode != null && currentPower != null) {
-            val mappedRegion = UhfRegion.fromFrequencyMode(currentMode)
-            settingsStore.update {
-                it.copy(
-                    uhfFrequencyMode = currentMode,
-                    uhfPower = currentPower,
-                    uhfRegion = mappedRegion.settingsValue,
-                )
+        if (settings.uhfFrequencyMode == null) {
+            val currentMode = uhfMutex.withLock { runCatching { instance.getFrequencyMode() }.getOrNull() }
+            val currentPower = uhfMutex.withLock { runCatching { instance.getPower() }.getOrNull() }
+            if (currentMode != null && currentPower != null) {
+                val mappedRegion = UhfRegion.fromFrequencyMode(currentMode)
+                settingsStore.update {
+                    it.copy(
+                        uhfFrequencyMode = currentMode,
+                        uhfPower = currentPower,
+                        uhfRegion = mappedRegion.settingsValue,
+                    )
+                }
+                Log.i(LOG_TAG, "desired config initialized from device (mode=$currentMode power=$currentPower)")
             }
-            Log.i(LOG_TAG, "desired config initialized from device (mode=$currentMode power=$currentPower)")
-            return UhfConfig(currentMode, currentPower)
         }
-        val regionMode = UhfRegion.fromSettings(settings.uhfRegion).toFrequencyMode()
-        val fallbackMode = regionMode ?: DEFAULT_FREQUENCY_MODE
-        return UhfConfig(fallbackMode, settings.uhfPower)
+        return settingsStore.getDesiredUhfConfig()
     }
 
-    private suspend fun getReaderLocked(): Result<RFIDWithUHFUART> {
+    private suspend fun getReaderLocked(): Result<IUHF> {
         reader?.let { return Result.success(it) }
-        return uhfMutex.withLock { runCatching { RFIDWithUHFUART.getInstance() } }
+        return uhfMutex.withLock { runCatching { RFIDWithUHFUART.getInstance() as IUHF } }
             .fold(
                 onSuccess = { instance ->
                     reader = instance
@@ -1438,6 +1366,14 @@ class ChainwayUhfReader(
                     Result.failure(error)
                 },
             )
+    }
+
+    private fun initR2000IfSupported(instance: IUHF): Result<Boolean>? {
+        val method =
+            instance.javaClass.methods.firstOrNull {
+                it.name == "init_R2000" && it.parameterTypes.isEmpty()
+            } ?: return null
+        return runCatching { method.invoke(instance) }.map { resultToBoolean(it) }
     }
 
     private fun formatInitResult(result: Result<Boolean>?): String {
@@ -1457,8 +1393,9 @@ class ChainwayUhfReader(
         if (!result.success) {
             Log.w(
                 LOG_TAG,
-                "applyUhfConfig verify failed (reason=${result.reason} modeApplied=${result.modeApplied} " +
-                    "powerApplied=${result.powerApplied})",
+                "applyUhfConfig verify failed (reason=${result.reason} " +
+                    "modeApplied=${result.modeApplied} protocolApplied=${result.protocolApplied} " +
+                    "rfLinkApplied=${result.rfLinkApplied} powerApplied=${result.powerApplied})",
             )
         }
     }
@@ -1476,14 +1413,14 @@ class ChainwayUhfReader(
         }.getOrDefault(false)
     }
 
-    private fun setPowerOnBySystemIfSupported(instance: RFIDWithUHFUART) {
+    private fun setPowerOnBySystemIfSupported(instance: IUHF) {
         runCatching {
             val method = instance.javaClass.getMethod("setPowerOnBySystem", Context::class.java)
             method.invoke(instance, context)
         }
     }
 
-    private fun getErrCodeIfSupported(instance: RFIDWithUHFUART): Int? {
+    private fun getErrCodeIfSupported(instance: IUHF): Int? {
         return runCatching {
             val method = instance.javaClass.getMethod("getErrCode")
             val value = method.invoke(instance)
@@ -1501,17 +1438,12 @@ class ChainwayUhfReader(
         const val HEX_RADIX = 16
         const val DEFAULT_ACCESS_PASSWORD = "00000000"
         const val POWER_SCALE_FACTOR = 100
-        const val MAX_RAW_FIELDS = 3
         const val SINGLE_READ_RETRY_DELAY_MS = 75L
         const val INVENTORY_POLL_DELAY_MS = 50L
+        const val INVENTORY_LOG_LIMIT = 5
         const val STOP_RETRY_ATTEMPTS = 3
         const val STOP_RETRY_DELAY_MS = 100L
         const val MATRIX_READS = 10
         const val MATRIX_READ_DELAY_MS = 100L
-        const val MATRIX_PROTOCOL_ISO_18000_6C = 0x00
-        const val MATRIX_RFLINK_DSB_ASK = 0
-        const val MATRIX_LOG_TAG = "memtag-uhf-matrix"
-        val DEFAULT_FREQUENCY_MODE: Int =
-            UhfRegion.fromSettings(AppDefaults.UHF_REGION).toFrequencyMode() ?: 2
     }
 }
