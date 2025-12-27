@@ -14,6 +14,8 @@ data class UhfDiagnostics(
     val lastRaw1: String? = null,
     val lastRssi: Int? = null,
     val lastReadEpc: String? = null,
+    val protocolSupport: ProtocolSupport = ProtocolSupport.Unknown,
+    val lastProtocolAttempt: ProtocolAttempt? = null,
 )
 
 interface UhfDiagnosticsSource {

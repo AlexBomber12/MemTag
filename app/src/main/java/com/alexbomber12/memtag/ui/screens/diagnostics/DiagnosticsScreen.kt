@@ -37,6 +37,8 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.alexbomber12.memtag.data.AppDefaults
+import com.alexbomber12.memtag.integrations.uhf.ProtocolSupport
+import com.alexbomber12.memtag.integrations.uhf.UHF_PROTOCOL_UNSUPPORTED
 import com.alexbomber12.memtag.integrations.uhf.UhfRegion
 import com.alexbomber12.memtag.ui.components.AppCard
 import com.alexbomber12.memtag.ui.components.ErrorState
@@ -271,10 +273,15 @@ fun DiagnosticsScreen(viewModel: DiagnosticsViewModel) {
                             "rflink=${desired.rfLink}",
                 )
                 val current = state.currentConfig
+                val currentProtocolLabel =
+                    formatProtocolValue(
+                        value = current?.protocol,
+                        support = state.protocolSupport,
+                    )
                 Text(
                     text =
                         "Current: mode=${formatMode(current?.frequencyMode)} " +
-                            "protocol=${current?.protocol?.toString() ?: "--"} " +
+                            "protocol=$currentProtocolLabel " +
                             "rflink=${current?.rfLink?.toString() ?: "--"} " +
                             "power=${current?.power?.toString() ?: "--"}",
                 )
@@ -282,24 +289,40 @@ fun DiagnosticsScreen(viewModel: DiagnosticsViewModel) {
                 if (applyResult == null) {
                     Text(text = "Last apply: --")
                 } else {
+                    val appliedProtocolLabel =
+                        formatProtocolValue(
+                            value = applyResult.afterProtocol,
+                            support = applyResult.protocolSupport,
+                        )
+                    val protocolVerifiedLabel = formatAppliedStatus(applyResult.protocolApplied)
                     Text(
                         text =
                             "Last apply: setModeOk=${applyResult.setModeOk} " +
-                                "setProtocolOk=${applyResult.setProtocolOk} " +
                                 "setRfLinkOk=${applyResult.setRfLinkOk} " +
                                 "setPowerOk=${applyResult.setPowerOk}",
                     )
+                    when {
+                        applyResult.protocolAttempt != null -> {
+                            val errorCode = applyResult.protocolAttempt.errorCode
+                            val suffix = if (errorCode != null) " errCode=$errorCode" else ""
+                            Text(text = "setProtocolOk=${applyResult.protocolAttempt.ok}$suffix")
+                        }
+
+                        applyResult.protocolSupport == ProtocolSupport.Unsupported -> {
+                            Text(text = "setProtocol: skipped (unsupported)")
+                        }
+                    }
                     Text(
                         text =
                             "After: mode=${formatMode(applyResult.afterMode)} " +
-                                "protocol=${applyResult.afterProtocol} " +
+                                "protocol=$appliedProtocolLabel " +
                                 "rflink=${applyResult.afterRfLink} " +
                                 "power=${applyResult.afterPower}",
                     )
                     Text(
                         text =
                             "Verified: modeApplied=${applyResult.modeApplied} " +
-                                "protocolApplied=${applyResult.protocolApplied} " +
+                                "protocol=$protocolVerifiedLabel " +
                                 "rfLinkApplied=${applyResult.rfLinkApplied} " +
                                 "powerApplied=${applyResult.powerApplied}",
                     )
@@ -434,6 +457,22 @@ private fun trimProbeValue(
         return "--"
     }
     return if (value.length <= maxChars) value else value.take(maxChars)
+}
+
+private fun formatProtocolValue(
+    value: Int?,
+    support: ProtocolSupport,
+): String {
+    return when {
+        support == ProtocolSupport.Unsupported -> "unsupported"
+        value == null -> "--"
+        value == UHF_PROTOCOL_UNSUPPORTED -> "unavailable"
+        else -> value.toString()
+    }
+}
+
+private fun formatAppliedStatus(value: Boolean?): String {
+    return value?.toString() ?: "N/A"
 }
 
 private fun formatMode(value: Int?): String {

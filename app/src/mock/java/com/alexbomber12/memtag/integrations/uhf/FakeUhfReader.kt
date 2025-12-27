@@ -291,6 +291,8 @@ class FakeUhfReader(
                     afterPower = powerDbm,
                     afterProtocol = protocol,
                     afterRfLink = rfLink,
+                    protocolSupport = ProtocolSupport.Supported,
+                    protocolAttempt = ProtocolAttempt(ok = true),
                     modeApplied = true,
                     powerApplied = true,
                     protocolApplied = true,

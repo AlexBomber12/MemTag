@@ -6,6 +6,8 @@ import com.alexbomber12.memtag.data.AppDefaults
 import com.alexbomber12.memtag.data.settings.AppSettings
 import com.alexbomber12.memtag.data.settings.SettingsStore
 import com.alexbomber12.memtag.integrations.uhf.MatrixProbeResult
+import com.alexbomber12.memtag.integrations.uhf.ProtocolAttempt
+import com.alexbomber12.memtag.integrations.uhf.ProtocolSupport
 import com.alexbomber12.memtag.integrations.uhf.TagReading
 import com.alexbomber12.memtag.integrations.uhf.UhfApplyResult
 import com.alexbomber12.memtag.integrations.uhf.UhfConfig
@@ -50,6 +52,8 @@ data class DiagnosticsUiState(
         ),
     val currentConfig: UhfConfig? = null,
     val lastApplyResult: UhfApplyResult? = null,
+    val protocolSupport: ProtocolSupport = ProtocolSupport.Unknown,
+    val lastProtocolAttempt: ProtocolAttempt? = null,
     val isApplyingConfig: Boolean = false,
     val isReadingConfig: Boolean = false,
     val configStatusMessage: String? = null,
@@ -96,6 +100,8 @@ class DiagnosticsViewModel(
                             lastRaw1 = diagnostics.lastRaw1,
                             lastRssi = diagnostics.lastRssi,
                             lastReadEpc = diagnostics.lastReadEpc ?: state.lastReadEpc,
+                            protocolSupport = diagnostics.protocolSupport,
+                            lastProtocolAttempt = diagnostics.lastProtocolAttempt,
                         )
                     }
                 }
@@ -249,6 +255,8 @@ class DiagnosticsViewModel(
                     isApplyingConfig = false,
                     lastApplyResult = applyResult,
                     currentConfig = updatedConfig ?: it.currentConfig,
+                    protocolSupport = applyResult?.protocolSupport ?: it.protocolSupport,
+                    lastProtocolAttempt = applyResult?.protocolAttempt ?: it.lastProtocolAttempt,
                     configStatusMessage = null,
                 )
             }
@@ -287,7 +295,13 @@ class DiagnosticsViewModel(
             }
             val applied = applyResult.getOrNull()
             if (applied != null) {
-                mutableState.update { it.copy(lastApplyResult = applied) }
+                mutableState.update {
+                    it.copy(
+                        lastApplyResult = applied,
+                        protocolSupport = applied.protocolSupport,
+                        lastProtocolAttempt = applied.protocolAttempt,
+                    )
+                }
                 if (!applied.success) {
                     mutableState.update { it.copy(isReadingSingle = false) }
                     updateError(UhfError.VendorError(applied.toErrorMessage()).asException())
@@ -374,7 +388,13 @@ class DiagnosticsViewModel(
                 }
                 val applied = applyResult.getOrNull()
                 if (applied != null) {
-                    mutableState.update { it.copy(lastApplyResult = applied) }
+                    mutableState.update {
+                        it.copy(
+                            lastApplyResult = applied,
+                            protocolSupport = applied.protocolSupport,
+                            lastProtocolAttempt = applied.protocolAttempt,
+                        )
+                    }
                     if (!applied.success) {
                         updateError(UhfError.VendorError(applied.toErrorMessage()).asException())
                         setInventoryRunning(false)

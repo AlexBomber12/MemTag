@@ -52,6 +52,8 @@ class ChainwayUhfReader(
     private var inventoryJob: Job? = null
     private var inventoryRunning = false
     private var inventoryLogCount = 0
+    private var protocolSupport: ProtocolSupport = ProtocolSupport.Unknown
+    private var lastProtocolAttempt: ProtocolAttempt? = null
 
     override suspend fun initialize(): Result<Unit> =
         mutex.withLock {
@@ -580,11 +582,16 @@ class ChainwayUhfReader(
             if (inventoryRunning) {
                 return@withLock Result.failure(UhfError.OperationInProgress.asException())
             }
+            if (protocolSupport == ProtocolSupport.Unsupported) {
+                Log.i(LOG_TAG, "getProtocol skipped (unsupported)")
+                return@withLock Result.success(UHF_PROTOCOL_UNSUPPORTED)
+            }
             val instance = reader ?: return@withLock Result.failure(UhfError.HardwareUnavailable.asException())
             withContext(Dispatchers.IO) {
                 uhfMutex.withLock { runCatching { instance.getProtocol() } }
                     .fold(
                         onSuccess = {
+                            updateProtocolSupportFromGet(it)
                             Log.i(LOG_TAG, "getProtocol -> $it")
                             Result.success(it)
                         },
@@ -700,19 +707,12 @@ class ChainwayUhfReader(
         return withContext(Dispatchers.IO) {
             uhfMutex.withLock { setPowerOnBySystemIfSupported(instance) }
             val desired = resolveDesiredConfig(instance)
+            val protocolSupportBefore = protocolSupport
             val beforeMode =
                 uhfMutex.withLock { runCatching { instance.getFrequencyMode() } }
                     .getOrElse { error ->
                         return@withContext Result.failure(
                             UhfError.VendorError(error.message ?: "UHF get frequency mode error")
-                                .asException(cause = error),
-                        )
-                    }
-            val beforeProtocol =
-                uhfMutex.withLock { runCatching { instance.getProtocol() } }
-                    .getOrElse { error ->
-                        return@withContext Result.failure(
-                            UhfError.VendorError(error.message ?: "UHF get protocol error")
                                 .asException(cause = error),
                         )
                     }
@@ -732,6 +732,21 @@ class ChainwayUhfReader(
                                 .asException(cause = error),
                         )
                     }
+            val beforeProtocol =
+                if (protocolSupport == ProtocolSupport.Supported) {
+                    val value =
+                        uhfMutex.withLock { runCatching { instance.getProtocol() } }
+                            .getOrElse { error ->
+                                return@withContext Result.failure(
+                                    UhfError.VendorError(error.message ?: "UHF get protocol error")
+                                        .asException(cause = error),
+                                )
+                            }
+                    updateProtocolSupportFromGet(value)
+                    value
+                } else {
+                    null
+                }
             val setModeOk =
                 uhfMutex.withLock { runCatching { instance.setFrequencyMode(desired.frequencyMode) } }
                     .getOrElse { error ->
@@ -740,14 +755,27 @@ class ChainwayUhfReader(
                                 .asException(cause = error),
                         )
                     }
-            val setProtocolOk =
-                uhfMutex.withLock { runCatching { instance.setProtocol(desired.protocol) } }
-                    .getOrElse { error ->
-                        return@withContext Result.failure(
-                            UhfError.VendorError(error.message ?: "UHF set protocol error")
-                                .asException(cause = error),
-                        )
+            var setProtocolOk: Boolean? = null
+            var protocolAttempt: ProtocolAttempt? = null
+            if (protocolSupport != ProtocolSupport.Unsupported) {
+                val protocolResult =
+                    uhfMutex.withLock { runCatching { instance.setProtocol(desired.protocol) } }
+                val ok = protocolResult.getOrNull() == true
+                val errCode =
+                    if (ok) {
+                        null
+                    } else {
+                        uhfMutex.withLock { getErrCodeIfSupported(instance) }
                     }
+                protocolAttempt = ProtocolAttempt(ok = ok, errorCode = errCode)
+                recordProtocolAttempt(protocolAttempt)
+                setProtocolOk = ok
+                if (ok) {
+                    updateProtocolSupport(ProtocolSupport.Supported)
+                } else {
+                    updateProtocolSupport(ProtocolSupport.Unsupported)
+                }
+            }
             val setRfLinkOk =
                 uhfMutex.withLock { runCatching { instance.setRFLink(desired.rfLink) } }
                     .getOrElse { error ->
@@ -772,14 +800,6 @@ class ChainwayUhfReader(
                                 .asException(cause = error),
                         )
                     }
-            val afterProtocol =
-                uhfMutex.withLock { runCatching { instance.getProtocol() } }
-                    .getOrElse { error ->
-                        return@withContext Result.failure(
-                            UhfError.VendorError(error.message ?: "UHF get protocol error")
-                                .asException(cause = error),
-                        )
-                    }
             val afterRfLink =
                 uhfMutex.withLock { runCatching { instance.getRFLink() } }
                     .getOrElse { error ->
@@ -796,10 +816,30 @@ class ChainwayUhfReader(
                                 .asException(cause = error),
                         )
                     }
+            val afterProtocol =
+                if (protocolSupportBefore != ProtocolSupport.Unsupported) {
+                    val value =
+                        uhfMutex.withLock { runCatching { instance.getProtocol() } }
+                            .getOrElse { error ->
+                                return@withContext Result.failure(
+                                    UhfError.VendorError(error.message ?: "UHF get protocol error")
+                                        .asException(cause = error),
+                                )
+                            }
+                    updateProtocolSupportFromGet(value)
+                    value
+                } else {
+                    null
+                }
             val modeApplied = afterMode == desired.frequencyMode
-            val protocolApplied = afterProtocol == desired.protocol
             val rfLinkApplied = afterRfLink == desired.rfLink
             val powerApplied = afterPower == desired.powerDbm
+            val protocolApplied =
+                if (protocolSupport == ProtocolSupport.Supported) {
+                    afterProtocol == desired.protocol
+                } else {
+                    null
+                }
             val result =
                 UhfApplyResult(
                     reason = reason,
@@ -819,11 +859,20 @@ class ChainwayUhfReader(
                     afterPower = afterPower,
                     afterProtocol = afterProtocol,
                     afterRfLink = afterRfLink,
+                    protocolSupport = protocolSupport,
+                    protocolAttempt = protocolAttempt,
                     modeApplied = modeApplied,
                     powerApplied = powerApplied,
                     protocolApplied = protocolApplied,
                     rfLinkApplied = rfLinkApplied,
                 )
+            val protocolAppliedLabel = protocolApplied?.toString() ?: "N/A"
+            val protocolAction =
+                if (protocolAttempt == null) {
+                    "skipped"
+                } else {
+                    "attempted"
+                }
             Log.i(
                 LOG_TAG,
                 "applyUhfConfig(" +
@@ -836,6 +885,8 @@ class ChainwayUhfReader(
                     "desiredProtocol=${desired.protocol} " +
                     "desiredRfLink=${desired.rfLink} " +
                     "desiredPower=${desired.powerDbm} " +
+                    "protocolSupport=$protocolSupport " +
+                    "setProtocol=$protocolAction " +
                     "setModeOk=$setModeOk " +
                     "setProtocolOk=$setProtocolOk " +
                     "setRfLinkOk=$setRfLinkOk " +
@@ -845,7 +896,7 @@ class ChainwayUhfReader(
                     "afterRfLink=$afterRfLink " +
                     "afterPower=$afterPower " +
                     "modeApplied=$modeApplied " +
-                    "protocolApplied=$protocolApplied " +
+                    "protocolApplied=$protocolAppliedLabel " +
                     "rfLinkApplied=$rfLinkApplied " +
                     "powerApplied=$powerApplied" +
                     ")",
@@ -877,14 +928,6 @@ class ChainwayUhfReader(
                                 .asException(cause = error),
                         )
                     }
-            val currentProtocol =
-                uhfMutex.withLock { runCatching { instance.getProtocol() } }
-                    .getOrElse { error ->
-                        return@withContext Result.failure(
-                            UhfError.VendorError(error.message ?: "UHF get protocol error")
-                                .asException(cause = error),
-                        )
-                    }
             val currentRfLink =
                 uhfMutex.withLock { runCatching { instance.getRFLink() } }
                     .getOrElse { error ->
@@ -901,22 +944,52 @@ class ChainwayUhfReader(
                                 .asException(cause = error),
                         )
                     }
+            val currentProtocol =
+                if (protocolSupport == ProtocolSupport.Unsupported) {
+                    null
+                } else {
+                    val value =
+                        uhfMutex.withLock { runCatching { instance.getProtocol() } }
+                            .getOrElse { error ->
+                                return@withContext Result.failure(
+                                    UhfError.VendorError(error.message ?: "UHF get protocol error")
+                                        .asException(cause = error),
+                                )
+                            }
+                    updateProtocolSupportFromGet(value)
+                    value
+                }
+            val protocolMatches =
+                if (protocolSupport == ProtocolSupport.Supported) {
+                    currentProtocol == desired.protocol
+                } else {
+                    true
+                }
+            val protocolLabel =
+                when {
+                    protocolSupport == ProtocolSupport.Unsupported -> "unsupported"
+                    currentProtocol == UHF_PROTOCOL_UNSUPPORTED -> "unavailable"
+                    currentProtocol != null -> currentProtocol.toString()
+                    else -> "?"
+                }
             if (currentMode == desired.frequencyMode &&
-                currentProtocol == desired.protocol &&
+                protocolMatches &&
                 currentRfLink == desired.rfLink &&
                 currentPower == desired.powerDbm
             ) {
                 Log.i(
                     LOG_TAG,
                     "applyUhfConfigIfNeeded(reason=$reason) config already OK " +
-                        "(mode=$currentMode protocol=$currentProtocol rfLink=$currentRfLink power=$currentPower)",
+                        "(mode=$currentMode protocol=$protocolLabel rfLink=$currentRfLink power=$currentPower " +
+                        "protocolSupport=$protocolSupport)",
                 )
                 Result.success(null)
             } else {
                 Log.i(
                     LOG_TAG,
                     "applyUhfConfigIfNeeded(reason=$reason) mismatch " +
-                        "(mode=$currentMode protocol=$currentProtocol rfLink=$currentRfLink power=$currentPower " +
+                        "(mode=$currentMode protocol=$protocolLabel rfLink=$currentRfLink power=$currentPower " +
+                        "protocolSupport=$protocolSupport " +
                         "desiredMode=${desired.frequencyMode} desiredProtocol=${desired.protocol} " +
                         "desiredRfLink=${desired.rfLink} desiredPower=${desired.powerDbm})",
                 )
@@ -1084,12 +1157,30 @@ class ChainwayUhfReader(
             Log.w(LOG_TAG, "matrixProbe protocol/rflink skipped: stopInventory failed")
             return "protocol=? rflink=?"
         }
-        val protocolSetOk =
-            withContext(Dispatchers.IO) {
-                uhfMutex.withLock {
-                    runCatching { instance.setProtocol(UHF_PROTOCOL_ISO_18000_6C) }.getOrNull() == true
+        val protocolSupportBefore = protocolSupport
+        var protocolSetOk: Boolean? = null
+        if (protocolSupport != ProtocolSupport.Unsupported) {
+            val protocolResult =
+                withContext(Dispatchers.IO) {
+                    uhfMutex.withLock { runCatching { instance.setProtocol(UHF_PROTOCOL_ISO_18000_6C) } }
                 }
+            val ok = protocolResult.getOrNull() == true
+            val errCode =
+                if (ok) {
+                    null
+                } else {
+                    withContext(Dispatchers.IO) {
+                        uhfMutex.withLock { getErrCodeIfSupported(instance) }
+                    }
+                }
+            recordProtocolAttempt(ProtocolAttempt(ok = ok, errorCode = errCode))
+            protocolSetOk = ok
+            if (ok) {
+                updateProtocolSupport(ProtocolSupport.Supported)
+            } else {
+                updateProtocolSupport(ProtocolSupport.Unsupported)
             }
+        }
         val rflinkSetOk =
             withContext(Dispatchers.IO) {
                 uhfMutex.withLock {
@@ -1097,20 +1188,32 @@ class ChainwayUhfReader(
                 }
             }
         val protocol =
-            withContext(Dispatchers.IO) {
-                uhfMutex.withLock { runCatching { instance.getProtocol() }.getOrNull() }
+            if (protocolSupportBefore != ProtocolSupport.Unsupported) {
+                withContext(Dispatchers.IO) {
+                    uhfMutex.withLock { runCatching { instance.getProtocol() }.getOrNull() }
+                }?.also { value ->
+                    updateProtocolSupportFromGet(value)
+                }
+            } else {
+                null
             }
         val rflink =
             withContext(Dispatchers.IO) {
                 uhfMutex.withLock { runCatching { instance.getRFLink() }.getOrNull() }
             }
+        val protocolNote =
+            if (protocolSupport == ProtocolSupport.Unsupported) {
+                "unsupported"
+            } else {
+                protocol?.toString() ?: "?"
+            }
+        val rflinkNote = rflink?.toString() ?: "?"
+        val protocolSetLabel = protocolSetOk?.toString() ?: "skipped"
         Log.i(
             LOG_TAG,
-            "matrixProbe protocolSet=$protocolSetOk rflinkSet=$rflinkSetOk " +
-                "protocol=${protocol ?: "?"} rflink=${rflink ?: "?"}",
+            "matrixProbe protocolSet=$protocolSetLabel rflinkSet=$rflinkSetOk " +
+                "protocol=$protocolNote rflink=$rflinkNote protocolSupport=$protocolSupport",
         )
-        val protocolNote = protocol?.toString() ?: "?"
-        val rflinkNote = rflink?.toString() ?: "?"
         return "protocol=$protocolNote rflink=$rflinkNote"
     }
 
@@ -1334,6 +1437,42 @@ class ChainwayUhfReader(
         return Result.failure(UhfError.OperationInProgress.asException())
     }
 
+    private fun updateProtocolSupportFromGet(value: Int) {
+        val resolved =
+            if (value == UHF_PROTOCOL_UNSUPPORTED) ProtocolSupport.Unsupported else ProtocolSupport.Supported
+        updateProtocolSupport(resolved)
+    }
+
+    private fun updateProtocolSupport(next: ProtocolSupport) {
+        if (protocolSupport == ProtocolSupport.Unsupported && next != ProtocolSupport.Unsupported) {
+            return
+        }
+        if (protocolSupport != next) {
+            protocolSupport = next
+            updateDiagnosticsProtocolState()
+            if (next == ProtocolSupport.Unsupported) {
+                Log.w(
+                    LOG_TAG,
+                    "protocol unsupported detected (get=-1 or set failed), skipping further setProtocol",
+                )
+            }
+        }
+    }
+
+    private fun recordProtocolAttempt(attempt: ProtocolAttempt?) {
+        lastProtocolAttempt = attempt
+        updateDiagnosticsProtocolState()
+    }
+
+    private fun updateDiagnosticsProtocolState() {
+        diagnosticsState.update {
+            it.copy(
+                protocolSupport = protocolSupport,
+                lastProtocolAttempt = lastProtocolAttempt,
+            )
+        }
+    }
+
     private suspend fun resolveDesiredConfig(instance: IUHF): UhfDesiredConfig {
         val settings = settingsStore.settingsFlow.first()
         if (settings.uhfFrequencyMode == null) {
@@ -1391,11 +1530,13 @@ class ChainwayUhfReader(
             return
         }
         if (!result.success) {
+            val protocolAppliedLabel = result.protocolApplied?.toString() ?: "N/A"
             Log.w(
                 LOG_TAG,
                 "applyUhfConfig verify failed (reason=${result.reason} " +
-                    "modeApplied=${result.modeApplied} protocolApplied=${result.protocolApplied} " +
-                    "rfLinkApplied=${result.rfLinkApplied} powerApplied=${result.powerApplied})",
+                    "modeApplied=${result.modeApplied} protocolApplied=$protocolAppliedLabel " +
+                    "rfLinkApplied=${result.rfLinkApplied} powerApplied=${result.powerApplied} " +
+                    "protocolSupport=${result.protocolSupport})",
             )
         }
     }
