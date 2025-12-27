@@ -89,7 +89,7 @@ class SettingsStoreTest {
             assertEquals("lib-01", settings.mementoLibraryId)
             assertEquals("US", settings.uhfRegion)
             assertEquals(25, settings.uhfPower)
-            assertEquals(1, settings.uhfFrequencyMode)
+            assertEquals(0x02, settings.uhfFrequencyMode)
             assertEquals("com.example.SCAN", settings.scan2dAction)
             assertEquals("payload", settings.scan2dExtraKey)
             assertEquals(true, settings.findSoundEnabled)
