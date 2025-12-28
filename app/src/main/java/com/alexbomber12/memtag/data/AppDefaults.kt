@@ -19,6 +19,8 @@ object AppDefaults {
     const val FIND_DEBUG_OVERLAY_ENABLED = false
     const val LAST_SCANNED_EPC = ""
     const val LAST_FIND_TARGET_EPC = ""
+    const val LAST_SCANNED_EPC_AT = 0L
+    const val LAST_FIND_TARGET_EPC_AT = 0L
     const val RFID_KEY_CODES = ""
     const val SCAN_KEY_CODES = ""
     const val SHOW_DIAGNOSTICS_TAB = false

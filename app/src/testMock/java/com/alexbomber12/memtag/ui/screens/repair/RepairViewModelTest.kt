@@ -135,6 +135,29 @@ class RepairViewModelTest {
             assertTrue(message == null || !message.contains("Write verified"))
         }
 
+    @Test
+    fun autoExpectedPrefersLatestTimestamp() =
+        runTest(mainDispatcherRule.dispatcher) {
+            val reader = FakeUhfReader(dispatcher = mainDispatcherRule.dispatcher)
+            val logs = FakeActionsLogDao()
+            val settingsStore =
+                FakeSettingsStore(
+                    AppSettings(
+                        lastScannedEpc = "E2000017221101441890ABCE",
+                        lastScannedEpcAt = 1_700_000_000_000L,
+                        lastFindTargetEpc = "E2000017221101441890ABCD",
+                        lastFindTargetEpcAt = 1_700_000_000_500L,
+                    ),
+                )
+            val viewModel = createViewModel(reader, logs, settingsStore = settingsStore)
+
+            advanceUntilIdle()
+
+            val state = viewModel.uiState.value
+            assertEquals("E2000017221101441890ABCD", state.expectedEpc)
+            assertEquals(ExpectedSource.AutoFind, state.expectedSource)
+        }
+
     private fun createViewModel(
         reader: FakeUhfReader,
         logs: ActionsLogDao,

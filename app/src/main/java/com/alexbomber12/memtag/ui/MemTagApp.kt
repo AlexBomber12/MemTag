@@ -61,7 +61,13 @@ fun MemTagApp(
         val uri = deepLinkIntent?.data ?: return@LaunchedEffect
         val params = parseFindDeepLink(uri, appContainer.logger) ?: return@LaunchedEffect
         if (params.epc.isNotBlank()) {
-            appContainer.settingsStore.update { it.copy(lastFindTargetEpc = params.epc) }
+            val timestamp = System.currentTimeMillis()
+            appContainer.settingsStore.update {
+                it.copy(
+                    lastFindTargetEpc = params.epc,
+                    lastFindTargetEpcAt = timestamp,
+                )
+            }
         }
         appContainer.logger.i(TAG, "external deeplink: find epc=${params.epc} autoStart=${params.autoStart}")
         navController.navigate(

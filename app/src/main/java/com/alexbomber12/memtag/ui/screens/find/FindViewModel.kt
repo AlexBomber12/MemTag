@@ -578,7 +578,12 @@ class FindViewModel(
     private fun persistFindTarget(value: String) {
         viewModelScope.launch {
             val normalized = runCatching { EpcNormalizer.normalize(value) }.getOrNull().orEmpty()
-            settingsStore.update { it.copy(lastFindTargetEpc = normalized) }
+            settingsStore.update {
+                it.copy(
+                    lastFindTargetEpc = normalized,
+                    lastFindTargetEpcAt = clock(),
+                )
+            }
         }
     }
 

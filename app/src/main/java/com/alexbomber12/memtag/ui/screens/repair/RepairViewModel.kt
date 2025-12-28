@@ -2,6 +2,7 @@ package com.alexbomber12.memtag.ui.screens.repair
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.alexbomber12.memtag.data.settings.AppSettings
 import com.alexbomber12.memtag.data.settings.SettingsStore
 import com.alexbomber12.memtag.db.ActionsLogDao
 import com.alexbomber12.memtag.db.ActionsLogEntity
@@ -14,6 +15,7 @@ import com.alexbomber12.memtag.integrations.scan2d.Scan2dScanner
 import com.alexbomber12.memtag.integrations.scan2d.asException
 import com.alexbomber12.memtag.integrations.uhf.UhfError
 import com.alexbomber12.memtag.integrations.uhf.UhfException
+import com.alexbomber12.memtag.integrations.uhf.UhfLogger
 import com.alexbomber12.memtag.integrations.uhf.UhfReader
 import com.alexbomber12.memtag.integrations.uhf.toErrorMessage
 import com.alexbomber12.memtag.util.epc.EpcNormalizer
@@ -46,6 +48,13 @@ sealed class VerifyWriteStatus {
     ) : VerifyWriteStatus()
 }
 
+enum class ExpectedSource {
+    AutoFind,
+    AutoLookup,
+    Manual,
+    None,
+}
+
 enum class WriteWarning {
     NOT_SCANNED,
     MISMATCH,
@@ -59,6 +68,7 @@ data class WriteConfirmation(
 
 data class RepairUiState(
     val expectedEpc: String = "",
+    val expectedSource: ExpectedSource = ExpectedSource.None,
     val scannedEpc: String? = null,
     val status: VerifyWriteStatus = VerifyWriteStatus.Invalid("Expected EPC is required."),
     val isReading: Boolean = false,
@@ -69,8 +79,6 @@ data class RepairUiState(
     val message: String? = null,
     val errorMessage: String? = null,
     val logs: List<RepairActionLog> = emptyList(),
-    val lastFindTargetEpc: String = "",
-    val lastLookupEpc: String = "",
 )
 
 class RepairViewModel(
@@ -84,7 +92,8 @@ class RepairViewModel(
     val uiState: StateFlow<RepairUiState> = mutableState
 
     private var operationJob: Job? = null
-    private var expectedEdited = false
+    private var expectedEditedByUser = false
+    private var latestSettings: AppSettings = AppSettings()
 
     init {
         viewModelScope.launch {
@@ -92,143 +101,113 @@ class RepairViewModel(
         }
         viewModelScope.launch {
             settingsStore.settingsFlow.collect { settings ->
-                mutableState.update { state ->
-                    val prefillExpected =
-                        if (!expectedEdited && state.expectedEpc.isBlank()) {
-                            settings.lastFindTargetEpc.takeIf { it.isNotBlank() }
-                                ?: settings.lastScannedEpc.takeIf { it.isNotBlank() }
+                latestSettings = settings
+                updateStateWithStatus { state ->
+                    val selection =
+                        if (shouldAutoSelect(state)) {
+                            selectExpectedFromSettings(settings)
                         } else {
                             null
                         }
-                    val updated =
-                        state.copy(
-                            expectedEpc = prefillExpected ?: state.expectedEpc,
-                            lastFindTargetEpc = settings.lastFindTargetEpc,
-                            lastLookupEpc = settings.lastScannedEpc,
-                        )
-                    updated.copy(status = evaluateStatus(updated.expectedEpc, updated.scannedEpc))
+                    val expectedEpc = selection?.epc ?: state.expectedEpc
+                    val expectedSource =
+                        when {
+                            selection != null -> selection.source
+                            expectedEditedByUser && expectedEpc.isNotBlank() -> ExpectedSource.Manual
+                            expectedEpc.isBlank() -> ExpectedSource.None
+                            else -> state.expectedSource
+                        }
+                    state.copy(
+                        expectedEpc = expectedEpc,
+                        expectedSource = expectedSource,
+                        confirmation = if (selection != null) null else state.confirmation,
+                    )
                 }
             }
         }
     }
 
     fun onScreenOpened() {
-        mutableState.update { state ->
-            val updated =
-                state.copy(
-                    scannedEpc = null,
-                    confirmation = null,
-                    message = null,
-                    errorMessage = null,
-                )
-            updated.copy(status = evaluateStatus(updated.expectedEpc, updated.scannedEpc))
+        updateStateWithStatus { state ->
+            state.copy(
+                scannedEpc = null,
+                confirmation = null,
+                message = null,
+                errorMessage = null,
+            )
         }
     }
 
     fun onExpectedEpcChange(value: String) {
-        expectedEdited = true
-        mutableState.update { state ->
-            val updated =
-                state.copy(
-                    expectedEpc = value,
-                    confirmation = null,
-                    message = null,
-                    errorMessage = null,
-                )
-            updated.copy(status = evaluateStatus(updated.expectedEpc, updated.scannedEpc))
-        }
-    }
-
-    fun useExpectedFromFind() {
-        val value = uiState.value.lastFindTargetEpc
         if (value.isBlank()) {
+            expectedEditedByUser = false
+            applyAutoExpected(clearFeedback = true)
             return
         }
-        expectedEdited = true
-        mutableState.update { state ->
-            val updated =
-                state.copy(
-                    expectedEpc = value,
-                    confirmation = null,
-                    message = null,
-                    errorMessage = null,
-                )
-            updated.copy(status = evaluateStatus(updated.expectedEpc, updated.scannedEpc))
+        expectedEditedByUser = true
+        updateStateWithStatus { state ->
+            state.copy(
+                expectedEpc = value,
+                expectedSource = ExpectedSource.Manual,
+                confirmation = null,
+                message = null,
+                errorMessage = null,
+            )
         }
     }
 
-    fun useExpectedFromLookup() {
-        val value = uiState.value.lastLookupEpc
-        if (value.isBlank()) {
-            return
-        }
-        expectedEdited = true
-        mutableState.update { state ->
-            val updated =
-                state.copy(
-                    expectedEpc = value,
-                    confirmation = null,
-                    message = null,
-                    errorMessage = null,
-                )
-            updated.copy(status = evaluateStatus(updated.expectedEpc, updated.scannedEpc))
-        }
-    }
-
-    fun clearScanned() {
-        mutableState.update { state ->
-            val updated =
-                state.copy(
-                    scannedEpc = null,
-                    confirmation = null,
-                    message = null,
-                    errorMessage = null,
-                )
-            updated.copy(status = evaluateStatus(updated.expectedEpc, updated.scannedEpc))
-        }
+    fun resetExpectedToAuto() {
+        expectedEditedByUser = false
+        applyAutoExpected(clearFeedback = true)
     }
 
     fun scanRfid() {
         val state = uiState.value
         if (operationJob != null || state.confirmation != null) {
+            if (state.isReading || state.isScanningQr) {
+                UhfLogger.i("verifyWrite scan ignored: already scanning")
+            }
             return
         }
         mutableState.update { it.copy(isReading = true, isScanningQr = false, message = null, errorMessage = null) }
         val job =
             viewModelScope.launch {
-                val initResult = uhfReader.initialize()
-                if (initResult.isFailure) {
-                    handleScanFailure(mapUhfError(initResult.exceptionOrNull()))
-                    return@launch
-                }
-                uhfReader.stopInventory()
-                val applyResult = uhfReader.applyDesiredConfigBestEffort("verify-write-scan")
-                if (applyResult.isFailure) {
-                    handleScanFailure(mapUhfError(applyResult.exceptionOrNull()))
-                    return@launch
-                }
-                val applied = applyResult.getOrNull()
-                if (applied != null && !applied.success) {
-                    handleScanFailure(applied.toErrorMessage())
-                    return@launch
-                }
-                val readResult = uhfReader.readSingle(READ_TIMEOUT_MS)
-                if (readResult.isFailure) {
-                    handleScanFailure(mapUhfError(readResult.exceptionOrNull()))
-                    return@launch
-                }
-                val normalized =
-                    runCatching { EpcNormalizer.normalize(readResult.getOrNull().orEmpty()) }.getOrElse { error ->
-                        handleScanFailure(error.message ?: "Invalid EPC read from tag.")
+                try {
+                    val initResult = uhfReader.initialize()
+                    if (initResult.isFailure) {
+                        handleScanFailure(mapUhfError(initResult.exceptionOrNull()))
                         return@launch
                     }
-                applyScannedEpc(normalized)
+                    uhfReader.stopInventory()
+                    val applyResult = uhfReader.applyDesiredConfigBestEffort("verify-write-scan")
+                    if (applyResult.isFailure) {
+                        UhfLogger.w(
+                            "verifyWrite scan config apply failed: " +
+                                (applyResult.exceptionOrNull()?.message ?: "unknown"),
+                        )
+                    } else {
+                        val applied = applyResult.getOrNull()
+                        if (applied != null && !applied.success) {
+                            UhfLogger.w("verifyWrite scan config apply incomplete: ${applied.toErrorMessage()}")
+                        }
+                    }
+                    val readResult = uhfReader.readSingle(READ_TIMEOUT_MS)
+                    if (readResult.isFailure) {
+                        handleScanFailure(mapUhfError(readResult.exceptionOrNull()))
+                        return@launch
+                    }
+                    val normalized =
+                        runCatching { EpcNormalizer.normalize(readResult.getOrNull().orEmpty()) }.getOrElse { error ->
+                            handleScanFailure(error.message ?: "Invalid EPC read from tag.")
+                            return@launch
+                        }
+                    applyScannedEpc(normalized)
+                } finally {
+                    clearScanFlags()
+                }
             }
         operationJob = job
-        job.invokeOnCompletion { error ->
-            if (error is CancellationException) {
-                mutableState.update { it.copy(isReading = false) }
-            }
+        job.invokeOnCompletion {
             operationJob = null
         }
     }
@@ -236,40 +215,44 @@ class RepairViewModel(
     fun scanQr() {
         val state = uiState.value
         if (operationJob != null || state.confirmation != null) {
+            if (state.isReading || state.isScanningQr) {
+                UhfLogger.i("verifyWrite scan ignored: already scanning")
+            }
             return
         }
         mutableState.update { it.copy(isScanningQr = true, isReading = false, message = null, errorMessage = null) }
         val job =
             viewModelScope.launch {
-                val result =
-                    runCatching { withContext(Dispatchers.IO) { scan2dScanner.scanOnce() } }
-                        .getOrElse { error ->
-                            val mapped =
-                                if (error is CancellationException) {
-                                    Scan2dError.Cancelled.asException(message = "QR scan cancelled.", cause = error)
-                                } else {
-                                    error
-                                }
-                            Result.failure(mapped)
-                        }
-                result
-                    .onSuccess { epc ->
-                        val normalized =
-                            runCatching { EpcNormalizer.normalize(epc) }.getOrElse { error ->
-                                handleScanFailure(error.message ?: "Invalid EPC read from QR.")
-                                return@onSuccess
+                try {
+                    val result =
+                        runCatching { withContext(Dispatchers.IO) { scan2dScanner.scanOnce() } }
+                            .getOrElse { error ->
+                                val mapped =
+                                    if (error is CancellationException) {
+                                        Scan2dError.Cancelled.asException(message = "QR scan cancelled.", cause = error)
+                                    } else {
+                                        error
+                                    }
+                                Result.failure(mapped)
                             }
-                        applyScannedEpc(normalized)
-                    }
-                    .onFailure { error ->
-                        handleScanFailure(mapScanError(error))
-                    }
+                    result
+                        .onSuccess { epc ->
+                            val normalized =
+                                runCatching { EpcNormalizer.normalize(epc) }.getOrElse { error ->
+                                    handleScanFailure(error.message ?: "Invalid EPC read from QR.")
+                                    return@onSuccess
+                                }
+                            applyScannedEpc(normalized)
+                        }
+                        .onFailure { error ->
+                            handleScanFailure(mapScanError(error))
+                        }
+                } finally {
+                    clearScanFlags()
+                }
             }
         operationJob = job
-        job.invokeOnCompletion { error ->
-            if (error is CancellationException) {
-                mutableState.update { it.copy(isScanningQr = false) }
-            }
+        job.invokeOnCompletion {
             operationJob = null
         }
     }
@@ -375,14 +358,15 @@ class RepairViewModel(
                 uhfReader.stopInventory()
                 val applyResult = uhfReader.applyDesiredConfigBestEffort("verify-write")
                 if (applyResult.isFailure) {
-                    val error = applyResult.exceptionOrNull()
-                    handleWriteFailure(error, mapUhfError(error))
-                    return@launch
-                }
-                val applied = applyResult.getOrNull()
-                if (applied != null && !applied.success) {
-                    handleWriteFailure(null, applied.toErrorMessage())
-                    return@launch
+                    UhfLogger.w(
+                        "verifyWrite config apply failed: " +
+                            (applyResult.exceptionOrNull()?.message ?: "unknown"),
+                    )
+                } else {
+                    val applied = applyResult.getOrNull()
+                    if (applied != null && !applied.success) {
+                        UhfLogger.w("verifyWrite config apply incomplete: ${applied.toErrorMessage()}")
+                    }
                 }
                 val writeResult = uhfReader.writeEpc(expectedEpc, WRITE_TIMEOUT_MS)
                 if (writeResult.isFailure) {
@@ -402,16 +386,14 @@ class RepairViewModel(
                     handleWriteFailure(verifyResult.exceptionOrNull(), message)
                     return@launch
                 }
-                mutableState.update { state ->
-                    val updated =
-                        state.copy(
-                            isWriting = false,
-                            isVerifying = false,
-                            scannedEpc = expectedEpc,
-                            message = "Write verified.",
-                            errorMessage = null,
-                        )
-                    updated.copy(status = VerifyWriteStatus.Ok(expectedEpc))
+                updateStateWithStatus { state ->
+                    state.copy(
+                        isWriting = false,
+                        isVerifying = false,
+                        scannedEpc = expectedEpc,
+                        message = "Write verified.",
+                        errorMessage = null,
+                    )
                 }
                 logAction(
                     actionType = RepairActionType.REPAIR_WRITE_SUCCESS,
@@ -431,17 +413,15 @@ class RepairViewModel(
     }
 
     private fun applyScannedEpc(normalized: String) {
-        mutableState.update { state ->
-            val updated =
-                state.copy(
-                    isReading = false,
-                    isScanningQr = false,
-                    scannedEpc = normalized,
-                    confirmation = null,
-                    message = null,
-                    errorMessage = null,
-                )
-            updated.copy(status = evaluateStatus(updated.expectedEpc, updated.scannedEpc))
+        updateStateWithStatus { state ->
+            state.copy(
+                isReading = false,
+                isScanningQr = false,
+                scannedEpc = normalized,
+                confirmation = null,
+                message = null,
+                errorMessage = null,
+            )
         }
         viewModelScope.launch {
             logAction(
@@ -492,6 +472,76 @@ class RepairViewModel(
         mutableState.update { it.copy(logs = entries.map { entry -> entry.toDomain() }) }
     }
 
+    private fun applyAutoExpected(clearFeedback: Boolean) {
+        val selection = selectExpectedFromSettings(latestSettings)
+        updateStateWithStatus { state ->
+            val expectedEpc = selection?.epc.orEmpty()
+            val expectedSource = selection?.source ?: ExpectedSource.None
+            val updated =
+                state.copy(
+                    expectedEpc = expectedEpc,
+                    expectedSource = expectedSource,
+                    confirmation = null,
+                )
+            if (clearFeedback) {
+                updated.copy(message = null, errorMessage = null)
+            } else {
+                updated
+            }
+        }
+    }
+
+    private fun updateStateWithStatus(transform: (RepairUiState) -> RepairUiState) {
+        var snapshot: RepairUiState? = null
+        mutableState.update { state ->
+            val updated = transform(state)
+            val withStatus = updated.copy(status = evaluateStatus(updated.expectedEpc, updated.scannedEpc))
+            snapshot = withStatus
+            withStatus
+        }
+        snapshot?.let { logComparison(it) }
+    }
+
+    private fun selectExpectedFromSettings(settings: AppSettings): ExpectedSelection? {
+        val findCandidate = settings.lastFindTargetEpc.takeIf { it.isNotBlank() }
+        val lookupCandidate = settings.lastScannedEpc.takeIf { it.isNotBlank() }
+        return when {
+            findCandidate != null &&
+                (settings.lastFindTargetEpcAt >= settings.lastScannedEpcAt || lookupCandidate == null) ->
+                ExpectedSelection(findCandidate, ExpectedSource.AutoFind)
+            lookupCandidate != null ->
+                ExpectedSelection(lookupCandidate, ExpectedSource.AutoLookup)
+            else -> null
+        }
+    }
+
+    private fun shouldAutoSelect(state: RepairUiState): Boolean {
+        if (expectedEditedByUser) {
+            return false
+        }
+        return state.expectedEpc.isBlank() || state.expectedSource.isAuto()
+    }
+
+    private fun clearScanFlags() {
+        mutableState.update { state ->
+            if (!state.isReading && !state.isScanningQr) {
+                state
+            } else {
+                state.copy(isReading = false, isScanningQr = false)
+            }
+        }
+    }
+
+    private fun logComparison(state: RepairUiState) {
+        val expectedLabel = state.expectedEpc.ifBlank { "--" }
+        val scannedLabel = state.scannedEpc?.ifBlank { "--" } ?: "--"
+        val isMatch = state.status is VerifyWriteStatus.Ok
+        UhfLogger.i(
+            "verifyWrite expectedSource=${state.expectedSource} " +
+                "expected=$expectedLabel scanned=$scannedLabel match=$isMatch",
+        )
+    }
+
     private fun evaluateStatus(
         expectedEpc: String,
         scannedEpc: String?,
@@ -515,6 +565,10 @@ class RepairViewModel(
         } else {
             VerifyWriteStatus.Mismatch(expectedEpc = normalizedExpected, scannedEpc = normalizedScanned)
         }
+    }
+
+    private fun ExpectedSource.isAuto(): Boolean {
+        return this == ExpectedSource.AutoFind || this == ExpectedSource.AutoLookup || this == ExpectedSource.None
     }
 
     private fun normalizedExpectedOrNull(expectedEpc: String): String? {
@@ -592,6 +646,11 @@ class RepairViewModel(
     private fun isBusy(state: RepairUiState): Boolean {
         return state.isReading || state.isScanningQr || state.isWriting || state.isVerifying
     }
+
+    private data class ExpectedSelection(
+        val epc: String,
+        val source: ExpectedSource,
+    )
 
     private companion object {
         const val READ_TIMEOUT_MS = 4_000L

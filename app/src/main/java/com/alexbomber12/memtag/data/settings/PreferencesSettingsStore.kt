@@ -6,6 +6,7 @@ import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.intPreferencesKey
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import com.alexbomber12.memtag.data.AppDefaults
 import com.alexbomber12.memtag.integrations.uhf.UhfRegion
@@ -51,6 +52,8 @@ class PreferencesSettingsStore(
             preferences[Keys.SHOW_FIND_DEBUG_OVERLAY] = updated.showFindDebugOverlay
             preferences[Keys.LAST_SCANNED_EPC] = updated.lastScannedEpc
             preferences[Keys.LAST_FIND_TARGET_EPC] = updated.lastFindTargetEpc
+            preferences[Keys.LAST_SCANNED_EPC_AT] = updated.lastScannedEpcAt
+            preferences[Keys.LAST_FIND_TARGET_EPC_AT] = updated.lastFindTargetEpcAt
             preferences[Keys.RFID_KEY_CODES] = updated.rfidKeyCodes
             preferences[Keys.SCAN_KEY_CODES] = updated.scanKeyCodes
             preferences[Keys.SHOW_DIAGNOSTICS_TAB] = updated.showDiagnosticsTab
@@ -117,6 +120,9 @@ class PreferencesSettingsStore(
                     ?: this[Keys.LEGACY_LAST_LOOKUP_EPC]
                     ?: AppDefaults.LAST_SCANNED_EPC,
             lastFindTargetEpc = this[Keys.LAST_FIND_TARGET_EPC] ?: AppDefaults.LAST_FIND_TARGET_EPC,
+            lastScannedEpcAt = this[Keys.LAST_SCANNED_EPC_AT] ?: AppDefaults.LAST_SCANNED_EPC_AT,
+            lastFindTargetEpcAt =
+                this[Keys.LAST_FIND_TARGET_EPC_AT] ?: AppDefaults.LAST_FIND_TARGET_EPC_AT,
             rfidKeyCodes = this[Keys.RFID_KEY_CODES] ?: AppDefaults.RFID_KEY_CODES,
             scanKeyCodes = this[Keys.SCAN_KEY_CODES] ?: AppDefaults.SCAN_KEY_CODES,
             showDiagnosticsTab = this[Keys.SHOW_DIAGNOSTICS_TAB] ?: AppDefaults.SHOW_DIAGNOSTICS_TAB,
@@ -138,6 +144,8 @@ class PreferencesSettingsStore(
         val LAST_SCANNED_EPC = stringPreferencesKey("last_scanned_epc")
         val LEGACY_LAST_LOOKUP_EPC = stringPreferencesKey("last_lookup_epc")
         val LAST_FIND_TARGET_EPC = stringPreferencesKey("last_find_target_epc")
+        val LAST_SCANNED_EPC_AT = longPreferencesKey("last_scanned_epc_at")
+        val LAST_FIND_TARGET_EPC_AT = longPreferencesKey("last_find_target_epc_at")
         val RFID_KEY_CODES = stringPreferencesKey("rfid_key_codes")
         val SCAN_KEY_CODES = stringPreferencesKey("scan_key_codes")
         val SHOW_DIAGNOSTICS_TAB = booleanPreferencesKey("show_diagnostics_tab")

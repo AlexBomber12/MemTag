@@ -54,6 +54,8 @@ class SettingsStoreTest {
             assertEquals(AppDefaults.FIND_DEBUG_OVERLAY_ENABLED, settings.showFindDebugOverlay)
             assertEquals(AppDefaults.LAST_SCANNED_EPC, settings.lastScannedEpc)
             assertEquals(AppDefaults.LAST_FIND_TARGET_EPC, settings.lastFindTargetEpc)
+            assertEquals(AppDefaults.LAST_SCANNED_EPC_AT, settings.lastScannedEpcAt)
+            assertEquals(AppDefaults.LAST_FIND_TARGET_EPC_AT, settings.lastFindTargetEpcAt)
             assertEquals(AppDefaults.RFID_KEY_CODES, settings.rfidKeyCodes)
             assertEquals(AppDefaults.SCAN_KEY_CODES, settings.scanKeyCodes)
         }
@@ -76,6 +78,8 @@ class SettingsStoreTest {
                     showFindDebugOverlay = true,
                     lastScannedEpc = "E2000017221101441890ABCD",
                     lastFindTargetEpc = "E2000017221101441890ABCE",
+                    lastScannedEpcAt = 1_700_000_000_000L,
+                    lastFindTargetEpcAt = 1_700_000_000_500L,
                     rfidKeyCodes = "131, 132",
                     scanKeyCodes = "133",
                 )
@@ -99,6 +103,8 @@ class SettingsStoreTest {
             assertEquals(true, settings.showFindDebugOverlay)
             assertEquals("E2000017221101441890ABCD", settings.lastScannedEpc)
             assertEquals("E2000017221101441890ABCE", settings.lastFindTargetEpc)
+            assertEquals(1_700_000_000_000L, settings.lastScannedEpcAt)
+            assertEquals(1_700_000_000_500L, settings.lastFindTargetEpcAt)
             assertEquals("131, 132", settings.rfidKeyCodes)
             assertEquals("133", settings.scanKeyCodes)
         }
