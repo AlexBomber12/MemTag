@@ -10,6 +10,7 @@ import com.alexbomber12.memtag.data.batch.BatchRepository
 import com.alexbomber12.memtag.domain.batch.BatchExportRow
 import com.alexbomber12.memtag.domain.batch.BatchExtraEntry
 import com.alexbomber12.memtag.domain.batch.BatchInputItem
+import com.alexbomber12.memtag.domain.batch.BatchItem
 import com.alexbomber12.memtag.domain.batch.BatchSessionEntry
 import com.alexbomber12.memtag.domain.batch.BatchSource
 import com.alexbomber12.memtag.domain.batch.BatchStatus
@@ -35,7 +36,7 @@ enum class BatchMode {
 
 enum class BatchFilter {
     ALL,
-    MISSING,
+    NOT_FOUND,
     UNKNOWN,
 }
 
@@ -45,8 +46,8 @@ private const val MAX_INVALID_ROWS = 50
 
 data class BatchSummary(
     val total: Int = 0,
-    val present: Int = 0,
-    val missing: Int = 0,
+    val found: Int = 0,
+    val notFound: Int = 0,
     val unknown: Int = 0,
     val extra: Int = 0,
 )
@@ -66,7 +67,6 @@ data class BatchUiState(
     val mode: BatchMode = BatchMode.SWEEP,
     val sweepRunning: Boolean = false,
     val sweepDurationMs: Long = DEFAULT_SWEEP_DURATION_MS,
-    val includeExtrasInExport: Boolean = true,
     val currentRowEpc: String? = null,
     val lastScanEpc: String? = null,
     val lastScanRssi: Int? = null,
@@ -131,10 +131,6 @@ class BatchViewModel(
             return
         }
         mutableState.update { it.copy(sweepDurationMs = durationMs) }
-    }
-
-    fun setIncludeExtrasInExport(include: Boolean) {
-        mutableState.update { it.copy(includeExtrasInExport = include) }
     }
 
     fun setManualFilter(filter: BatchFilter) {
@@ -233,8 +229,7 @@ class BatchViewModel(
                     runCatching {
                         withContext(Dispatchers.IO) {
                             val items = repository.getAll()
-                            val includeExtras = uiState.value.includeExtrasInExport
-                            val rows = buildExportRows(items, includeExtras)
+                            val rows = buildExportRows(items)
                             val csv = BatchCsvExporter.export(rows)
                             contentResolver.openOutputStream(uri)?.bufferedWriter(Charsets.UTF_8)?.use { writer ->
                                 writer.write(csv)
@@ -282,16 +277,41 @@ class BatchViewModel(
                     inputItems.forEach { item ->
                         val previous = sessionMap[item.epcNormalized]
                         val seen = seenEntries[item.epcNormalized]
-                        val nextStatus = if (seen != null) BatchStatus.PRESENT else BatchStatus.MISSING
+                        val previousStatus = previous?.status ?: BatchStatus.UNKNOWN
+                        val previousUpdatedAt = previous?.updatedAt ?: 0L
+                        val nextStatus =
+                            if (seen != null) {
+                                BatchStatus.FOUND
+                            } else if (previousStatus == BatchStatus.UNKNOWN) {
+                                BatchStatus.NOT_FOUND
+                            } else {
+                                previousStatus
+                            }
+                        val updatedAt =
+                            if (nextStatus == BatchStatus.FOUND) {
+                                if (previousStatus == BatchStatus.FOUND && previousUpdatedAt > 0L) {
+                                    previousUpdatedAt
+                                } else {
+                                    now
+                                }
+                            } else {
+                                0L
+                            }
                         val lastSeenAt = seen?.lastSeenAt ?: previous?.lastSeenAt
                         val lastRssi = seen?.bestRssi ?: previous?.lastRssi
+                        val source =
+                            if (seen != null || (previousStatus == BatchStatus.UNKNOWN && nextStatus == BatchStatus.NOT_FOUND)) {
+                                BatchSource.INVENTORY
+                            } else {
+                                previous?.source
+                            }
                         repository.updateSession(
                             epcNormalized = item.epcNormalized,
                             status = nextStatus,
-                            updatedAt = now,
+                            updatedAt = updatedAt,
                             lastSeenAt = lastSeenAt,
                             lastRssi = lastRssi,
-                            source = BatchSource.INVENTORY,
+                            source = source,
                         )
                     }
                 }
@@ -358,15 +378,15 @@ class BatchViewModel(
         job.invokeOnCompletion { scanJob = null }
     }
 
-    fun markMissingCurrent() {
+    fun markNotFoundCurrent() {
         val current = uiState.value.currentRowEpc ?: return
         val previous = uiState.value.sessionMap[current] ?: return
         pushUndo(UpdateEntry(current, previous))
         viewModelScope.launch {
             repository.updateSession(
                 epcNormalized = current,
-                status = BatchStatus.MISSING,
-                updatedAt = clock(),
+                status = BatchStatus.NOT_FOUND,
+                updatedAt = 0L,
                 lastSeenAt = previous.lastSeenAt,
                 lastRssi = previous.lastRssi,
                 source = BatchSource.MANUAL,
@@ -387,7 +407,7 @@ class BatchViewModel(
                     repository.updateSession(
                         epcNormalized = action.epcNormalized,
                         status = previous.status,
-                        updatedAt = previous.updatedAt ?: clock(),
+                        updatedAt = previous.updatedAt ?: 0L,
                         lastSeenAt = previous.lastSeenAt,
                         lastRssi = previous.lastRssi,
                         source = previous.source,
@@ -434,11 +454,17 @@ class BatchViewModel(
         val session = state.sessionMap[epcNormalized]
         if (session != null) {
             pushUndo(UpdateEntry(epcNormalized, session))
+            val updatedAt =
+                if (session.status == BatchStatus.FOUND && (session.updatedAt ?: 0L) > 0L) {
+                    session.updatedAt ?: 0L
+                } else {
+                    clock()
+                }
             viewModelScope.launch {
                 repository.updateSession(
                     epcNormalized = epcNormalized,
-                    status = BatchStatus.PRESENT,
-                    updatedAt = clock(),
+                    status = BatchStatus.FOUND,
+                    updatedAt = updatedAt,
                     lastSeenAt = timestampMs,
                     lastRssi = rssi ?: session.lastRssi,
                     source = BatchSource.SCAN,
@@ -479,6 +505,31 @@ class BatchViewModel(
         }
     }
 
+    fun finishManualSession() {
+        if (uiState.value.sweepRunning) {
+            return
+        }
+        viewModelScope.launch {
+            val inputItems = uiState.value.inputItems
+            val sessionMap = uiState.value.sessionMap
+            withContext(Dispatchers.IO) {
+                inputItems.forEach { item ->
+                    val session = sessionMap[item.epcNormalized] ?: return@forEach
+                    if (session.status == BatchStatus.UNKNOWN) {
+                        repository.updateSession(
+                            epcNormalized = item.epcNormalized,
+                            status = BatchStatus.NOT_FOUND,
+                            updatedAt = 0L,
+                            lastSeenAt = session.lastSeenAt,
+                            lastRssi = session.lastRssi,
+                            source = BatchSource.MANUAL,
+                        )
+                    }
+                }
+            }
+        }
+    }
+
     private fun advanceAfterManual(currentEpc: String) {
         val next = findNextTarget(uiState.value.inputItems, uiState.value.sessionMap, currentEpc)
         if (next != null) {
@@ -506,38 +557,15 @@ class BatchViewModel(
         return extras
     }
 
-    private fun buildExportRows(
-        items: List<com.alexbomber12.memtag.domain.batch.BatchItem>,
-        includeExtras: Boolean,
-    ): List<BatchExportRow> {
-        val rows =
-            items.map { item ->
-                BatchExportRow(
-                    epc = item.input.epcNormalized,
-                    name = item.input.name,
-                    status = item.session.status,
-                    lastSeenAt = item.session.lastSeenAt,
-                    lastRssi = item.session.lastRssi,
-                    source = item.session.source,
-                    note = item.input.note,
-                )
-            }.toMutableList()
-        if (includeExtras) {
-            uiState.value.extras.values.forEach { extra ->
-                rows.add(
-                    BatchExportRow(
-                        epc = extra.epcNormalized,
-                        name = null,
-                        status = BatchStatus.EXTRA,
-                        lastSeenAt = extra.lastSeenAt,
-                        lastRssi = extra.lastRssi,
-                        source = extra.source,
-                        note = null,
-                    ),
-                )
-            }
+    private fun buildExportRows(items: List<BatchItem>): List<BatchExportRow> {
+        return items.map { item ->
+            BatchExportRow(
+                epc = item.input.epcNormalized,
+                name = item.input.name,
+                status = item.session.status,
+                updatedAt = item.session.updatedAt,
+            )
         }
-        return rows
     }
 
     private fun summaryFor(
@@ -545,21 +573,21 @@ class BatchViewModel(
         sessionMap: Map<String, BatchSessionEntry>,
         extras: Map<String, BatchExtraEntry>,
     ): BatchSummary {
-        var present = 0
-        var missing = 0
+        var found = 0
+        var notFound = 0
         var unknown = 0
         inputItems.forEach { item ->
             val status = sessionMap[item.epcNormalized]?.status ?: BatchStatus.UNKNOWN
             when (status) {
-                BatchStatus.PRESENT -> present += 1
-                BatchStatus.MISSING -> missing += 1
+                BatchStatus.FOUND -> found += 1
+                BatchStatus.NOT_FOUND -> notFound += 1
                 else -> unknown += 1
             }
         }
         return BatchSummary(
             total = inputItems.size,
-            present = present,
-            missing = missing,
+            found = found,
+            notFound = notFound,
             unknown = unknown,
             extra = extras.size,
         )
@@ -581,8 +609,8 @@ class BatchViewModel(
         if (unknown != null) {
             return unknown.epcNormalized
         }
-        val missing = inputItems.firstOrNull { sessionMap[it.epcNormalized]?.status == BatchStatus.MISSING }
-        return missing?.epcNormalized ?: inputItems.first().epcNormalized
+        val notFound = inputItems.firstOrNull { sessionMap[it.epcNormalized]?.status == BatchStatus.NOT_FOUND }
+        return notFound?.epcNormalized ?: inputItems.first().epcNormalized
     }
 
     private fun findNextTarget(
@@ -593,7 +621,7 @@ class BatchViewModel(
         if (inputItems.isEmpty()) {
             return null
         }
-        val statuses = setOf(BatchStatus.UNKNOWN, BatchStatus.MISSING)
+        val statuses = setOf(BatchStatus.UNKNOWN, BatchStatus.NOT_FOUND)
         val startIndex = inputItems.indexOfFirst { it.epcNormalized == currentEpc }
         val forward =
             if (startIndex >= 0) {

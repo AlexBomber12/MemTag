@@ -52,8 +52,7 @@ class BatchRepositoryTest {
                 listOf(
                     BatchInputItem(
                         epcNormalized = "ABCDEF12",
-                        name = null,
-                        note = null,
+                        name = "",
                     ),
                 ),
                 now,
@@ -61,7 +60,7 @@ class BatchRepositoryTest {
 
             repository.updateSession(
                 epcNormalized = "ABCDEF12",
-                status = BatchStatus.PRESENT,
+                status = BatchStatus.FOUND,
                 updatedAt = now + 100L,
                 lastSeenAt = now + 50L,
                 lastRssi = -45,
@@ -69,7 +68,7 @@ class BatchRepositoryTest {
             )
 
             val item = repository.getAll().first()
-            assertEquals(BatchStatus.PRESENT, item.session.status)
+            assertEquals(BatchStatus.FOUND, item.session.status)
             assertEquals(now + 50L, item.session.lastSeenAt)
             assertEquals(-45, item.session.lastRssi)
             assertEquals(BatchSource.SCAN, item.session.source)

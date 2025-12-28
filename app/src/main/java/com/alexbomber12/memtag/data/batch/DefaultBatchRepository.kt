@@ -40,11 +40,11 @@ class DefaultBatchRepository(
                 val timestamp = now + index
                 BatchItemEntity(
                     epcNormalized = item.epcNormalized,
-                    name = item.name?.ifBlank { null },
+                    name = item.name.ifBlank { null },
                     status = BatchStatus.UNKNOWN.name,
                     createdAt = timestamp,
-                    updatedAt = timestamp,
-                    note = item.note?.ifBlank { null },
+                    updatedAt = 0L,
+                    note = null,
                     lastProximity = null,
                     lastSeenAt = null,
                     source = null,
@@ -116,8 +116,7 @@ class DefaultBatchRepository(
         val input =
             BatchInputItem(
                 epcNormalized = epcNormalized,
-                name = name,
-                note = note,
+                name = name.orEmpty(),
             )
         val session =
             BatchSessionEntry(
@@ -125,7 +124,7 @@ class DefaultBatchRepository(
                 lastSeenAt = lastSeenAt,
                 lastRssi = lastProximity,
                 source = mapSource(source),
-                updatedAt = updatedAt,
+                updatedAt = updatedAt.takeIf { it > 0 },
             )
         return BatchItem(
             id = id,
@@ -146,12 +145,12 @@ class DefaultBatchRepository(
     private fun mapStatus(raw: String): BatchStatus {
         return when (raw.uppercase()) {
             BatchStatus.UNKNOWN.name -> BatchStatus.UNKNOWN
-            BatchStatus.PRESENT.name -> BatchStatus.PRESENT
-            BatchStatus.MISSING.name -> BatchStatus.MISSING
+            BatchStatus.FOUND.name -> BatchStatus.FOUND
+            BatchStatus.NOT_FOUND.name -> BatchStatus.NOT_FOUND
             BatchStatus.EXTRA.name -> BatchStatus.EXTRA
             "PENDING" -> BatchStatus.UNKNOWN
-            "FOUND" -> BatchStatus.PRESENT
-            "SKIPPED", "NOT_FOUND" -> BatchStatus.MISSING
+            "PRESENT", "FOUND" -> BatchStatus.FOUND
+            "MISSING", "SKIPPED", "NOT_FOUND" -> BatchStatus.NOT_FOUND
             else -> BatchStatus.UNKNOWN
         }
     }
