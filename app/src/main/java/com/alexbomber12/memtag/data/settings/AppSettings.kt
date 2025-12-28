@@ -18,6 +18,7 @@ data class AppSettings(
     val lastFindTargetEpc: String = AppDefaults.LAST_FIND_TARGET_EPC,
     val rfidKeyCodes: String = AppDefaults.RFID_KEY_CODES,
     val scanKeyCodes: String = AppDefaults.SCAN_KEY_CODES,
+    val showDiagnosticsTab: Boolean = AppDefaults.SHOW_DIAGNOSTICS_TAB,
 ) {
     fun sanitized(): AppSettings {
         val normalizedRegion =

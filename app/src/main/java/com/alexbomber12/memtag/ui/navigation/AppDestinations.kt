@@ -61,7 +61,20 @@ object AppDestinations {
             icon = Icons.Filled.Info,
         )
 
-    val topLevel = listOf(Find, Lookup, RepairWrite, Batch, Settings, Diagnostics)
+    private val baseTopLevel = listOf(Find, Lookup, RepairWrite, Batch, Settings)
+    private val allTopLevel = baseTopLevel + Diagnostics
+
+    fun topLevelDestinations(showDiagnostics: Boolean): List<AppDestination> {
+        return if (showDiagnostics) {
+            allTopLevel
+        } else {
+            baseTopLevel
+        }
+    }
+
+    fun topLevelDestinationForRoute(route: String?): AppDestination? {
+        return allTopLevel.firstOrNull { it.route == route }
+    }
 
     const val FIND_ROUTE_PATTERN = "find?epc={epc}&autoStart={autoStart}&fromBatch={fromBatch}"
 

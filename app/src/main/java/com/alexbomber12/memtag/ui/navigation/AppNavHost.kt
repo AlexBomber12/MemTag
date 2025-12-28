@@ -99,7 +99,10 @@ fun AppNavHost(
         }
         composable(AppDestinations.Settings.route) {
             val viewModel: SettingsViewModel = viewModel(factory = viewModelFactory)
-            SettingsScreen(viewModel = viewModel)
+            SettingsScreen(
+                viewModel = viewModel,
+                onOpenDiagnostics = { navController.navigateToTopLevel(AppDestinations.Diagnostics) },
+            )
         }
         composable(AppDestinations.Diagnostics.route) {
             val viewModel: DiagnosticsViewModel = viewModel(factory = viewModelFactory)
