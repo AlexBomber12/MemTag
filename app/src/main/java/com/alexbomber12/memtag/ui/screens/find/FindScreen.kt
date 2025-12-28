@@ -31,6 +31,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
 import com.alexbomber12.memtag.app.HardwareAction
 import com.alexbomber12.memtag.ui.components.AppCard
@@ -52,7 +54,7 @@ fun FindScreen(
     hardwareActions: Flow<HardwareAction>,
 ) {
     val uiState by viewModel.uiState.collectAsState()
-    var showDebug by rememberSaveable { mutableStateOf(false) }
+    var debugExpanded by rememberSaveable { mutableStateOf(false) }
 
     Column(
         modifier =
@@ -76,7 +78,7 @@ fun FindScreen(
                 }
             }
         }
-        val isValid = EpcValidator.isValidEpcHex(uiState.epcInput)
+        val isValid = uiState.epcInput.isBlank() || EpcValidator.isValidEpcHex(uiState.epcInput)
         val showInputError = uiState.epcInput.isNotBlank() && !isValid
         val statusLabel =
             when (uiState.status) {
@@ -118,10 +120,21 @@ fun FindScreen(
         }
 
         AppCard(title = "Proximity") {
+            val isNearbyMode = uiState.targetEpcNormalized.isNullOrBlank()
+            val canSetTargetFromLastSeen =
+                uiState.lastSeenAnyEpc != null &&
+                    (isNearbyMode || uiState.matchStatus == MatchStatus.NotMatchedYet)
+
             ProximityMeter(
                 proximity = uiState.proximity,
                 modifier = Modifier.fillMaxWidth(),
             )
+            if (isNearbyMode) {
+                Text(
+                    text = "Mode: Nearby tag",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
             Text(
                 text = "Status: $statusLabel",
                 style = MaterialTheme.typography.bodyMedium,
@@ -133,14 +146,47 @@ fun FindScreen(
                     color = MaterialTheme.colorScheme.error,
                 )
             }
-            TextButton(
-                onClick = { showDebug = !showDebug },
-                modifier = Modifier.align(Alignment.End),
-            ) {
-                Text(text = if (showDebug) "Hide debug" else "Show debug")
+            when {
+                uiState.isRunning && isNearbyMode && uiState.tagsSeenAny == 0 -> {
+                    Text(
+                        text = "No tags seen yet, bring a tag closer.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+
+                uiState.isRunning &&
+                    !isNearbyMode &&
+                    uiState.tagsSeenMatched == 0 &&
+                    uiState.tagsSeenAny > 0 -> {
+                    Text(
+                        text = "Target not seen yet, but tags nearby: ${uiState.lastSeenAnyEpc.orEmpty()}",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
             }
-            AnimatedVisibility(visible = showDebug) {
-                DebugPanel(uiState = uiState)
+            if (canSetTargetFromLastSeen) {
+                SecondaryButton(
+                    text = "Set target from last seen tag",
+                    onClick = viewModel::setTargetFromLastSeenAny,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        }
+
+        if (uiState.debugOverlayEnabled) {
+            AppCard(title = "Find Debug") {
+                TextButton(
+                    onClick = { debugExpanded = !debugExpanded },
+                    modifier = Modifier.align(Alignment.End),
+                ) {
+                    Text(text = if (debugExpanded) "Hide details" else "Show details")
+                }
+                AnimatedVisibility(visible = debugExpanded) {
+                    DebugPanel(
+                        uiState = uiState,
+                        onDisableFilterChange = viewModel::setDebugDisableFilter,
+                    )
+                }
             }
         }
 
@@ -273,13 +319,44 @@ private fun ToggleRow(
 }
 
 @Composable
-private fun DebugPanel(uiState: FindUiState) {
+private fun DebugPanel(
+    uiState: FindUiState,
+    onDisableFilterChange: (Boolean) -> Unit,
+) {
+    val clipboard = LocalClipboardManager.current
     val formattedRaw = String.format(Locale.US, "%.2f", uiState.rawProximity)
     val formattedSmoothed = String.format(Locale.US, "%.2f", uiState.smoothedProximity)
+    val matchStatusLabel =
+        when (uiState.matchStatus) {
+            MatchStatus.NoTarget -> "No target"
+            MatchStatus.Matched -> "Matched"
+            MatchStatus.NotMatchedYet -> "Not matched yet"
+        }
     Column(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
+        Text(text = "Target (normalized): ${uiState.targetEpcNormalized ?: "n/a"}")
+        Text(text = "Any EPC: ${uiState.lastSeenAnyEpc ?: "n/a"}")
+        Text(text = "Any RSSI: ${uiState.lastSeenAnyRssi ?: "n/a"}")
+        Text(text = "Any tags seen: ${uiState.tagsSeenAny}")
+        Text(text = "Matched EPC: ${uiState.lastSeenMatchedEpc ?: "n/a"}")
+        Text(text = "Matched RSSI: ${uiState.lastSeenMatchedRssi ?: "n/a"}")
+        Text(text = "Matched tags seen: ${uiState.tagsSeenMatched}")
+        Text(text = "Match status: $matchStatusLabel")
+        ToggleRow(
+            title = "Debug: disable filter",
+            description = "Use any tag for Geiger updates",
+            checked = uiState.debugDisableFilter,
+            onCheckedChange = onDisableFilterChange,
+        )
+        if (uiState.lastSeenAnyEpc != null) {
+            TextButton(
+                onClick = { clipboard.setText(AnnotatedString(uiState.lastSeenAnyEpc)) },
+            ) {
+                Text(text = "Copy last seen EPC")
+            }
+        }
         Text(text = "Last RSSI: ${uiState.lastRssi ?: "n/a"}")
         Text(text = "Hits / window: ${uiState.hitsPerWindow}")
         Text(text = "Raw proximity: $formattedRaw")

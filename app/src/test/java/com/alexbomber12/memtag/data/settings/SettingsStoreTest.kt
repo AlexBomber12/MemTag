@@ -51,6 +51,7 @@ class SettingsStoreTest {
             assertEquals(AppDefaults.SCAN2D_EXTRA_KEY, settings.scan2dExtraKey)
             assertEquals(AppDefaults.FIND_SOUND_ENABLED, settings.findSoundEnabled)
             assertEquals(AppDefaults.FIND_HAPTIC_ENABLED, settings.findHapticEnabled)
+            assertEquals(AppDefaults.FIND_DEBUG_OVERLAY_ENABLED, settings.showFindDebugOverlay)
             assertEquals(AppDefaults.LAST_SCANNED_EPC, settings.lastScannedEpc)
             assertEquals(AppDefaults.LAST_FIND_TARGET_EPC, settings.lastFindTargetEpc)
             assertEquals(AppDefaults.RFID_KEY_CODES, settings.rfidKeyCodes)
@@ -72,6 +73,7 @@ class SettingsStoreTest {
                 it.copy(
                     findSoundEnabled = true,
                     findHapticEnabled = true,
+                    showFindDebugOverlay = true,
                     lastScannedEpc = "E2000017221101441890ABCD",
                     lastFindTargetEpc = "E2000017221101441890ABCE",
                     rfidKeyCodes = "131, 132",
@@ -94,6 +96,7 @@ class SettingsStoreTest {
             assertEquals("payload", settings.scan2dExtraKey)
             assertEquals(true, settings.findSoundEnabled)
             assertEquals(true, settings.findHapticEnabled)
+            assertEquals(true, settings.showFindDebugOverlay)
             assertEquals("E2000017221101441890ABCD", settings.lastScannedEpc)
             assertEquals("E2000017221101441890ABCE", settings.lastFindTargetEpc)
             assertEquals("131, 132", settings.rfidKeyCodes)

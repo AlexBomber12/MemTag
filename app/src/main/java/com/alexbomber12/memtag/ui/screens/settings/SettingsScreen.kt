@@ -229,6 +229,26 @@ fun SettingsScreen(
             )
         }
 
+        AppCard(title = "Find") {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(text = "Find Debug Overlay", style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        text = "Show Geiger debug details in the Find screen.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                Switch(
+                    checked = settings.showFindDebugOverlay,
+                    onCheckedChange = viewModel::toggleFindDebugOverlay,
+                )
+            }
+        }
+
         AppCard(title = "Diagnostics") {
             Row(
                 modifier = Modifier.fillMaxWidth(),

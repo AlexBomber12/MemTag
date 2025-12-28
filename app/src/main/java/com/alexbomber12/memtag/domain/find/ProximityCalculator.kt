@@ -17,6 +17,7 @@ data class ProximitySnapshot(
 class ProximityCalculator(
     private val targetEpc: String,
     private val config: Config = Config(),
+    private val matchAll: Boolean = false,
 ) {
     data class Config(
         val windowMs: Long = 500L,
@@ -45,7 +46,7 @@ class ProximityCalculator(
     }
 
     fun onReading(reading: TagReading): ProximitySnapshot? {
-        if (!reading.epcHex.equals(targetEpc, ignoreCase = true)) {
+        if (!matchAll && !reading.epcHex.equals(targetEpc, ignoreCase = true)) {
             return null
         }
         val nowMs = reading.timestampMs

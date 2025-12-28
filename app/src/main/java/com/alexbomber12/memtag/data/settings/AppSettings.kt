@@ -14,6 +14,7 @@ data class AppSettings(
     val scan2dExtraKey: String = AppDefaults.SCAN2D_EXTRA_KEY,
     val findSoundEnabled: Boolean = AppDefaults.FIND_SOUND_ENABLED,
     val findHapticEnabled: Boolean = AppDefaults.FIND_HAPTIC_ENABLED,
+    val showFindDebugOverlay: Boolean = AppDefaults.FIND_DEBUG_OVERLAY_ENABLED,
     val lastScannedEpc: String = AppDefaults.LAST_SCANNED_EPC,
     val lastFindTargetEpc: String = AppDefaults.LAST_FIND_TARGET_EPC,
     val rfidKeyCodes: String = AppDefaults.RFID_KEY_CODES,

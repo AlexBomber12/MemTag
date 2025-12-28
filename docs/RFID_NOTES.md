@@ -27,6 +27,17 @@ If you build the device flavor without vendor libraries, Gradle fails fast with 
 - RSSI is treated as dBm; if the SDK reports positive values, they are interpreted as negative magnitude (e.g., `60` -> `-60`).
 - Output uses EMA smoothing (alpha ~0.2) and decays gradually after ~700 ms without target hits.
 
+## Find Debug overlay (Geiger troubleshooting)
+- Enable **Settings -> Find Debug Overlay** to show a collapsible debug card in Find.
+- **Nearby mode** appears when no target EPC is set; the meter uses any tag RSSI.
+- **Match status** helps explain “empty” sessions:
+  - `No target`: Find is running without a target EPC.
+  - `Not matched yet`: tags are seen, but none match the target EPC.
+  - `Matched`: target EPC has been seen.
+- **Any tag telemetry** (last EPC/RSSI + tags seen) proves inventory is active even if the target does not match.
+- **Debug: disable filter** uses any tag to drive the Geiger meter for quick RF sanity checks.
+- **Set target from last seen tag** updates the target to the most recent EPC when mismatch is confirmed.
+
 ## Repair & Verify (EPC mismatch tool)
 - Use **Repair** only when a scanned tag EPC does not match the expected EPC for a selected item.
 - A mismatch means the tag you scanned is not encoded with the selected item's EPC (wrong tag or incorrect encoding).

@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.Log
 import com.alexbomber12.memtag.data.settings.SettingsStore
 import com.alexbomber12.memtag.util.epc.EpcNormalizer
+import com.alexbomber12.memtag.util.epc.normalizeUhfEpc
 import com.rscja.deviceapi.RFIDWithUHFUART
 import com.rscja.deviceapi.entity.UHFTAGInfo
 import com.rscja.deviceapi.interfaces.IUHF
@@ -405,6 +406,7 @@ class ChainwayUhfReader(
                                                 epcHex = parsed.epc,
                                                 rssi = parsed.rssi,
                                                 timestampMs = System.currentTimeMillis(),
+                                                rawEpc = parsed.rawEpc,
                                             ),
                                         )
                                     }
@@ -1324,6 +1326,7 @@ class ChainwayUhfReader(
 
     private data class ParsedTag(
         val epc: String?,
+        val rawEpc: String?,
         val tid: String?,
         val rssi: Int?,
         val rssiRaw: String?,
@@ -1352,19 +1355,21 @@ class ChainwayUhfReader(
         tagInfo: UHFTAGInfo,
         source: String,
     ): ParsedTag {
-        val epc = normalizeProbeField(tagInfo.getEPC())
+        val rawEpc = normalizeProbeField(tagInfo.getEPC())
+        val epc = normalizeUhfEpc(rawEpc)
         val tid = normalizeProbeField(tagInfo.getTid())
         val rssiRaw = normalizeProbeField(tagInfo.getRssi())
         val rssi = rssiRaw?.toIntOrNull()
         if (!epc.isNullOrBlank() && inventoryRunning && inventoryLogCount < INVENTORY_LOG_LIMIT) {
             Log.i(
                 LOG_TAG,
-                "inventory tag source=$source epc=$epc rssi=${rssi ?: "--"} tid=${tid ?: "--"}",
+                "inventory tag source=$source raw=${rawEpc ?: "--"} epc=$epc rssi=${rssi ?: "--"} tid=${tid ?: "--"}",
             )
             inventoryLogCount += 1
         }
         return ParsedTag(
             epc = epc,
+            rawEpc = rawEpc,
             tid = tid,
             rssi = rssi,
             rssiRaw = rssiRaw,
@@ -1374,8 +1379,9 @@ class ChainwayUhfReader(
     private fun recordParsedTag(parsed: ParsedTag) {
         diagnosticsState.update { current ->
             val tagFound = !parsed.epc.isNullOrBlank()
+            val rawFound = !parsed.rawEpc.isNullOrBlank()
             current.copy(
-                lastRaw0 = parsed.epc,
+                lastRaw0 = if (rawFound) parsed.rawEpc else current.lastRaw0,
                 lastRaw1 = parsed.tid,
                 lastRssi = parsed.rssi ?: current.lastRssi,
                 lastReadEpc = if (tagFound) parsed.epc else current.lastReadEpc,
