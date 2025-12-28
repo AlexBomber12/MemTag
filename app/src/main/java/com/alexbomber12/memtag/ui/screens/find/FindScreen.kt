@@ -15,7 +15,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
@@ -204,25 +203,23 @@ private fun ProximityMeter(
             displayValue < 70 -> MaterialTheme.colorScheme.tertiary
             else -> MaterialTheme.colorScheme.primary
         }
-    Row(
+    Column(
         modifier = modifier,
-        horizontalArrangement = Arrangement.SpaceEvenly,
-        verticalAlignment = Alignment.CenterVertically,
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(
-                text = displayValue.toString(),
-                style = MaterialTheme.typography.displaySmall,
-                color = barColor,
-            )
-            Text(
-                text = "Proximity",
-                style = MaterialTheme.typography.labelMedium,
-            )
-        }
+        Text(
+            text = displayValue.toString(),
+            style = MaterialTheme.typography.displaySmall,
+            color = barColor,
+        )
         EqualizerBar(
             progress = animatedProgress,
             color = barColor,
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .height(160.dp),
         )
     }
 }
@@ -236,8 +233,6 @@ private fun EqualizerBar(
     Box(
         modifier =
             modifier
-                .height(180.dp)
-                .width(32.dp)
                 .clip(MaterialTheme.shapes.small)
                 .background(MaterialTheme.colorScheme.surfaceVariant)
                 .padding(4.dp),

@@ -26,9 +26,21 @@ fun AppBottomBar(
             NavigationBarItem(
                 selected = currentRoot == destination.route,
                 onClick = {
-                    navController.navigate(destination.route) {
-                        popUpTo(navController.graph.findStartDestination().id) {
-                            saveState = true
+                    if (navController.currentBackStackEntry == null || navController.graph.nodes.size() == 0) {
+                        return@NavigationBarItem
+                    }
+                    val targetRoute =
+                        if (destination.route == AppDestinations.Find.route) {
+                            AppDestinations.findRoute()
+                        } else {
+                            destination.route
+                        }
+                    val startId = runCatching { navController.graph.findStartDestination().id }.getOrNull()
+                    navController.navigate(targetRoute) {
+                        if (startId != null) {
+                            popUpTo(startId) {
+                                saveState = true
+                            }
                         }
                         launchSingleTop = true
                         restoreState = true

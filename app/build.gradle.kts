@@ -65,24 +65,42 @@ val deviceLibArtifacts =
         file.extension.equals("jar", ignoreCase = true) ||
             file.extension.equals("aar", ignoreCase = true)
     }
-val hasDeviceApiAar =
-    deviceLibArtifacts.any { file ->
+val resolvedDeviceLibs =
+    deviceLibArtifacts.filterNot { file ->
         file.extension.equals("aar", ignoreCase = true) &&
             file.name.contains("DeviceAPI", ignoreCase = true)
     }
-val resolvedDeviceLibs =
-    if (hasDeviceApiAar) {
-        deviceLibArtifacts.filterNot { file ->
-            file.name.startsWith("cw-deviceapi", ignoreCase = true)
-        }
-    } else {
-        deviceLibArtifacts
-    }
+val deviceJniRoot = layout.projectDirectory.dir("src/device/jniLibs").asFile
+val requiredDeviceJniLibs =
+    listOf(
+        deviceJniRoot.resolve("arm64-v8a/libDeviceAPI.so"),
+        deviceJniRoot.resolve("armeabi-v7a/libDeviceAPI.so"),
+    )
 val verifyDeviceLibs =
     tasks.register("verifyDeviceLibs") {
         doLast {
-            val libs = resolvedDeviceLibs
-            if (libs.isEmpty()) {
+            val deviceApiJar =
+                deviceLibArtifacts.firstOrNull { file ->
+                    file.name.equals("cw-deviceapi20191022.jar", ignoreCase = true)
+                }
+            if (deviceApiJar == null) {
+                throw GradleException(
+                    "Device flavor requires app/libs/cw-deviceapi20191022.jar from API_ver20191022. " +
+                        "Add the Chainway SDK jar or build the mock flavor with :app:assembleMockDebug.",
+                )
+            }
+            val missingJniLibs = requiredDeviceJniLibs.filterNot { it.exists() }
+            if (missingJniLibs.isNotEmpty()) {
+                val missingList =
+                    missingJniLibs.joinToString { file ->
+                        file.relativeTo(layout.projectDirectory.asFile).path.replace('\\', '/')
+                    }
+                throw GradleException(
+                    "Device flavor requires native libs from API_ver20191022 in app/src/device/jniLibs. " +
+                        "Missing: $missingList",
+                )
+            }
+            if (resolvedDeviceLibs.isEmpty()) {
                 throw GradleException(
                     "Device flavor requires vendor UHF SDK jars/aars in app/libs (preferred) " +
                         "or app/lib (legacy). Add the Chainway SDK files or build the mock flavor " +

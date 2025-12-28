@@ -34,7 +34,7 @@ fun AppNavHost(
 ) {
     NavHost(
         navController = navController,
-        startDestination = AppDestinations.findRoute(),
+        startDestination = AppDestinations.FIND_ROUTE_PATTERN,
         modifier = modifier,
     ) {
         composable(AppDestinations.Lookup.route) {

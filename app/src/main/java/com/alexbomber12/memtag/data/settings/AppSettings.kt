@@ -9,6 +9,7 @@ data class AppSettings(
     val mementoLibraryId: String = AppDefaults.MEMENTO_LIBRARY_ID,
     val uhfRegion: String = AppDefaults.UHF_REGION,
     val uhfPower: Int = AppDefaults.UHF_POWER,
+    val uhfFrequencyMode: Int? = null,
     val scan2dAction: String = AppDefaults.SCAN2D_ACTION,
     val scan2dExtraKey: String = AppDefaults.SCAN2D_EXTRA_KEY,
     val findSoundEnabled: Boolean = AppDefaults.FIND_SOUND_ENABLED,
@@ -26,12 +27,14 @@ data class AppSettings(
                 AppDefaults.UHF_REGION
             }
         val normalizedPower = uhfPower.coerceIn(AppDefaults.UHF_POWER_MIN, AppDefaults.UHF_POWER_MAX)
+        val normalizedFrequencyMode = uhfFrequencyMode?.takeIf { it >= 0 }
         val normalizedLastScanned = runCatching { EpcNormalizer.normalize(lastScannedEpc) }.getOrNull().orEmpty()
         val normalizedFindTarget = runCatching { EpcNormalizer.normalize(lastFindTargetEpc) }.getOrNull().orEmpty()
         return copy(
             mementoBaseUrl = AppDefaults.normalizeBaseUrl(mementoBaseUrl),
             uhfRegion = normalizedRegion,
             uhfPower = normalizedPower,
+            uhfFrequencyMode = normalizedFrequencyMode,
             lastScannedEpc = normalizedLastScanned,
             lastFindTargetEpc = normalizedFindTarget,
             rfidKeyCodes = rfidKeyCodes.trim(),

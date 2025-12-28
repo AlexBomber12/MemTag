@@ -8,6 +8,7 @@ import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import com.alexbomber12.memtag.data.AppDefaults
+import com.alexbomber12.memtag.integrations.uhf.UhfRegion
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.map
@@ -38,6 +39,11 @@ class PreferencesSettingsStore(
             preferences[Keys.MEMENTO_LIBRARY_ID] = updated.mementoLibraryId
             preferences[Keys.UHF_REGION] = updated.uhfRegion
             preferences[Keys.UHF_POWER] = updated.uhfPower
+            if (updated.uhfFrequencyMode == null) {
+                preferences.remove(Keys.UHF_FREQUENCY_MODE)
+            } else {
+                preferences[Keys.UHF_FREQUENCY_MODE] = updated.uhfFrequencyMode
+            }
             preferences[Keys.SCAN2D_ACTION] = updated.scan2dAction
             preferences[Keys.SCAN2D_EXTRA_KEY] = updated.scan2dExtraKey
             preferences[Keys.FIND_SOUND_ENABLED] = updated.findSoundEnabled
@@ -72,9 +78,11 @@ class PreferencesSettingsStore(
                 AppDefaults.UHF_REGION
             }
         val normalizedPower = power.coerceIn(AppDefaults.UHF_POWER_MIN, AppDefaults.UHF_POWER_MAX)
+        val frequencyMode = UhfRegion.fromSettings(normalizedRegion).toFrequencyMode()
         dataStore.edit { preferences ->
             preferences[Keys.UHF_REGION] = normalizedRegion
             preferences[Keys.UHF_POWER] = normalizedPower
+            preferences[Keys.UHF_FREQUENCY_MODE] = frequencyMode
         }
     }
 
@@ -95,6 +103,7 @@ class PreferencesSettingsStore(
             mementoLibraryId = this[Keys.MEMENTO_LIBRARY_ID] ?: AppDefaults.MEMENTO_LIBRARY_ID,
             uhfRegion = this[Keys.UHF_REGION] ?: AppDefaults.UHF_REGION,
             uhfPower = this[Keys.UHF_POWER] ?: AppDefaults.UHF_POWER,
+            uhfFrequencyMode = this[Keys.UHF_FREQUENCY_MODE],
             scan2dAction = this[Keys.SCAN2D_ACTION] ?: AppDefaults.SCAN2D_ACTION,
             scan2dExtraKey = this[Keys.SCAN2D_EXTRA_KEY] ?: AppDefaults.SCAN2D_EXTRA_KEY,
             findSoundEnabled = this[Keys.FIND_SOUND_ENABLED] ?: AppDefaults.FIND_SOUND_ENABLED,
@@ -115,6 +124,7 @@ class PreferencesSettingsStore(
         val MEMENTO_LIBRARY_ID = stringPreferencesKey("memento_library_id")
         val UHF_REGION = stringPreferencesKey("uhf_region")
         val UHF_POWER = intPreferencesKey("uhf_power")
+        val UHF_FREQUENCY_MODE = intPreferencesKey("uhf_frequency_mode")
         val SCAN2D_ACTION = stringPreferencesKey("scan2d_action")
         val SCAN2D_EXTRA_KEY = stringPreferencesKey("scan2d_extra_key")
         val FIND_SOUND_ENABLED = booleanPreferencesKey("find_sound_enabled")

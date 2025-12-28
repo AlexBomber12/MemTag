@@ -53,13 +53,14 @@ fun RepairScreen(
 
     LaunchedEffect(hardwareActions) {
         hardwareActions.collect { action ->
-            if (action == HardwareAction.Rfid) {
-                viewModel.readTag()
+            when (action) {
+                HardwareAction.Rfid -> viewModel.readTag()
+                HardwareAction.Scan -> viewModel.scanQrForCurrent()
             }
         }
     }
 
-    val isBusy = state.isReading || state.isWriting || state.isVerifying
+    val isBusy = state.isReading || state.isScanningQr || state.isWriting || state.isVerifying
     val expectedEpc = state.selectedItem?.epcNormalized ?: state.expectedEpc
     val canRepair =
         state.comparison is RepairComparison.Mismatch &&
@@ -125,20 +126,28 @@ fun RepairScreen(
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     PrimaryButton(
-                        text = "Read tag EPC",
+                        text = "Read RFID",
                         onClick = viewModel::readTag,
                         enabled = !isBusy,
                         modifier = Modifier.weight(1f),
                     )
                     SecondaryButton(
-                        text = "Stop/Cancel",
-                        onClick = viewModel::cancelOperations,
-                        enabled = isBusy || state.showConfirmation,
+                        text = "Scan QR",
+                        onClick = viewModel::scanQrForCurrent,
+                        enabled = !isBusy,
                         modifier = Modifier.weight(1f),
                     )
                 }
+                SecondaryButton(
+                    text = "Stop/Cancel",
+                    onClick = viewModel::cancelOperations,
+                    enabled = isBusy || state.showConfirmation,
+                    modifier = Modifier.fillMaxWidth(),
+                )
                 if (state.isReading) {
-                    LoadingState(message = "Reading tag EPC...")
+                    LoadingState(message = "Reading RFID...")
+                } else if (state.isScanningQr) {
+                    LoadingState(message = "Scanning QR...")
                 } else if (state.currentEpc != null) {
                     EpcLine(label = "Current EPC", epc = state.currentEpc)
                 } else {

@@ -7,7 +7,7 @@ import android.content.IntentFilter
 import android.os.Build
 import com.alexbomber12.memtag.data.AppDefaults
 import com.alexbomber12.memtag.data.settings.SettingsStore
-import com.rscja.barcode.BarcodeUtility
+import com.barcode.BarcodeUtility
 import com.rscja.deviceapi.Barcode2D
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.TimeoutCancellationException

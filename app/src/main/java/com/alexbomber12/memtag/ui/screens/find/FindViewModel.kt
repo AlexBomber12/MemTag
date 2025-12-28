@@ -9,8 +9,10 @@ import com.alexbomber12.memtag.domain.find.ProximitySnapshot
 import com.alexbomber12.memtag.integrations.feedback.FindFeedbackController
 import com.alexbomber12.memtag.integrations.uhf.UhfError
 import com.alexbomber12.memtag.integrations.uhf.UhfException
+import com.alexbomber12.memtag.integrations.uhf.UhfLogger
 import com.alexbomber12.memtag.integrations.uhf.UhfReader
-import com.alexbomber12.memtag.integrations.uhf.UhfRegion
+import com.alexbomber12.memtag.integrations.uhf.asException
+import com.alexbomber12.memtag.integrations.uhf.toErrorMessage
 import com.alexbomber12.memtag.util.epc.EpcNormalizer
 import com.alexbomber12.memtag.util.epc.EpcValidator
 import kotlinx.coroutines.Job
@@ -63,15 +65,12 @@ class FindViewModel(
     private var tickerJob: Job? = null
     private var feedbackJob: Job? = null
     private var calculator: ProximityCalculator? = null
-    private var currentPower = AppDefaults.UHF_POWER
-    private var currentRegion = UhfRegion.fromSettings(AppDefaults.UHF_REGION)
     private var autoStartConsumedForEpc: String? = null
+    private var scanStartMs: Long? = null
 
     init {
         viewModelScope.launch {
             settingsStore.settingsFlow.collect { settings ->
-                currentPower = settings.uhfPower
-                currentRegion = UhfRegion.fromSettings(settings.uhfRegion)
                 mutableState.update { state ->
                     val updatedTarget =
                         if (state.epcInput.isBlank() && settings.lastFindTargetEpc.isNotBlank()) {
@@ -177,6 +176,8 @@ class FindViewModel(
                 status = FindStatus.Running,
             )
         }
+        scanStartMs = System.currentTimeMillis()
+        UhfLogger.i("ScanRFID start (screen=find source=inventory usedMethod=inventory)")
         startTicker()
         startFeedback()
         val job =
@@ -186,7 +187,15 @@ class FindViewModel(
                     handleInventoryError(initResult.exceptionOrNull())
                     return@launch
                 }
-                if (!applySettingsToReader()) {
+                uhfReader.stopInventory()
+                val applyResult = uhfReader.applyDesiredConfigBestEffort("find-inventory")
+                if (applyResult.isFailure) {
+                    handleInventoryError(applyResult.exceptionOrNull())
+                    return@launch
+                }
+                val applied = applyResult.getOrNull()
+                if (applied != null && !applied.success) {
+                    handleInventoryError(UhfError.VendorError(applied.toErrorMessage()).asException())
                     return@launch
                 }
                 uhfReader
@@ -235,6 +244,7 @@ class FindViewModel(
                 seenRecently = false,
             )
         }
+        logScanEnd("stopped")
     }
 
     override fun onCleared() {
@@ -317,6 +327,7 @@ class FindViewModel(
             )
         }
         uhfReader.stopInventory()
+        logScanEnd("error")
     }
 
     private fun setError(message: String) {
@@ -351,18 +362,11 @@ class FindViewModel(
         }
     }
 
-    private suspend fun applySettingsToReader(): Boolean {
-        val powerResult = uhfReader.setPower(currentPower)
-        if (powerResult.isFailure) {
-            handleInventoryError(powerResult.exceptionOrNull())
-            return false
-        }
-        val regionResult = uhfReader.setRegion(currentRegion)
-        if (regionResult.isFailure) {
-            handleInventoryError(regionResult.exceptionOrNull())
-            return false
-        }
-        return true
+    private fun logScanEnd(result: String) {
+        val startedAt = scanStartMs ?: return
+        val durationMs = System.currentTimeMillis() - startedAt
+        UhfLogger.i("ScanRFID end (screen=find result=$result durationMs=$durationMs)")
+        scanStartMs = null
     }
 
     private fun feedbackIntervalMs(proximity: Int): Long? {

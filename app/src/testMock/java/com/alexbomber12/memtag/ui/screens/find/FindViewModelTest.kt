@@ -4,7 +4,9 @@ import com.alexbomber12.memtag.data.settings.AppSettings
 import com.alexbomber12.memtag.data.settings.SettingsStore
 import com.alexbomber12.memtag.integrations.feedback.FindFeedbackController
 import com.alexbomber12.memtag.integrations.uhf.FakeUhfReader
+import com.alexbomber12.memtag.integrations.uhf.MatrixProbeResult
 import com.alexbomber12.memtag.integrations.uhf.TagReading
+import com.alexbomber12.memtag.integrations.uhf.UhfApplyResult
 import com.alexbomber12.memtag.integrations.uhf.UhfError
 import com.alexbomber12.memtag.integrations.uhf.UhfReader
 import com.alexbomber12.memtag.integrations.uhf.UhfRegion
@@ -102,7 +104,14 @@ private class FakeSettingsStore(
         region: String,
         power: Int,
     ) {
-        state.update { it.copy(uhfRegion = region, uhfPower = power).sanitized() }
+        val frequencyMode = UhfRegion.fromSettings(region).toFrequencyMode()
+        state.update {
+            it.copy(
+                uhfRegion = region,
+                uhfPower = power,
+                uhfFrequencyMode = frequencyMode,
+            ).sanitized()
+        }
     }
 
     override suspend fun setScan2d(
@@ -138,15 +147,32 @@ private class FailingUhfReader : UhfReader {
         timeoutMs: Long,
     ): Result<Boolean> = Result.failure(UhfError.NotInitialized.asException())
 
-    override fun startInventory(filterEpcHex: String?): Flow<TagReading> = flow { throw UhfError.NotInitialized.asException() }
+    override suspend fun startInventory(filterEpcHex: String?): Flow<TagReading> =
+        flow {
+            throw UhfError.NotInitialized.asException()
+        }
 
     override suspend fun stopInventory(): Result<Unit> = Result.success(Unit)
 
     override suspend fun setPower(dbm: Int): Result<Unit> = Result.success(Unit)
 
-    override suspend fun getPower(): Result<Int> = Result.success(0)
+    override suspend fun getPower(reason: String): Result<Int> = Result.success(0)
+
+    override suspend fun getFrequencyMode(reason: String): Result<Int> = Result.success(0)
+
+    override suspend fun getProtocol(reason: String): Result<Int> = Result.success(0)
+
+    override suspend fun getRfLink(reason: String): Result<Int> = Result.success(0)
 
     override suspend fun setRegion(region: UhfRegion): Result<Unit> = Result.success(Unit)
 
-    override suspend fun getRegion(): Result<UhfRegion> = Result.success(UhfRegion.OTHER)
+    override suspend fun getRegion(reason: String): Result<UhfRegion> = Result.success(UhfRegion.OTHER)
+
+    override suspend fun applyDesiredConfigBestEffort(reason: String): Result<UhfApplyResult> =
+        Result.failure(UhfError.NotInitialized.asException())
+
+    override suspend fun applyDesiredConfigWithReadback(reason: String): Result<UhfApplyResult> =
+        Result.failure(UhfError.NotInitialized.asException())
+
+    override suspend fun runMatrixProbe(): List<MatrixProbeResult> = emptyList()
 }

@@ -28,15 +28,27 @@ interface UhfReader {
         timeoutMs: Long = 3_000,
     ): Result<Boolean>
 
-    fun startInventory(filterEpcHex: String? = null): Flow<TagReading>
+    suspend fun startInventory(filterEpcHex: String? = null): Flow<TagReading>
 
     suspend fun stopInventory(): Result<Unit>
 
     suspend fun setPower(dbm: Int): Result<Unit>
 
-    suspend fun getPower(): Result<Int>
+    suspend fun getPower(reason: String): Result<Int>
+
+    suspend fun getFrequencyMode(reason: String): Result<Int>
+
+    suspend fun getProtocol(reason: String): Result<Int>
+
+    suspend fun getRfLink(reason: String): Result<Int>
 
     suspend fun setRegion(region: UhfRegion): Result<Unit>
 
-    suspend fun getRegion(): Result<UhfRegion>
+    suspend fun getRegion(reason: String): Result<UhfRegion>
+
+    suspend fun applyDesiredConfigBestEffort(reason: String): Result<UhfApplyResult>
+
+    suspend fun applyDesiredConfigWithReadback(reason: String): Result<UhfApplyResult>
+
+    suspend fun runMatrixProbe(): List<MatrixProbeResult>
 }

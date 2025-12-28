@@ -52,6 +52,7 @@ class AppViewModelFactory(
                 repository = appContainer.mementoRepository,
                 lookupByEpcUseCase = appContainer.lookupByEpcUseCase,
                 uhfReader = appContainer.uhfReader,
+                scan2dScanner = appContainer.scan2dScanner,
                 actionsLogDao = appContainer.actionsLogDao,
                 settingsStore = appContainer.settingsStore,
             ) as T
