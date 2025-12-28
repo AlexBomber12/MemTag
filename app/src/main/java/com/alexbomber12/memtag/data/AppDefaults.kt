@@ -16,6 +16,7 @@ object AppDefaults {
 
     const val FIND_SOUND_ENABLED = false
     const val FIND_HAPTIC_ENABLED = false
+    const val FIND_DEBUG_OVERLAY_ENABLED = false
     const val LAST_SCANNED_EPC = ""
     const val LAST_FIND_TARGET_EPC = ""
     const val RFID_KEY_CODES = ""

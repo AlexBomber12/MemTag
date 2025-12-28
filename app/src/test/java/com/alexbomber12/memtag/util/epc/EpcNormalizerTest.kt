@@ -2,6 +2,7 @@ package com.alexbomber12.memtag.util.epc
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -61,5 +62,22 @@ class EpcNormalizerTest {
     @Test(expected = IllegalArgumentException::class)
     fun normalizeRejectsTooLong() {
         EpcNormalizer.normalize("A".repeat(65))
+    }
+
+    @Test
+    fun normalizeUhfEpcHandlesPrefixesAndWhitespace() {
+        val result = normalizeUhfEpc("  epc: 3008 33b2 ddd9 0140 0000 0000 ")
+        assertEquals("300833B2DDD9014000000000", result)
+    }
+
+    @Test
+    fun normalizeUhfEpcStripsNonHexCharacters() {
+        val result = normalizeUhfEpc("EPC=E2000017-2211-01441890ABCD")
+        assertEquals("E2000017221101441890ABCD", result)
+    }
+
+    @Test
+    fun normalizeUhfEpcRejectsInvalidLength() {
+        assertNull(normalizeUhfEpc("EPC:1234"))
     }
 }

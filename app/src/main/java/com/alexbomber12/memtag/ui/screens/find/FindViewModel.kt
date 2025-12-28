@@ -7,6 +7,7 @@ import com.alexbomber12.memtag.data.settings.SettingsStore
 import com.alexbomber12.memtag.domain.find.ProximityCalculator
 import com.alexbomber12.memtag.domain.find.ProximitySnapshot
 import com.alexbomber12.memtag.integrations.feedback.FindFeedbackController
+import com.alexbomber12.memtag.integrations.uhf.TagReading
 import com.alexbomber12.memtag.integrations.uhf.UhfError
 import com.alexbomber12.memtag.integrations.uhf.UhfException
 import com.alexbomber12.memtag.integrations.uhf.UhfLogger
@@ -14,7 +15,7 @@ import com.alexbomber12.memtag.integrations.uhf.UhfReader
 import com.alexbomber12.memtag.integrations.uhf.asException
 import com.alexbomber12.memtag.integrations.uhf.toErrorMessage
 import com.alexbomber12.memtag.util.epc.EpcNormalizer
-import com.alexbomber12.memtag.util.epc.EpcValidator
+import com.alexbomber12.memtag.util.epc.normalizeUhfEpc
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -36,8 +37,15 @@ sealed class FindStatus {
     ) : FindStatus()
 }
 
+enum class MatchStatus {
+    NoTarget,
+    Matched,
+    NotMatchedYet,
+}
+
 data class FindUiState(
     val epcInput: String = "",
+    val targetEpcNormalized: String? = null,
     val lastScannedEpc: String = "",
     val isRunning: Boolean = false,
     val status: FindStatus = FindStatus.Idle,
@@ -47,8 +55,18 @@ data class FindUiState(
     val hitsPerWindow: Int = 0,
     val lastRssi: Int? = null,
     val seenRecently: Boolean = false,
+    val lastSeenAnyEpc: String? = null,
+    val lastSeenAnyRssi: Int? = null,
+    val lastSeenAnyAt: Long? = null,
+    val tagsSeenAny: Int = 0,
+    val lastSeenMatchedEpc: String? = null,
+    val lastSeenMatchedRssi: Int? = null,
+    val tagsSeenMatched: Int = 0,
+    val matchStatus: MatchStatus = MatchStatus.NoTarget,
     val soundEnabled: Boolean = AppDefaults.FIND_SOUND_ENABLED,
     val hapticEnabled: Boolean = AppDefaults.FIND_HAPTIC_ENABLED,
+    val debugOverlayEnabled: Boolean = AppDefaults.FIND_DEBUG_OVERLAY_ENABLED,
+    val debugDisableFilter: Boolean = false,
     val lastErrorMessage: String? = null,
 )
 
@@ -67,10 +85,13 @@ class FindViewModel(
     private var calculator: ProximityCalculator? = null
     private var autoStartConsumedForEpc: String? = null
     private var scanStartMs: Long? = null
+    private var geigerLogCount: Int = 0
 
     init {
         viewModelScope.launch {
             settingsStore.settingsFlow.collect { settings ->
+                val wasDebugDisableFilter = uiState.value.debugDisableFilter
+                val wasRunning = uiState.value.isRunning
                 mutableState.update { state ->
                     val updatedTarget =
                         if (state.epcInput.isBlank() && settings.lastFindTargetEpc.isNotBlank()) {
@@ -78,14 +99,30 @@ class FindViewModel(
                         } else {
                             state.epcInput
                         }
+                    val targetNormalized = normalizeTargetEpc(updatedTarget)
+                    val nextDebugDisableFilter =
+                        if (settings.showFindDebugOverlay) {
+                            state.debugDisableFilter
+                        } else {
+                            false
+                        }
                     val updated =
                         state.copy(
                             epcInput = updatedTarget,
+                            targetEpcNormalized = targetNormalized,
                             lastScannedEpc = settings.lastScannedEpc,
                             soundEnabled = settings.findSoundEnabled,
                             hapticEnabled = settings.findHapticEnabled,
+                            debugOverlayEnabled = settings.showFindDebugOverlay,
+                            debugDisableFilter = nextDebugDisableFilter,
                         )
-                    updated.copy(status = computeStatus(updated))
+                    updated.copy(
+                        status = computeStatus(updated),
+                        matchStatus = computeMatchStatus(updated),
+                    )
+                }
+                if (wasRunning && wasDebugDisableFilter && !settings.showFindDebugOverlay) {
+                    refreshCalculator()
                 }
             }
         }
@@ -93,8 +130,20 @@ class FindViewModel(
 
     fun onEpcInputChange(value: String) {
         mutableState.update { state ->
-            val updated = state.copy(epcInput = value, lastErrorMessage = null)
-            updated.copy(status = computeStatus(updated))
+            val targetNormalized = normalizeTargetEpc(value)
+            val updated =
+                state.copy(
+                    epcInput = value,
+                    targetEpcNormalized = targetNormalized,
+                    lastErrorMessage = null,
+                    lastSeenMatchedEpc = null,
+                    lastSeenMatchedRssi = null,
+                    tagsSeenMatched = 0,
+                )
+            updated.copy(
+                status = computeStatus(updated),
+                matchStatus = computeMatchStatus(updated),
+            )
         }
         persistFindTarget(value)
     }
@@ -110,8 +159,19 @@ class FindViewModel(
         val shouldUpdate = uiState.value.epcInput != normalized
         if (shouldUpdate) {
             mutableState.update { state ->
-                val updated = state.copy(epcInput = normalized, lastErrorMessage = null)
-                updated.copy(status = computeStatus(updated))
+                val updated =
+                    state.copy(
+                        epcInput = normalized,
+                        targetEpcNormalized = normalized,
+                        lastErrorMessage = null,
+                        lastSeenMatchedEpc = null,
+                        lastSeenMatchedRssi = null,
+                        tagsSeenMatched = 0,
+                    )
+                updated.copy(
+                    status = computeStatus(updated),
+                    matchStatus = computeMatchStatus(updated),
+                )
             }
             persistFindTarget(normalized)
         }
@@ -127,8 +187,19 @@ class FindViewModel(
             return
         }
         mutableState.update { state ->
-            val updated = state.copy(epcInput = last, lastErrorMessage = null)
-            updated.copy(status = computeStatus(updated))
+            val updated =
+                state.copy(
+                    epcInput = last,
+                    targetEpcNormalized = last,
+                    lastErrorMessage = null,
+                    lastSeenMatchedEpc = null,
+                    lastSeenMatchedRssi = null,
+                    tagsSeenMatched = 0,
+                )
+            updated.copy(
+                status = computeStatus(updated),
+                matchStatus = computeMatchStatus(updated),
+            )
         }
         persistFindTarget(last)
     }
@@ -147,34 +218,75 @@ class FindViewModel(
         }
     }
 
+    fun setDebugDisableFilter(enabled: Boolean) {
+        mutableState.update { state ->
+            val updated = state.copy(debugDisableFilter = enabled)
+            updated.copy(matchStatus = computeMatchStatus(updated))
+        }
+        if (uiState.value.isRunning) {
+            refreshCalculator()
+        }
+    }
+
+    fun setTargetFromLastSeenAny() {
+        val candidate = uiState.value.lastSeenAnyEpc ?: return
+        mutableState.update { state ->
+            val updated =
+                state.copy(
+                    epcInput = candidate,
+                    targetEpcNormalized = candidate,
+                    lastErrorMessage = null,
+                    lastSeenMatchedEpc = null,
+                    lastSeenMatchedRssi = null,
+                    tagsSeenMatched = 0,
+                )
+            updated.copy(
+                status = computeStatus(updated),
+                matchStatus = computeMatchStatus(updated),
+            )
+        }
+        persistFindTarget(candidate)
+        if (uiState.value.isRunning) {
+            refreshCalculator()
+        }
+    }
+
     fun startFind() {
         if (inventoryJob != null) {
             return
         }
         val epcRaw = uiState.value.epcInput
-        if (!EpcValidator.isValidEpcHex(epcRaw)) {
+        val targetNormalized = normalizeTargetEpc(epcRaw)
+        if (epcRaw.isNotBlank() && targetNormalized == null) {
             setError("Invalid EPC. Use 8-64 hex characters.")
             return
         }
-        val normalized =
-            runCatching { EpcNormalizer.normalize(epcRaw) }.getOrElse {
-                setError("Invalid EPC. Use 8-64 hex characters.")
-                return
-            }
-        calculator = ProximityCalculator(normalized)
-        mutableState.update {
-            it.copy(
-                epcInput = normalized,
-                isRunning = true,
-                lastErrorMessage = null,
-                proximity = 0,
-                rawProximity = 0f,
-                smoothedProximity = 0f,
-                hitsPerWindow = 0,
-                lastRssi = null,
-                seenRecently = false,
-                status = FindStatus.Running,
-            )
+        val matchAll = targetNormalized == null || uiState.value.debugDisableFilter
+        calculator = ProximityCalculator(targetNormalized.orEmpty(), matchAll = matchAll)
+        geigerLogCount = 0
+        mutableState.update { state ->
+            val updated =
+                state.copy(
+                    epcInput = targetNormalized ?: epcRaw,
+                    targetEpcNormalized = targetNormalized,
+                    isRunning = true,
+                    lastErrorMessage = null,
+                    proximity = 0,
+                    rawProximity = 0f,
+                    smoothedProximity = 0f,
+                    hitsPerWindow = 0,
+                    lastRssi = null,
+                    seenRecently = false,
+                    lastSeenAnyEpc = null,
+                    lastSeenAnyRssi = null,
+                    lastSeenAnyAt = null,
+                    tagsSeenAny = 0,
+                    lastSeenMatchedEpc = null,
+                    lastSeenMatchedRssi = null,
+                    tagsSeenMatched = 0,
+                    status = FindStatus.Running,
+                )
+            updated.copy(matchStatus = computeMatchStatus(updated))
         }
         scanStartMs = System.currentTimeMillis()
         UhfLogger.i("ScanRFID start (screen=find source=inventory usedMethod=inventory)")
@@ -199,13 +311,53 @@ class FindViewModel(
                     return@launch
                 }
                 uhfReader
-                    .startInventory(filterEpcHex = normalized)
+                    .startInventory(filterEpcHex = null)
                     .catch { error -> handleInventoryError(error) }
                     .collect { reading ->
-                        val readingEpc =
-                            runCatching { EpcNormalizer.normalize(reading.epcHex) }.getOrNull()
-                        if (readingEpc == normalized) {
-                            calculator?.onReading(reading.copy(epcHex = readingEpc))
+                        val rawEpc = reading.rawEpc ?: reading.epcHex
+                        val normalizedEpc = normalizeUhfEpc(rawEpc)
+                        val rssi = reading.rssi
+                        val timestampMs = reading.timestampMs
+                        val stateSnapshot = uiState.value
+                        val target = stateSnapshot.targetEpcNormalized
+                        val matched = normalizedEpc != null && target != null && normalizedEpc == target
+                        if (normalizedEpc != null) {
+                            mutableState.update { state ->
+                                val updated =
+                                    state.copy(
+                                        lastSeenAnyEpc = normalizedEpc,
+                                        lastSeenAnyRssi = rssi,
+                                        lastSeenAnyAt = timestampMs,
+                                        tagsSeenAny = state.tagsSeenAny + 1,
+                                        lastSeenMatchedEpc =
+                                            if (matched) normalizedEpc else state.lastSeenMatchedEpc,
+                                        lastSeenMatchedRssi =
+                                            if (matched) rssi else state.lastSeenMatchedRssi,
+                                        tagsSeenMatched =
+                                            if (matched) state.tagsSeenMatched + 1 else state.tagsSeenMatched,
+                                    )
+                                updated.copy(matchStatus = computeMatchStatus(updated))
+                            }
+                        }
+                        val matchAllNow = stateSnapshot.debugDisableFilter || target == null
+                        if (normalizedEpc != null && (matchAllNow || matched)) {
+                            calculator?.onReading(
+                                TagReading(
+                                    epcHex = normalizedEpc,
+                                    rssi = rssi,
+                                    timestampMs = timestampMs,
+                                    rawEpc = rawEpc,
+                                ),
+                            )
+                        }
+                        if (geigerLogCount < GEIGER_LOG_LIMIT) {
+                            val normalizedLabel = normalizedEpc ?: "--"
+                            val rssiLabel = rssi?.toString() ?: "--"
+                            UhfLogger.i(
+                                "geiger tag raw=${rawEpc.ifBlank { "--" }} normalized=$normalizedLabel " +
+                                    "rssi=$rssiLabel matched=$matched",
+                            )
+                            geigerLogCount += 1
                         }
                     }
             }
@@ -231,18 +383,27 @@ class FindViewModel(
             uhfReader.stopInventory()
         }
         calculator?.reset()
-        mutableState.update {
-            it.copy(
-                isRunning = false,
-                status = FindStatus.Idle,
-                lastErrorMessage = null,
-                proximity = 0,
-                rawProximity = 0f,
-                smoothedProximity = 0f,
-                hitsPerWindow = 0,
-                lastRssi = null,
-                seenRecently = false,
-            )
+        mutableState.update { state ->
+            val updated =
+                state.copy(
+                    isRunning = false,
+                    status = FindStatus.Idle,
+                    lastErrorMessage = null,
+                    proximity = 0,
+                    rawProximity = 0f,
+                    smoothedProximity = 0f,
+                    hitsPerWindow = 0,
+                    lastRssi = null,
+                    seenRecently = false,
+                    lastSeenAnyEpc = null,
+                    lastSeenAnyRssi = null,
+                    lastSeenAnyAt = null,
+                    tagsSeenAny = 0,
+                    lastSeenMatchedEpc = null,
+                    lastSeenMatchedRssi = null,
+                    tagsSeenMatched = 0,
+                )
+            updated.copy(matchStatus = computeMatchStatus(updated))
         }
         logScanEnd("stopped")
     }
@@ -340,6 +501,27 @@ class FindViewModel(
         }
     }
 
+    private fun normalizeTargetEpc(value: String): String? {
+        if (value.isBlank()) {
+            return null
+        }
+        return runCatching { EpcNormalizer.normalize(value) }.getOrNull()
+    }
+
+    private fun computeMatchStatus(state: FindUiState): MatchStatus {
+        return when {
+            state.targetEpcNormalized.isNullOrBlank() -> MatchStatus.NoTarget
+            state.tagsSeenMatched > 0 -> MatchStatus.Matched
+            else -> MatchStatus.NotMatchedYet
+        }
+    }
+
+    private fun refreshCalculator() {
+        val target = uiState.value.targetEpcNormalized
+        val matchAll = target == null || uiState.value.debugDisableFilter
+        calculator = ProximityCalculator(target.orEmpty(), matchAll = matchAll)
+    }
+
     private fun computeStatus(state: FindUiState): FindStatus {
         val error = state.lastErrorMessage
         return when {
@@ -396,5 +578,6 @@ class FindViewModel(
     private companion object {
         const val UI_UPDATE_INTERVAL_MS = 100L
         const val FEEDBACK_IDLE_POLL_MS = 200L
+        const val GEIGER_LOG_LIMIT = 5
     }
 }

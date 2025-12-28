@@ -110,6 +110,12 @@ class SettingsViewModel(
         }
     }
 
+    fun toggleFindDebugOverlay(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsStore.update { current -> current.copy(showFindDebugOverlay = enabled) }
+        }
+    }
+
     fun syncNow() {
         syncCoordinator.requestManualSync()
     }
