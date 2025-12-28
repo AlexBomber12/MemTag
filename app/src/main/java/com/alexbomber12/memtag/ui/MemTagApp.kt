@@ -20,14 +20,20 @@ import com.alexbomber12.memtag.ui.navigation.AppDestinations
 import com.alexbomber12.memtag.ui.navigation.AppNavHost
 import com.alexbomber12.memtag.ui.navigation.AppTopBar
 import com.alexbomber12.memtag.ui.navigation.navigateToTopLevel
+import kotlinx.coroutines.flow.map
 
 @Composable
 fun MemTagApp(appContainer: AppContainer) {
     val navController = rememberNavController()
-    val settings by
-        appContainer.settingsStore.settingsFlow.collectAsStateWithLifecycle(
-            initialValue = AppSettings(),
+    val settingsFlow =
+        remember(appContainer.settingsStore) {
+            appContainer.settingsStore.settingsFlow.map { it to true }
+        }
+    val settingsSnapshot by
+        settingsFlow.collectAsStateWithLifecycle(
+            initialValue = AppSettings() to false,
         )
+    val (settings, settingsLoaded) = settingsSnapshot
     val showDiagnosticsTab = settings.showDiagnosticsTab
     val destinations = AppDestinations.topLevelDestinations(showDiagnosticsTab)
     val viewModelFactory = remember(appContainer) { AppViewModelFactory(appContainer) }
@@ -38,8 +44,8 @@ fun MemTagApp(appContainer: AppContainer) {
         AppDestinations.topLevelDestinationForRoute(currentRoot)
             ?: destinations.first()
 
-    LaunchedEffect(showDiagnosticsTab, currentRoot) {
-        if (!showDiagnosticsTab && currentRoot == AppDestinations.Diagnostics.route) {
+    LaunchedEffect(showDiagnosticsTab, currentRoot, settingsLoaded) {
+        if (settingsLoaded && !showDiagnosticsTab && currentRoot == AppDestinations.Diagnostics.route) {
             navController.navigateToTopLevel(AppDestinations.Find)
         }
     }
