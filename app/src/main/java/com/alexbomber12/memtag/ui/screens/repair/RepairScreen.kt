@@ -2,8 +2,6 @@
 
 package com.alexbomber12.memtag.ui.screens.repair
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -17,6 +15,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -26,10 +25,8 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.alexbomber12.memtag.app.HardwareAction
-import com.alexbomber12.memtag.domain.InventoryItem
 import com.alexbomber12.memtag.domain.repair.RepairActionLog
 import com.alexbomber12.memtag.domain.repair.RepairActionResult
-import com.alexbomber12.memtag.domain.repair.RepairComparison
 import com.alexbomber12.memtag.ui.components.AppCard
 import com.alexbomber12.memtag.ui.components.ErrorState
 import com.alexbomber12.memtag.ui.components.LoadingState
@@ -47,24 +44,38 @@ fun RepairScreen(
 ) {
     val state = viewModel.uiState.collectAsStateWithLifecycle().value
 
-    if (state.showConfirmation) {
-        ConfirmationDialog(state = state, onConfirm = viewModel::confirmRepair, onCancel = viewModel::cancelOperations)
+    state.confirmation?.let { confirmation ->
+        ConfirmationDialog(
+            confirmation = confirmation,
+            onConfirm = viewModel::confirmWrite,
+            onCancel = viewModel::dismissConfirmation,
+        )
+    }
+
+    DisposableEffect(Unit) {
+        onDispose { viewModel.cancelOperations() }
+    }
+
+    LaunchedEffect(Unit) {
+        viewModel.onScreenOpened()
     }
 
     LaunchedEffect(hardwareActions) {
         hardwareActions.collect { action ->
             when (action) {
-                HardwareAction.Rfid -> viewModel.readTag()
-                HardwareAction.Scan -> viewModel.scanQrForCurrent()
+                HardwareAction.Rfid -> viewModel.scanRfid()
+                HardwareAction.Scan -> viewModel.scanQr()
             }
         }
     }
 
     val isBusy = state.isReading || state.isScanningQr || state.isWriting || state.isVerifying
-    val expectedEpc = state.selectedItem?.epcNormalized ?: state.expectedEpc
-    val canRepair =
-        state.comparison is RepairComparison.Mismatch &&
-            !isBusy
+    val isExpectedValid = state.status !is VerifyWriteStatus.Invalid
+    val canWrite =
+        !isBusy &&
+            state.confirmation == null &&
+            isExpectedValid &&
+            (state.scannedEpc.isNullOrBlank() || state.status is VerifyWriteStatus.Mismatch)
 
     LazyColumn(
         modifier =
@@ -74,101 +85,108 @@ fun RepairScreen(
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         item {
-            AppCard(title = "Target item") {
+            AppCard(title = "Expected EPC") {
                 OutlinedTextField(
-                    value = state.searchQuery,
-                    onValueChange = viewModel::onSearchQueryChange,
-                    label = { Text(text = "Search by name, UM, or EPC") },
+                    value = state.expectedEpc,
+                    onValueChange = viewModel::onExpectedEpcChange,
+                    label = { Text(text = "Expected EPC") },
                     modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
                 )
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
-                    PrimaryButton(
-                        text = "Search",
-                        onClick = viewModel::searchInventory,
+                    SecondaryButton(
+                        text = "Use from Find",
+                        onClick = viewModel::useExpectedFromFind,
+                        enabled = !isBusy && state.lastFindTargetEpc.isNotBlank(),
                         modifier = Modifier.weight(1f),
                     )
                     SecondaryButton(
-                        text = "Clear selection",
-                        onClick = viewModel::clearSelection,
-                        enabled = state.selectedItem != null,
+                        text = "Use from Lookup",
+                        onClick = viewModel::useExpectedFromLookup,
+                        enabled = !isBusy && state.lastLookupEpc.isNotBlank(),
                         modifier = Modifier.weight(1f),
                     )
-                }
-                OutlinedTextField(
-                    value = expectedEpc.orEmpty(),
-                    onValueChange = viewModel::onExpectedEpcChange,
-                    label = { Text(text = "Expected EPC") },
-                    modifier = Modifier.fillMaxWidth(),
-                    enabled = state.selectedItem == null,
-                    readOnly = state.selectedItem != null,
-                )
-                state.selectedItem?.let { item ->
-                    SelectedItemCard(item = item)
-                } ?: run {
-                    if (state.searchResults.isEmpty()) {
-                        Text(text = "No results yet.", style = MaterialTheme.typography.labelMedium)
-                    } else {
-                        state.searchResults.forEach { item ->
-                            SearchResultRow(item = item, onSelect = viewModel::selectItem)
-                        }
-                    }
                 }
             }
         }
 
         item {
-            AppCard(title = "Current tag") {
+            AppCard(title = "Scanned EPC") {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
-                    PrimaryButton(
-                        text = "Read RFID",
-                        onClick = viewModel::readTag,
+                    SecondaryButton(
+                        text = "Scan RFID",
+                        onClick = viewModel::scanRfid,
                         enabled = !isBusy,
                         modifier = Modifier.weight(1f),
                     )
                     SecondaryButton(
                         text = "Scan QR",
-                        onClick = viewModel::scanQrForCurrent,
+                        onClick = viewModel::scanQr,
                         enabled = !isBusy,
                         modifier = Modifier.weight(1f),
                     )
                 }
-                SecondaryButton(
-                    text = "Stop/Cancel",
-                    onClick = viewModel::cancelOperations,
-                    enabled = isBusy || state.showConfirmation,
+                Row(
                     modifier = Modifier.fillMaxWidth(),
-                )
-                if (state.isReading) {
-                    LoadingState(message = "Reading RFID...")
-                } else if (state.isScanningQr) {
-                    LoadingState(message = "Scanning QR...")
-                } else if (state.currentEpc != null) {
-                    EpcLine(label = "Current EPC", epc = state.currentEpc)
-                } else {
-                    Text(text = "No tag read yet.", style = MaterialTheme.typography.labelMedium)
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    SecondaryButton(
+                        text = "Clear scanned",
+                        onClick = viewModel::clearScanned,
+                        enabled = !isBusy && !state.scannedEpc.isNullOrBlank(),
+                        modifier = Modifier.weight(1f),
+                    )
+                    SecondaryButton(
+                        text = "Stop/Cancel",
+                        onClick = viewModel::cancelOperations,
+                        enabled = isBusy || state.confirmation != null,
+                        modifier = Modifier.weight(1f),
+                    )
                 }
-                if (state.selectedItem == null) {
-                    when (val lookup = state.lookupState) {
-                        RepairLookupState.Idle -> Unit
-                        is RepairLookupState.Found -> {
-                            Text(
-                                text = "This tag matches ${lookup.item.name ?: "an item"}.",
-                                style = MaterialTheme.typography.labelMedium,
-                            )
-                            SelectedItemCard(item = lookup.item)
-                        }
-                        RepairLookupState.NotFound -> {
-                            Text(
-                                text = "No matching item found for this EPC.",
-                                style = MaterialTheme.typography.labelMedium,
-                            )
-                        }
+                when {
+                    state.isReading -> LoadingState(message = "Scanning RFID...")
+                    state.isScanningQr -> LoadingState(message = "Scanning QR...")
+                    !state.scannedEpc.isNullOrBlank() -> EpcLine(label = "Scanned EPC", epc = state.scannedEpc)
+                    else -> Text(text = "No tag scanned yet.", style = MaterialTheme.typography.labelMedium)
+                }
+            }
+        }
+
+        item {
+            AppCard(title = "Status") {
+                when (val status = state.status) {
+                    is VerifyWriteStatus.NotScanned -> {
+                        Text(
+                            text = "Not scanned yet. Scan RFID or QR to verify.",
+                            style = MaterialTheme.typography.labelMedium,
+                        )
+                        EpcLine(label = "Expected EPC", epc = status.expectedEpc)
+                    }
+                    is VerifyWriteStatus.Ok -> {
+                        Text(
+                            text = "OK: scanned EPC matches expected.",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                        EpcLine(label = "Expected EPC", epc = status.expectedEpc, color = MaterialTheme.colorScheme.primary)
+                    }
+                    is VerifyWriteStatus.Mismatch -> {
+                        Text(
+                            text = "Mismatch: scanned EPC does not match expected.",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                        EpcLine(label = "Expected EPC", epc = status.expectedEpc, color = MaterialTheme.colorScheme.error)
+                        EpcLine(label = "Scanned EPC", epc = status.scannedEpc, color = MaterialTheme.colorScheme.error)
+                    }
+                    is VerifyWriteStatus.Invalid -> {
+                        ErrorState(message = status.message)
                     }
                 }
                 when {
@@ -181,59 +199,18 @@ fun RepairScreen(
                 state.errorMessage?.let { message ->
                     ErrorState(message = message)
                 }
-            }
-        }
-
-        item {
-            AppCard(title = "Comparison") {
-                when (val comparison = state.comparison) {
-                    RepairComparison.NotReady -> {
-                        Text(
-                            text = "Not ready. Set an expected EPC and read a tag.",
-                            style = MaterialTheme.typography.labelMedium,
-                        )
-                    }
-                    is RepairComparison.Match -> {
-                        Text(
-                            text = "Match: tag EPC already matches the selected item.",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.primary,
-                        )
-                        EpcLine(label = "Expected EPC", epc = comparison.expectedEpc)
-                    }
-                    is RepairComparison.Mismatch -> {
-                        Text(
-                            text = "Mismatch detected.",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.error,
-                        )
-                        EpcLine(label = "Expected EPC", epc = comparison.expectedEpc, color = MaterialTheme.colorScheme.error)
-                        EpcLine(label = "Current EPC", epc = comparison.currentEpc, color = MaterialTheme.colorScheme.error)
-                    }
-                    is RepairComparison.Invalid -> {
-                        ErrorState(message = comparison.message)
-                    }
-                }
                 PrimaryButton(
-                    text = "Repair (Write EPC)",
-                    onClick = viewModel::startRepairConfirmation,
-                    enabled = canRepair,
+                    text = "Write expected EPC",
+                    onClick = viewModel::startWriteConfirmation,
+                    enabled = canWrite,
                     modifier = Modifier.fillMaxWidth(),
                 )
-                if (state.selectedItem == null) {
-                    Text(
-                        text = "Select a target item or expected EPC to enable repair.",
-                        style = MaterialTheme.typography.labelSmall,
-                    )
-                }
             }
         }
 
-        item {
-            AppCard(title = "Recent actions") {
-                if (state.logs.isEmpty()) {
-                    Text(text = "No actions logged yet.", style = MaterialTheme.typography.labelMedium)
-                } else {
+        if (state.logs.isNotEmpty()) {
+            item {
+                AppCard(title = "Recent actions") {
                     state.logs.forEach { log ->
                         LogRow(log = log)
                     }
@@ -245,43 +222,51 @@ fun RepairScreen(
 
 @Composable
 private fun ConfirmationDialog(
-    state: RepairUiState,
+    confirmation: WriteConfirmation,
     onConfirm: () -> Unit,
     onCancel: () -> Unit,
 ) {
-    val expected = state.selectedItem?.epcNormalized ?: state.expectedEpc.orEmpty()
-    val current = state.currentEpc.orEmpty()
+    val scannedText = confirmation.scannedEpc ?: "not scanned yet"
     AlertDialog(
         onDismissRequest = onCancel,
-        title = { Text(text = "Confirm EPC rewrite") },
+        title = { Text(text = "Confirm write") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(text = "Review the EPCs before writing:", style = MaterialTheme.typography.bodyMedium)
                 EpcLine(
-                    label = "Current EPC",
-                    epc = current,
-                    color = MaterialTheme.colorScheme.error,
-                    valueStyle = MaterialTheme.typography.titleMedium,
-                )
-                EpcLine(
                     label = "Expected EPC",
-                    epc = expected,
+                    epc = confirmation.expectedEpc,
                     color = MaterialTheme.colorScheme.primary,
                     valueStyle = MaterialTheme.typography.titleMedium,
                 )
-                if (!state.confirmEnabled) {
-                    Text(
-                        text = "Confirm will unlock in 2 seconds.",
-                        style = MaterialTheme.typography.labelSmall,
-                    )
+                EpcLine(
+                    label = "Scanned EPC",
+                    epc = scannedText,
+                    valueStyle = MaterialTheme.typography.titleMedium,
+                )
+                when (confirmation.warning) {
+                    WriteWarning.NOT_SCANNED -> {
+                        Text(
+                            text = "Warning: writing without prior verification.",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
+                    WriteWarning.MISMATCH -> {
+                        Text(
+                            text = "Warning: current tag does not match expected.",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
+                    null -> Unit
                 }
             }
         },
         confirmButton = {
             PrimaryButton(
-                text = "Confirm Write",
+                text = "Confirm",
                 onClick = onConfirm,
-                enabled = state.confirmEnabled,
             )
         },
         dismissButton = {
@@ -291,38 +276,6 @@ private fun ConfirmationDialog(
             )
         },
     )
-}
-
-@Composable
-private fun SelectedItemCard(item: InventoryItem) {
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text(text = "Selected item", style = MaterialTheme.typography.labelMedium)
-        EpcLine(label = "EPC", epc = item.epcNormalized)
-        Text(text = "Name: ${item.name ?: "(none)"}")
-        Text(text = "UM: ${item.um ?: "(none)"}")
-        Text(text = "Location: ${item.locationPath ?: "(none)"}")
-    }
-}
-
-@Composable
-private fun SearchResultRow(
-    item: InventoryItem,
-    onSelect: (InventoryItem) -> Unit,
-) {
-    Column(
-        modifier =
-            Modifier
-                .fillMaxWidth()
-                .padding(vertical = 4.dp)
-                .clickable { onSelect(item) }
-                .background(MaterialTheme.colorScheme.surfaceVariant)
-                .padding(12.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
-    ) {
-        Text(text = item.name ?: "(unnamed)", style = MaterialTheme.typography.labelMedium)
-        EpcLine(label = "EPC", epc = item.epcNormalized)
-        Text(text = "UM: ${item.um ?: "(none)"}", style = MaterialTheme.typography.bodySmall)
-    }
 }
 
 @Composable
