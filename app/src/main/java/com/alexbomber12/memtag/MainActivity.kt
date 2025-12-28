@@ -2,6 +2,7 @@ package com.alexbomber12.memtag
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.content.Intent
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.os.Bundle
@@ -9,6 +10,9 @@ import android.view.KeyEvent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.lifecycle.lifecycleScope
 import com.alexbomber12.memtag.app.HardwareAction
 import com.alexbomber12.memtag.app.MemTagApplication
@@ -20,10 +24,12 @@ import kotlinx.coroutines.launch
 class MainActivity : ComponentActivity() {
     private var rfidKeyCodes: Set<Int> = emptySet()
     private var scanKeyCodes: Set<Int> = emptySet()
+    private var deepLinkIntent by mutableStateOf<Intent?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        deepLinkIntent = intent
         val appContainer = (application as MemTagApplication).container
         lifecycleScope.launch {
             appContainer.settingsStore.settingsFlow.collect { settings ->
@@ -33,7 +39,10 @@ class MainActivity : ComponentActivity() {
         }
         setContent {
             MemTagTheme {
-                MemTagApp(appContainer = appContainer)
+                MemTagApp(
+                    appContainer = appContainer,
+                    deepLinkIntent = deepLinkIntent,
+                )
             }
         }
     }
@@ -82,5 +91,13 @@ class MainActivity : ComponentActivity() {
         val network = connectivity.activeNetwork ?: return false
         val capabilities = connectivity.getNetworkCapabilities(network) ?: return false
         return capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+    }
+
+    override fun onNewIntent(intent: Intent?) {
+        super.onNewIntent(intent)
+        if (intent != null) {
+            setIntent(intent)
+        }
+        deepLinkIntent = intent
     }
 }
