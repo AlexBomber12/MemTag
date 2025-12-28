@@ -58,9 +58,9 @@ data class UhfApplyResult(
     val rfLinkApplied: Boolean?,
 ) {
     val success: Boolean =
-        modeApplied != false &&
-            powerApplied != false &&
-            rfLinkApplied != false &&
+        (modeApplied == true || (modeApplied == null && setModeOk != false)) &&
+            (powerApplied == true || (powerApplied == null && setPowerOk != false)) &&
+            (rfLinkApplied == true || (rfLinkApplied == null && setRfLinkOk != false)) &&
             protocolApplied != false
 }
 
@@ -69,15 +69,21 @@ fun UhfApplyResult.toErrorMessage(): String {
         buildList {
             if (modeApplied == false) {
                 add("modeApplied=false")
+            } else if (modeApplied == null && setModeOk == false) {
+                add("setModeOk=false")
             }
             if (powerApplied == false) {
                 add("powerApplied=false")
+            } else if (powerApplied == null && setPowerOk == false) {
+                add("setPowerOk=false")
             }
             if (protocolApplied == false) {
                 add("protocolApplied=false")
             }
             if (rfLinkApplied == false) {
                 add("rfLinkApplied=false")
+            } else if (rfLinkApplied == null && setRfLinkOk == false) {
+                add("setRfLinkOk=false")
             }
         }
     if (failures.isEmpty()) {
