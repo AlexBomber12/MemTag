@@ -11,6 +11,7 @@ import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
+import androidx.navigation.navDeepLink
 import com.alexbomber12.memtag.app.AppContainer
 import com.alexbomber12.memtag.ui.screens.diagnostics.DiagnosticsScreen
 import com.alexbomber12.memtag.ui.screens.diagnostics.DiagnosticsViewModel
@@ -60,6 +61,11 @@ fun AppNavHost(
                         type = NavType.BoolType
                         defaultValue = false
                     },
+                ),
+            deepLinks =
+                listOf(
+                    navDeepLink { uriPattern = "memtag://find?epc={epc}" },
+                    navDeepLink { uriPattern = "memtag://find?epc={epc}&autoStart={autoStart}" },
                 ),
         ) { backStackEntry ->
             val viewModel: FindViewModel = viewModel(factory = viewModelFactory)
