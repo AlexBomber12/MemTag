@@ -54,13 +54,19 @@ class SyncCoordinator(
             return
         }
         scope.launch {
-            maybeSync(force = false)
+            runCatching { maybeSync(force = false) }
+                .onFailure { error ->
+                    mutableStatus.value = SyncStatusState.Error(error.message ?: "Sync failed.")
+                }
         }
     }
 
     fun requestManualSync() {
         scope.launch {
-            maybeSync(force = true)
+            runCatching { maybeSync(force = true) }
+                .onFailure { error ->
+                    mutableStatus.value = SyncStatusState.Error(error.message ?: "Sync failed.")
+                }
         }
     }
 
@@ -97,21 +103,25 @@ class SyncCoordinator(
     private fun startSync(libraryId: String) {
         val job =
             scope.launch {
-                syncUseCase.execute(libraryId).collect { event ->
-                    when (event) {
-                        is SyncProgressEvent.Progress -> {
-                            mutableStatus.value = SyncStatusState.Running(event.progress)
-                        }
+                runCatching {
+                    syncUseCase.execute(libraryId).collect { event ->
+                        when (event) {
+                            is SyncProgressEvent.Progress -> {
+                                mutableStatus.value = SyncStatusState.Running(event.progress)
+                            }
 
-                        is SyncProgressEvent.Finished -> {
-                            mutableStatus.value =
-                                if (event.result.status == SyncStatus.ERROR) {
-                                    SyncStatusState.Error(event.result.errorMessage ?: "Sync failed.")
-                                } else {
-                                    SyncStatusState.Completed(event.result)
-                                }
+                            is SyncProgressEvent.Finished -> {
+                                mutableStatus.value =
+                                    if (event.result.status == SyncStatus.ERROR) {
+                                        SyncStatusState.Error(event.result.errorMessage ?: "Sync failed.")
+                                    } else {
+                                        SyncStatusState.Completed(event.result)
+                                    }
+                            }
                         }
                     }
+                }.onFailure { error ->
+                    mutableStatus.value = SyncStatusState.Error(error.message ?: "Sync failed.")
                 }
             }
         syncJob = job

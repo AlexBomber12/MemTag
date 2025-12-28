@@ -14,8 +14,12 @@ import com.alexbomber12.memtag.domain.SyncState
 import com.alexbomber12.memtag.domain.SyncStatus
 import com.alexbomber12.memtag.domain.repair.RepairActionResult
 import com.alexbomber12.memtag.domain.repair.RepairActionType
+import com.alexbomber12.memtag.integrations.scan2d.Scan2dError
+import com.alexbomber12.memtag.integrations.scan2d.Scan2dScanner
+import com.alexbomber12.memtag.integrations.scan2d.asException
 import com.alexbomber12.memtag.integrations.uhf.FakeUhfReader
 import com.alexbomber12.memtag.integrations.uhf.UhfError
+import com.alexbomber12.memtag.integrations.uhf.UhfRegion
 import com.alexbomber12.memtag.integrations.uhf.asException
 import com.alexbomber12.memtag.testing.MainDispatcherRule
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -172,11 +176,13 @@ class RepairViewModelTest {
         reader: FakeUhfReader,
         logs: ActionsLogDao,
         settingsStore: SettingsStore = FakeSettingsStore(),
+        scan2dScanner: Scan2dScanner = FakeScan2dScanner(),
     ): RepairViewModel {
         return RepairViewModel(
             repository = repository,
             lookupByEpcUseCase = LookupByEpcUseCase(repository),
             uhfReader = reader,
+            scan2dScanner = scan2dScanner,
             actionsLogDao = logs,
             settingsStore = settingsStore,
             clock = { 1_700_000_000_000L },
@@ -201,6 +207,12 @@ class RepairViewModelTest {
             updatedAt = null,
         )
     }
+}
+
+private class FakeScan2dScanner : Scan2dScanner {
+    var nextResult: Result<String> = Result.failure(Scan2dError.Timeout.asException())
+
+    override suspend fun scanOnce(timeoutMs: Long): Result<String> = nextResult
 }
 
 private class FakeActionsLogDao : ActionsLogDao {
@@ -283,7 +295,14 @@ private class FakeSettingsStore(
         region: String,
         power: Int,
     ) {
-        state.update { it.copy(uhfRegion = region, uhfPower = power).sanitized() }
+        val frequencyMode = UhfRegion.fromSettings(region).toFrequencyMode()
+        state.update {
+            it.copy(
+                uhfRegion = region,
+                uhfPower = power,
+                uhfFrequencyMode = frequencyMode,
+            ).sanitized()
+        }
     }
 
     override suspend fun setScan2d(

@@ -68,7 +68,7 @@ class AppContainer(context: Context) {
     val syncMementoLibraryUseCase = SyncMementoLibraryUseCase(mementoRepository)
     val syncCoordinator = SyncCoordinator(settingsStore, mementoRepository, syncMementoLibraryUseCase, appScope)
     val lookupByEpcUseCase = LookupByEpcUseCase(mementoRepository)
-    val uhfReader: UhfReader = UhfReaderProvider.create(applicationContext)
+    val uhfReader: UhfReader = UhfReaderProvider.create(applicationContext, settingsStore)
     val scan2dScanner: Scan2dScanner = Scan2dScannerProvider.create(applicationContext, settingsStore)
     val findFeedbackController: FindFeedbackController = DeviceFindFeedbackController(applicationContext)
     val hardwareKeyDispatcher = HardwareKeyDispatcher()

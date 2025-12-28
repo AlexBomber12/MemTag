@@ -18,5 +18,6 @@ local.properties
 /vendor
 /app/libs
 /app/lib
+/app/src/device/jniLibs
 .kotlin/
 .kotlin/errors/
