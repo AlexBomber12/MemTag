@@ -1,6 +1,7 @@
 package com.alexbomber12.memtag.domain.repair
 
 enum class RepairActionType {
+    VERIFY_WRITE_SCAN,
     VERIFY_MATCH,
     VERIFY_MISMATCH,
     VERIFY_LOOKUP_FOUND,

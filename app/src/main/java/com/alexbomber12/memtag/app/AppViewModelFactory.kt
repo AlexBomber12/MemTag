@@ -49,8 +49,6 @@ class AppViewModelFactory(
         if (modelClass.isAssignableFrom(RepairViewModel::class.java)) {
             @Suppress("UNCHECKED_CAST")
             return RepairViewModel(
-                repository = appContainer.mementoRepository,
-                lookupByEpcUseCase = appContainer.lookupByEpcUseCase,
                 uhfReader = appContainer.uhfReader,
                 scan2dScanner = appContainer.scan2dScanner,
                 actionsLogDao = appContainer.actionsLogDao,

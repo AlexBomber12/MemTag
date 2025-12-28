@@ -35,8 +35,8 @@ object AppDestinations {
     val RepairWrite =
         AppDestination(
             route = "repair_write",
-            label = "Repair",
-            title = "Verify & Repair",
+            label = "Verify Write",
+            title = "Verify Write",
             icon = Icons.Filled.Build,
         )
     val Batch =
