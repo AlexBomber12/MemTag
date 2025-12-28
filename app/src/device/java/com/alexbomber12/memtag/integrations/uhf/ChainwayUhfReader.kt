@@ -49,8 +49,10 @@ class ChainwayUhfReader(
     private var initialized = false
     private var initInProgress = false
     private var inventoryJob: Job? = null
+
     @Volatile
     private var inventoryRunning = false
+
     @Volatile
     private var scanRunning = false
     private var inventoryLogCount = 0

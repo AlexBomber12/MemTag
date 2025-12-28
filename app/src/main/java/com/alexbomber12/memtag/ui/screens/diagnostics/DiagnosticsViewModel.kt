@@ -9,6 +9,7 @@ import com.alexbomber12.memtag.integrations.uhf.MatrixProbeResult
 import com.alexbomber12.memtag.integrations.uhf.ProtocolAttempt
 import com.alexbomber12.memtag.integrations.uhf.ProtocolSupport
 import com.alexbomber12.memtag.integrations.uhf.TagReading
+import com.alexbomber12.memtag.integrations.uhf.UHF_CONFIG_BUSY
 import com.alexbomber12.memtag.integrations.uhf.UhfApplyResult
 import com.alexbomber12.memtag.integrations.uhf.UhfConfig
 import com.alexbomber12.memtag.integrations.uhf.UhfDesiredConfig
@@ -18,7 +19,6 @@ import com.alexbomber12.memtag.integrations.uhf.UhfException
 import com.alexbomber12.memtag.integrations.uhf.UhfLogger
 import com.alexbomber12.memtag.integrations.uhf.UhfReader
 import com.alexbomber12.memtag.integrations.uhf.UhfRegion
-import com.alexbomber12.memtag.integrations.uhf.UHF_CONFIG_BUSY
 import com.alexbomber12.memtag.integrations.uhf.asException
 import com.alexbomber12.memtag.integrations.uhf.toErrorMessage
 import kotlinx.coroutines.Job
