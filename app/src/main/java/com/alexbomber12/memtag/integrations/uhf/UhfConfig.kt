@@ -52,16 +52,42 @@ data class UhfApplyResult(
     val afterRfLink: Int?,
     val protocolSupport: ProtocolSupport,
     val protocolAttempt: ProtocolAttempt?,
-    val modeApplied: Boolean,
-    val powerApplied: Boolean,
+    val modeApplied: Boolean?,
+    val powerApplied: Boolean?,
     val protocolApplied: Boolean?,
-    val rfLinkApplied: Boolean,
+    val rfLinkApplied: Boolean?,
 ) {
-    val success: Boolean = modeApplied && powerApplied && rfLinkApplied && (protocolApplied != false)
+    val success: Boolean =
+        (modeApplied == true || (modeApplied == null && setModeOk != false)) &&
+            (powerApplied == true || (powerApplied == null && setPowerOk != false)) &&
+            (rfLinkApplied == true || (rfLinkApplied == null && setRfLinkOk != false)) &&
+            protocolApplied != false
 }
 
 fun UhfApplyResult.toErrorMessage(): String {
-    val protocolStatus = protocolApplied?.toString() ?: "N/A"
-    return "UHF config verify failed (modeApplied=$modeApplied " +
-        "powerApplied=$powerApplied protocolApplied=$protocolStatus rfLinkApplied=$rfLinkApplied)."
+    val failures =
+        buildList {
+            if (modeApplied == false) {
+                add("modeApplied=false")
+            } else if (modeApplied == null && setModeOk == false) {
+                add("setModeOk=false")
+            }
+            if (powerApplied == false) {
+                add("powerApplied=false")
+            } else if (powerApplied == null && setPowerOk == false) {
+                add("setPowerOk=false")
+            }
+            if (protocolApplied == false) {
+                add("protocolApplied=false")
+            }
+            if (rfLinkApplied == false) {
+                add("rfLinkApplied=false")
+            } else if (rfLinkApplied == null && setRfLinkOk == false) {
+                add("setRfLinkOk=false")
+            }
+        }
+    if (failures.isEmpty()) {
+        return ""
+    }
+    return "UHF config verify failed (${failures.joinToString(" ")})."
 }

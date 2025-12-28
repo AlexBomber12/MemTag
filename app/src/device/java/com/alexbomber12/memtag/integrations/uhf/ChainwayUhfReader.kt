@@ -30,6 +30,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
+import kotlin.math.roundToInt
 
 class ChainwayUhfReader(
     private val context: Context,
@@ -407,6 +408,7 @@ class ChainwayUhfReader(
                                                 rssi = parsed.rssi,
                                                 timestampMs = System.currentTimeMillis(),
                                                 rawEpc = parsed.rawEpc,
+                                                rssiRaw = parsed.rssiRaw,
                                             ),
                                         )
                                     }
@@ -771,6 +773,12 @@ class ChainwayUhfReader(
                                 .asException(cause = error),
                         )
                     }
+            val afterMode = safeGetFrequencyModeLocked(instance)
+            val afterRfLink = safeGetRFLinkLocked(instance)
+            val afterPower = safeGetPowerLocked(instance)
+            val modeApplied = afterMode?.let { it == desired.frequencyMode }
+            val rfLinkApplied = afterRfLink?.let { it == desired.rfLink }
+            val powerApplied = afterPower?.let { it == desired.powerDbm }
             val result =
                 UhfApplyResult(
                     reason = reason,
@@ -786,23 +794,80 @@ class ChainwayUhfReader(
                     setPowerOk = setPowerOk,
                     setProtocolOk = null,
                     setRfLinkOk = setRfLinkOk,
-                    afterMode = null,
-                    afterPower = null,
+                    afterMode = afterMode,
+                    afterPower = afterPower,
                     afterProtocol = null,
-                    afterRfLink = null,
+                    afterRfLink = afterRfLink,
                     protocolSupport = protocolSupport,
                     protocolAttempt = null,
-                    modeApplied = setModeOk == true,
-                    powerApplied = setPowerOk == true,
+                    modeApplied = modeApplied,
+                    powerApplied = powerApplied,
                     protocolApplied = null,
-                    rfLinkApplied = setRfLinkOk == true,
+                    rfLinkApplied = rfLinkApplied,
                 )
-            Log.i(
-                LOG_TAG,
-                "applyUhfConfigBestEffort(reason=$reason setModeOk=$setModeOk setRfLinkOk=$setRfLinkOk " +
-                    "setPowerOk=$setPowerOk protocolSupport=$protocolSupport)",
-            )
+            val unavailable =
+                buildList {
+                    if (afterMode == null) {
+                        add("mode")
+                    }
+                    if (afterRfLink == null) {
+                        add("rflink")
+                    }
+                    if (afterPower == null) {
+                        add("power")
+                    }
+                }
+            val desiredLabel =
+                "desired(mode=${formatModeForLog(desired.frequencyMode)} rflink=${desired.rfLink} power=${desired.powerDbm})"
+            val readbackLabel =
+                if (unavailable.isEmpty()) {
+                    "readback(mode=${formatModeForLog(afterMode)} rflink=$afterRfLink power=$afterPower)"
+                } else {
+                    "readback=unavailable(${unavailable.joinToString(",")}) " +
+                        "mode=${formatModeForLog(afterMode)} rflink=${afterRfLink ?: "--"} power=${afterPower ?: "--"}"
+                }
+            val appliedLabel =
+                "applied(mode=${formatAppliedForLog(modeApplied)} " +
+                    "rflink=${formatAppliedForLog(rfLinkApplied)} " +
+                    "power=${formatAppliedForLog(powerApplied)})"
+            Log.i(LOG_TAG, "applyBestEffort: $desiredLabel $readbackLabel $appliedLabel success=${result.success}")
             Result.success(result)
+        }
+    }
+
+    private suspend fun safeGetFrequencyModeLocked(instance: IUHF): Int? {
+        return safeGetConfigValueLocked { instance.getFrequencyMode() }
+    }
+
+    private suspend fun safeGetRFLinkLocked(instance: IUHF): Int? {
+        return safeGetConfigValueLocked { instance.getRFLink() }
+    }
+
+    private suspend fun safeGetPowerLocked(instance: IUHF): Int? {
+        return safeGetConfigValueLocked { instance.getPower() }
+    }
+
+    private suspend fun safeGetConfigValueLocked(getter: () -> Int): Int? {
+        val value =
+            uhfMutex.withLock {
+                runCatching { getter() }.getOrNull()
+            } ?: return null
+        return if (value < 0) null else value
+    }
+
+    private fun formatModeForLog(value: Int?): String {
+        if (value == null) {
+            return "--"
+        }
+        val hex = value.toString(16).uppercase().padStart(2, '0')
+        return "0x$hex"
+    }
+
+    private fun formatAppliedForLog(value: Boolean?): String {
+        return when (value) {
+            true -> "true"
+            false -> "false"
+            null -> "unverified"
         }
     }
 
@@ -1359,7 +1424,7 @@ class ChainwayUhfReader(
         val epc = normalizeUhfEpc(rawEpc)
         val tid = normalizeProbeField(tagInfo.getTid())
         val rssiRaw = normalizeProbeField(tagInfo.getRssi())
-        val rssi = rssiRaw?.toIntOrNull()
+        val rssi = rssiRaw?.trim()?.toFloatOrNull()?.roundToInt()
         if (!epc.isNullOrBlank() && inventoryRunning && inventoryLogCount < INVENTORY_LOG_LIMIT) {
             Log.i(
                 LOG_TAG,
