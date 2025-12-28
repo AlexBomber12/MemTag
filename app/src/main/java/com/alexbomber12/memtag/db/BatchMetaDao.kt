@@ -7,13 +7,13 @@ import androidx.room.Query
 import kotlinx.coroutines.flow.Flow
 
 @Dao
-interface QueueMetaDao {
+interface BatchMetaDao {
     @Query("SELECT * FROM queue_meta WHERE id = 0")
-    fun observeMeta(): Flow<QueueMetaEntity?>
+    fun observeMeta(): Flow<BatchMetaEntity?>
 
     @Query("SELECT * FROM queue_meta WHERE id = 0")
-    suspend fun getMeta(): QueueMetaEntity?
+    suspend fun getMeta(): BatchMetaEntity?
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun upsert(meta: QueueMetaEntity)
+    suspend fun upsert(meta: BatchMetaEntity)
 }

@@ -13,12 +13,15 @@ import androidx.room.PrimaryKey
         Index(value = ["updatedAt"]),
     ],
 )
-data class QueueItemEntity(
+data class BatchItemEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0L,
     val epcNormalized: String,
+    val name: String?,
     val status: String,
     val createdAt: Long,
     val updatedAt: Long,
     val note: String?,
     val lastProximity: Int?,
+    val lastSeenAt: Long?,
+    val source: String?,
 )

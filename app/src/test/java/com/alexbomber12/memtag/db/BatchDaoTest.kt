@@ -15,9 +15,9 @@ import org.robolectric.annotation.Config
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [26])
-class QueueDaoTest {
+class BatchDaoTest {
     private lateinit var database: MemTagDatabase
-    private lateinit var dao: QueueDao
+    private lateinit var dao: BatchDao
 
     @Before
     fun setUp() {
@@ -28,7 +28,7 @@ class QueueDaoTest {
             )
                 .allowMainThreadQueries()
                 .build()
-        dao = database.queueDao()
+        dao = database.batchDao()
     }
 
     @After
@@ -41,13 +41,16 @@ class QueueDaoTest {
         runBlocking {
             val now = 1_000L
             val item =
-                QueueItemEntity(
+                BatchItemEntity(
                     epcNormalized = "ABCDEF12",
-                    status = "PENDING",
+                    name = null,
+                    status = "UNKNOWN",
                     createdAt = now,
                     updatedAt = now,
                     note = null,
                     lastProximity = null,
+                    lastSeenAt = null,
+                    source = null,
                 )
             dao.insertAll(listOf(item))
             val secondInsert = dao.insertAll(listOf(item))
@@ -57,77 +60,83 @@ class QueueDaoTest {
         }
 
     @Test
-    fun updateStatusUpdatesRow() =
+    fun updateSessionUpdatesRow() =
         runBlocking {
             val now = 1_000L
             val item =
-                QueueItemEntity(
+                BatchItemEntity(
                     epcNormalized = "ABCDEF12",
-                    status = "PENDING",
+                    name = "Widget",
+                    status = "UNKNOWN",
                     createdAt = now,
                     updatedAt = now,
-                    note = null,
+                    note = "Fragile",
                     lastProximity = null,
+                    lastSeenAt = null,
+                    source = null,
                 )
             dao.insertAll(listOf(item))
 
-            dao.updateStatus("ABCDEF12", "FOUND", now + 500L)
+            dao.updateSession(
+                epcNormalized = "ABCDEF12",
+                status = "PRESENT",
+                updatedAt = now + 500L,
+                lastSeenAt = now + 250L,
+                lastRssi = -43,
+                source = "SCAN",
+            )
 
             val loaded = dao.getByEpc("ABCDEF12")
-            assertEquals("FOUND", loaded?.status)
+            assertEquals("PRESENT", loaded?.status)
             assertEquals(now + 500L, loaded?.updatedAt)
+            assertEquals(now + 250L, loaded?.lastSeenAt)
+            assertEquals(-43, loaded?.lastProximity)
+            assertEquals("SCAN", loaded?.source)
         }
 
     @Test
-    fun ordersByStatusThenCreatedAt() =
+    fun ordersByCreatedAt() =
         runBlocking {
             val items =
                 listOf(
-                    QueueItemEntity(
-                        epcNormalized = "P1",
-                        status = "PENDING",
+                    BatchItemEntity(
+                        epcNormalized = "A1",
+                        name = null,
+                        status = "UNKNOWN",
                         createdAt = 10L,
                         updatedAt = 10L,
                         note = null,
                         lastProximity = null,
+                        lastSeenAt = null,
+                        source = null,
                     ),
-                    QueueItemEntity(
-                        epcNormalized = "F1",
-                        status = "FOUND",
+                    BatchItemEntity(
+                        epcNormalized = "A2",
+                        name = null,
+                        status = "PRESENT",
+                        createdAt = 5L,
+                        updatedAt = 5L,
+                        note = null,
+                        lastProximity = null,
+                        lastSeenAt = null,
+                        source = null,
+                    ),
+                    BatchItemEntity(
+                        epcNormalized = "A3",
+                        name = null,
+                        status = "MISSING",
                         createdAt = 20L,
                         updatedAt = 20L,
                         note = null,
                         lastProximity = null,
-                    ),
-                    QueueItemEntity(
-                        epcNormalized = "P2",
-                        status = "PENDING",
-                        createdAt = 30L,
-                        updatedAt = 30L,
-                        note = null,
-                        lastProximity = null,
-                    ),
-                    QueueItemEntity(
-                        epcNormalized = "S1",
-                        status = "SKIPPED",
-                        createdAt = 15L,
-                        updatedAt = 15L,
-                        note = null,
-                        lastProximity = null,
-                    ),
-                    QueueItemEntity(
-                        epcNormalized = "N1",
-                        status = "NOT_FOUND",
-                        createdAt = 12L,
-                        updatedAt = 12L,
-                        note = null,
-                        lastProximity = null,
+                        lastSeenAt = null,
+                        source = null,
                     ),
                 )
             dao.insertAll(items)
 
             val ordered = dao.getAllFlow().first()
 
-            assertEquals(listOf("P1", "P2", "F1", "S1", "N1"), ordered.map { it.epcNormalized })
+            assertEquals(listOf("A2", "A1", "A3"), ordered.map { it.epcNormalized })
         }
 }

@@ -2,10 +2,11 @@ package com.alexbomber12.memtag.app
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
+import com.alexbomber12.memtag.domain.batch.BatchUhfUseCase
+import com.alexbomber12.memtag.ui.screens.batch.BatchViewModel
 import com.alexbomber12.memtag.ui.screens.diagnostics.DiagnosticsViewModel
 import com.alexbomber12.memtag.ui.screens.find.FindViewModel
 import com.alexbomber12.memtag.ui.screens.lookup.LookupViewModel
-import com.alexbomber12.memtag.ui.screens.queue.QueueViewModel
 import com.alexbomber12.memtag.ui.screens.repair.RepairViewModel
 import com.alexbomber12.memtag.ui.screens.settings.SettingsViewModel
 
@@ -55,10 +56,11 @@ class AppViewModelFactory(
                 settingsStore = appContainer.settingsStore,
             ) as T
         }
-        if (modelClass.isAssignableFrom(QueueViewModel::class.java)) {
+        if (modelClass.isAssignableFrom(BatchViewModel::class.java)) {
             @Suppress("UNCHECKED_CAST")
-            return QueueViewModel(
-                repository = appContainer.queueRepository,
+            return BatchViewModel(
+                repository = appContainer.batchRepository,
+                uhfUseCase = BatchUhfUseCase(appContainer.uhfReader),
             ) as T
         }
         throw IllegalArgumentException("Unknown ViewModel class: ${modelClass.name}")

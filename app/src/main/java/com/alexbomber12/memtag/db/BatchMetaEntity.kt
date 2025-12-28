@@ -4,7 +4,7 @@ import androidx.room.Entity
 import androidx.room.PrimaryKey
 
 @Entity(tableName = "queue_meta")
-data class QueueMetaEntity(
+data class BatchMetaEntity(
     @PrimaryKey val id: Int = 0,
     val currentEpcNormalized: String? = null,
     val lastImportAt: Long? = null,

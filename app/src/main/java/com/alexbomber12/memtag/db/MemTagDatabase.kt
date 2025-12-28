@@ -8,10 +8,10 @@ import androidx.room.RoomDatabase
         InventoryItemEntity::class,
         ActionsLogEntity::class,
         SyncStateEntity::class,
-        QueueItemEntity::class,
-        QueueMetaEntity::class,
+        BatchItemEntity::class,
+        BatchMetaEntity::class,
     ],
-    version = 3,
+    version = 4,
 )
 abstract class MemTagDatabase : RoomDatabase() {
     abstract fun inventoryItemDao(): InventoryItemDao
@@ -20,7 +20,7 @@ abstract class MemTagDatabase : RoomDatabase() {
 
     abstract fun syncStateDao(): SyncStateDao
 
-    abstract fun queueDao(): QueueDao
+    abstract fun batchDao(): BatchDao
 
-    abstract fun queueMetaDao(): QueueMetaDao
+    abstract fun batchMetaDao(): BatchMetaDao
 }
