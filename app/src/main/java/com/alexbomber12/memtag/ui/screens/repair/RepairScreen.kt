@@ -207,9 +207,9 @@ fun RepairScreen(
                             color = MaterialTheme.colorScheme.primary,
                         )
                     }
-                    state.errorMessage?.let { message ->
-                        ErrorState(message = message)
-                    }
+                }
+                state.errorMessage?.let { message ->
+                    ErrorState(message = message)
                 }
                 PrimaryButton(
                     text = "Write expected EPC",
