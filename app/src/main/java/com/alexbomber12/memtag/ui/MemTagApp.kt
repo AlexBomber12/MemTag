@@ -61,7 +61,7 @@ fun MemTagApp(
         val uri = deepLinkIntent?.data ?: return@LaunchedEffect
         val logger = appContainer.logger
         if (!isFindDeepLink(uri)) {
-            logger.w(DEEP_LINK_TAG, "external deeplink ignored: ${uri}")
+            logger.w(DEEP_LINK_TAG, "external deeplink ignored: $uri")
             return@LaunchedEffect
         }
         val epcRaw = uri.getQueryParameter("epc")?.trim().orEmpty()
