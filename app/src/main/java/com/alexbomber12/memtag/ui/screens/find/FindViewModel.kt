@@ -251,6 +251,13 @@ class FindViewModel(
         }
     }
 
+    fun clearError() {
+        mutableState.update { state ->
+            val updated = state.copy(lastErrorMessage = null)
+            updated.copy(status = computeStatus(updated))
+        }
+    }
+
     fun startFind() {
         if (inventoryJob != null) {
             return
