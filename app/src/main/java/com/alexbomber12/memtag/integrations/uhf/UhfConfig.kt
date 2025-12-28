@@ -52,16 +52,36 @@ data class UhfApplyResult(
     val afterRfLink: Int?,
     val protocolSupport: ProtocolSupport,
     val protocolAttempt: ProtocolAttempt?,
-    val modeApplied: Boolean,
-    val powerApplied: Boolean,
+    val modeApplied: Boolean?,
+    val powerApplied: Boolean?,
     val protocolApplied: Boolean?,
-    val rfLinkApplied: Boolean,
+    val rfLinkApplied: Boolean?,
 ) {
-    val success: Boolean = modeApplied && powerApplied && rfLinkApplied && (protocolApplied != false)
+    val success: Boolean =
+        modeApplied != false &&
+            powerApplied != false &&
+            rfLinkApplied != false &&
+            protocolApplied != false
 }
 
 fun UhfApplyResult.toErrorMessage(): String {
-    val protocolStatus = protocolApplied?.toString() ?: "N/A"
-    return "UHF config verify failed (modeApplied=$modeApplied " +
-        "powerApplied=$powerApplied protocolApplied=$protocolStatus rfLinkApplied=$rfLinkApplied)."
+    val failures =
+        buildList {
+            if (modeApplied == false) {
+                add("modeApplied=false")
+            }
+            if (powerApplied == false) {
+                add("powerApplied=false")
+            }
+            if (protocolApplied == false) {
+                add("protocolApplied=false")
+            }
+            if (rfLinkApplied == false) {
+                add("rfLinkApplied=false")
+            }
+        }
+    if (failures.isEmpty()) {
+        return ""
+    }
+    return "UHF config verify failed (${failures.joinToString(" ")})."
 }

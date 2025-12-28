@@ -5,4 +5,5 @@ data class TagReading(
     val rssi: Int?,
     val timestampMs: Long,
     val rawEpc: String? = null,
+    val rssiRaw: String? = null,
 )
