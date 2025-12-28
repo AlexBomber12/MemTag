@@ -73,22 +73,34 @@ fun LookupScreen(
                 }
                 when (val uhfStatus = state.uhfScanStatus) {
                     is ScanUhfStatus.Scanning -> {
-                        LoadingState(message = "Scanning RFID...")
+                        LoadingState(
+                            message = "Scanning RFID...",
+                            modifier = Modifier.fillMaxWidth(),
+                        )
                     }
 
                     is ScanUhfStatus.Error -> {
-                        ErrorState(message = uhfStatus.message)
+                        ErrorState(
+                            message = uhfStatus.message,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
                     }
 
                     is ScanUhfStatus.Idle -> Unit
                 }
                 when (val scanStatus = state.scanStatus) {
                     is ScanQrStatus.Scanning -> {
-                        LoadingState(message = "Scanning QR...")
+                        LoadingState(
+                            message = "Scanning QR...",
+                            modifier = Modifier.fillMaxWidth(),
+                        )
                     }
 
                     is ScanQrStatus.Error -> {
-                        ErrorState(message = scanStatus.message)
+                        ErrorState(
+                            message = scanStatus.message,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
                     }
 
                     is ScanQrStatus.Idle -> Unit
@@ -109,7 +121,10 @@ fun LookupScreen(
                     }
 
                     is LookupStatus.Loading -> {
-                        LoadingState(message = "Looking up EPC...")
+                        LoadingState(
+                            message = "Looking up EPC...",
+                            modifier = Modifier.fillMaxWidth(),
+                        )
                     }
 
                     is LookupStatus.NotFound -> {
@@ -117,7 +132,10 @@ fun LookupScreen(
                     }
 
                     is LookupStatus.Error -> {
-                        ErrorState(message = status.message)
+                        ErrorState(
+                            message = status.message,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
                     }
 
                     is LookupStatus.Found -> {
