@@ -17,6 +17,8 @@ data class AppSettings(
     val showFindDebugOverlay: Boolean = AppDefaults.FIND_DEBUG_OVERLAY_ENABLED,
     val lastScannedEpc: String = AppDefaults.LAST_SCANNED_EPC,
     val lastFindTargetEpc: String = AppDefaults.LAST_FIND_TARGET_EPC,
+    val lastScannedEpcAt: Long = AppDefaults.LAST_SCANNED_EPC_AT,
+    val lastFindTargetEpcAt: Long = AppDefaults.LAST_FIND_TARGET_EPC_AT,
     val rfidKeyCodes: String = AppDefaults.RFID_KEY_CODES,
     val scanKeyCodes: String = AppDefaults.SCAN_KEY_CODES,
     val showDiagnosticsTab: Boolean = AppDefaults.SHOW_DIAGNOSTICS_TAB,
@@ -32,6 +34,8 @@ data class AppSettings(
         val normalizedFrequencyMode = uhfFrequencyMode?.takeIf { it >= 0 }
         val normalizedLastScanned = runCatching { EpcNormalizer.normalize(lastScannedEpc) }.getOrNull().orEmpty()
         val normalizedFindTarget = runCatching { EpcNormalizer.normalize(lastFindTargetEpc) }.getOrNull().orEmpty()
+        val normalizedLastScannedAt = lastScannedEpcAt.coerceAtLeast(0L)
+        val normalizedFindTargetAt = lastFindTargetEpcAt.coerceAtLeast(0L)
         return copy(
             mementoBaseUrl = AppDefaults.normalizeBaseUrl(mementoBaseUrl),
             uhfRegion = normalizedRegion,
@@ -39,6 +43,8 @@ data class AppSettings(
             uhfFrequencyMode = normalizedFrequencyMode,
             lastScannedEpc = normalizedLastScanned,
             lastFindTargetEpc = normalizedFindTarget,
+            lastScannedEpcAt = normalizedLastScannedAt,
+            lastFindTargetEpcAt = normalizedFindTargetAt,
             rfidKeyCodes = rfidKeyCodes.trim(),
             scanKeyCodes = scanKeyCodes.trim(),
         )

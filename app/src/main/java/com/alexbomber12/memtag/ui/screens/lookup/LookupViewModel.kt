@@ -263,7 +263,13 @@ class LookupViewModel(
             )
         }
         viewModelScope.launch {
-            settingsStore.update { settings -> settings.copy(lastScannedEpc = normalized) }
+            val timestamp = System.currentTimeMillis()
+            settingsStore.update { settings ->
+                settings.copy(
+                    lastScannedEpc = normalized,
+                    lastScannedEpcAt = timestamp,
+                )
+            }
         }
         val job =
             viewModelScope.launch {

@@ -14,6 +14,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -76,6 +77,7 @@ fun RepairScreen(
             state.confirmation == null &&
             isExpectedValid &&
             (state.scannedEpc.isNullOrBlank() || state.status is VerifyWriteStatus.Mismatch)
+    val expectedBlank = state.expectedEpc.isBlank()
 
     LazyColumn(
         modifier =
@@ -95,20 +97,22 @@ fun RepairScreen(
                 )
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    SecondaryButton(
-                        text = "Use from Find",
-                        onClick = viewModel::useExpectedFromFind,
-                        enabled = !isBusy && state.lastFindTargetEpc.isNotBlank(),
-                        modifier = Modifier.weight(1f),
+                    Text(
+                        text = expectedSourceLabel(state.expectedSource),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    SecondaryButton(
-                        text = "Use from Lookup",
-                        onClick = viewModel::useExpectedFromLookup,
-                        enabled = !isBusy && state.lastLookupEpc.isNotBlank(),
-                        modifier = Modifier.weight(1f),
-                    )
+                    if (state.expectedSource == ExpectedSource.Manual) {
+                        TextButton(
+                            onClick = viewModel::resetExpectedToAuto,
+                            enabled = !isBusy,
+                        ) {
+                            Text(text = "Reset to auto")
+                        }
+                    }
                 }
             }
         }
@@ -132,23 +136,6 @@ fun RepairScreen(
                         modifier = Modifier.weight(1f),
                     )
                 }
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    SecondaryButton(
-                        text = "Clear scanned",
-                        onClick = viewModel::clearScanned,
-                        enabled = !isBusy && !state.scannedEpc.isNullOrBlank(),
-                        modifier = Modifier.weight(1f),
-                    )
-                    SecondaryButton(
-                        text = "Stop/Cancel",
-                        onClick = viewModel::cancelOperations,
-                        enabled = isBusy || state.confirmation != null,
-                        modifier = Modifier.weight(1f),
-                    )
-                }
                 when {
                     state.isReading -> LoadingState(message = "Scanning RFID...")
                     state.isScanningQr -> LoadingState(message = "Scanning QR...")
@@ -160,41 +147,66 @@ fun RepairScreen(
 
         item {
             AppCard(title = "Status") {
-                when (val status = state.status) {
-                    is VerifyWriteStatus.NotScanned -> {
-                        Text(
-                            text = "Not scanned yet. Scan RFID or QR to verify.",
-                            style = MaterialTheme.typography.labelMedium,
-                        )
-                        EpcLine(label = "Expected EPC", epc = status.expectedEpc)
+                when {
+                    expectedBlank -> {
+                        ErrorState(message = "Expected EPC is required.")
                     }
-                    is VerifyWriteStatus.Ok -> {
+                    else -> {
+                        when (val status = state.status) {
+                            is VerifyWriteStatus.NotScanned -> {
+                                Text(
+                                    text = "Not scanned yet.",
+                                    style = MaterialTheme.typography.labelMedium,
+                                )
+                                EpcLine(label = "Expected EPC", epc = status.expectedEpc)
+                            }
+                            is VerifyWriteStatus.Ok -> {
+                                Text(
+                                    text = "OK: scanned EPC matches expected.",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.primary,
+                                )
+                                EpcLine(
+                                    label = "Expected EPC",
+                                    epc = status.expectedEpc,
+                                    color = MaterialTheme.colorScheme.primary,
+                                )
+                            }
+                            is VerifyWriteStatus.Mismatch -> {
+                                Text(
+                                    text = "Mismatch: scanned EPC does not match expected.",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.error,
+                                )
+                                EpcLine(
+                                    label = "Expected EPC",
+                                    epc = status.expectedEpc,
+                                    color = MaterialTheme.colorScheme.error,
+                                )
+                                EpcLine(
+                                    label = "Scanned EPC",
+                                    epc = status.scannedEpc,
+                                    color = MaterialTheme.colorScheme.error,
+                                )
+                            }
+                            is VerifyWriteStatus.Invalid -> {
+                                ErrorState(message = status.message)
+                            }
+                        }
+                    }
+                }
+                if (!expectedBlank) {
+                    when {
+                        state.isWriting -> LoadingState(message = "Writing EPC...")
+                        state.isVerifying -> LoadingState(message = "Verifying tag EPC...")
+                    }
+                    state.message?.let { message ->
                         Text(
-                            text = "OK: scanned EPC matches expected.",
+                            text = message,
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.primary,
                         )
-                        EpcLine(label = "Expected EPC", epc = status.expectedEpc, color = MaterialTheme.colorScheme.primary)
                     }
-                    is VerifyWriteStatus.Mismatch -> {
-                        Text(
-                            text = "Mismatch: scanned EPC does not match expected.",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.error,
-                        )
-                        EpcLine(label = "Expected EPC", epc = status.expectedEpc, color = MaterialTheme.colorScheme.error)
-                        EpcLine(label = "Scanned EPC", epc = status.scannedEpc, color = MaterialTheme.colorScheme.error)
-                    }
-                    is VerifyWriteStatus.Invalid -> {
-                        ErrorState(message = status.message)
-                    }
-                }
-                when {
-                    state.isWriting -> LoadingState(message = "Writing EPC...")
-                    state.isVerifying -> LoadingState(message = "Verifying tag EPC...")
-                }
-                state.message?.let { message ->
-                    Text(text = message, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
                 }
                 state.errorMessage?.let { message ->
                     ErrorState(message = message)
@@ -247,14 +259,14 @@ private fun ConfirmationDialog(
                 when (confirmation.warning) {
                     WriteWarning.NOT_SCANNED -> {
                         Text(
-                            text = "Warning: writing without prior verification.",
+                            text = "Write expected EPC without verification?",
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.error,
                         )
                     }
                     WriteWarning.MISMATCH -> {
                         Text(
-                            text = "Warning: current tag does not match expected.",
+                            text = "Write expected EPC to tag?",
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.error,
                         )
@@ -298,6 +310,15 @@ private fun EpcLine(
             color = color,
             modifier = Modifier.widthIn(min = 180.dp),
         )
+    }
+}
+
+private fun expectedSourceLabel(source: ExpectedSource): String {
+    return when (source) {
+        ExpectedSource.AutoFind -> "Expected source: Find"
+        ExpectedSource.AutoLookup -> "Expected source: Lookup"
+        ExpectedSource.Manual -> "Expected source: Manual"
+        ExpectedSource.None -> "Expected source: --"
     }
 }
 
