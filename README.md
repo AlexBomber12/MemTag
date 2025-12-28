@@ -22,20 +22,24 @@ Open **Settings** in the app and set:
 
 These values are persisted with DataStore and used across app restarts.
 
-## Queue CSV (Find/Geiger)
+## Batch CSV (Inventory Sweep / Manual Scan)
 - Accepted formats:
   - One EPC per line
-  - CSV with header where the first column is `EPC` (case-insensitive)
-  - CSV with multiple columns (first non-empty cell is treated as the EPC)
+  - CSV with header that includes `epc` (case-insensitive)
+  - CSV without header (first column is EPC, second is name, third is note)
+  - Optional header columns: `name`/`label`, `note`/`notes`
 - EPC normalization rules:
   - Trim, remove spaces/line breaks, uppercase
   - Hex only, length 8..64
 - Import behavior:
-  - Duplicates are skipped (within the file and against the queue)
+  - Current batch is replaced on import
+  - Duplicates are skipped (within the file)
   - Invalid rows are reported with row numbers
 - Export columns:
-  - `EPC`, `Status`, `UpdatedAt` (ISO-8601 local time), `Note`
-- Suggested workflow: import CSV, start Find on the current item, mark status, export results.
+  - `epc`, `name`, `status`, `lastSeenAt` (ISO-8601 local time), `lastRssi`, `source`, `note`
+- Status values:
+  - `UNKNOWN`, `PRESENT`, `MISSING`, `EXTRA`
+- Suggested workflow: import CSV, run an inventory sweep or manual scan session, export results.
 
 ## Local PowerShell commands
 ```powershell

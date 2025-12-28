@@ -13,14 +13,14 @@ import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
 import androidx.navigation.navDeepLink
 import com.alexbomber12.memtag.app.AppContainer
+import com.alexbomber12.memtag.ui.screens.batch.BatchScreen
+import com.alexbomber12.memtag.ui.screens.batch.BatchViewModel
 import com.alexbomber12.memtag.ui.screens.diagnostics.DiagnosticsScreen
 import com.alexbomber12.memtag.ui.screens.diagnostics.DiagnosticsViewModel
 import com.alexbomber12.memtag.ui.screens.find.FindScreen
 import com.alexbomber12.memtag.ui.screens.find.FindViewModel
 import com.alexbomber12.memtag.ui.screens.lookup.LookupScreen
 import com.alexbomber12.memtag.ui.screens.lookup.LookupViewModel
-import com.alexbomber12.memtag.ui.screens.queue.QueueScreen
-import com.alexbomber12.memtag.ui.screens.queue.QueueViewModel
 import com.alexbomber12.memtag.ui.screens.repair.RepairScreen
 import com.alexbomber12.memtag.ui.screens.repair.RepairViewModel
 import com.alexbomber12.memtag.ui.screens.settings.SettingsScreen
@@ -89,18 +89,10 @@ fun AppNavHost(
             )
         }
         composable(AppDestinations.Batch.route) {
-            val viewModel: QueueViewModel = viewModel(factory = viewModelFactory)
-            QueueScreen(
+            val viewModel: BatchViewModel = viewModel(factory = viewModelFactory)
+            BatchScreen(
                 viewModel = viewModel,
-                onStartFind = { epc, autoStart ->
-                    navController.navigate(
-                        AppDestinations.findRoute(
-                            epc = epc,
-                            autoStart = autoStart,
-                            fromBatch = true,
-                        ),
-                    )
-                },
+                hardwareActions = appContainer.hardwareKeyDispatcher.actions,
             )
         }
         composable(AppDestinations.Settings.route) {

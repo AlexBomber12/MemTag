@@ -5,14 +5,15 @@ import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.room.Room
 import com.alexbomber12.memtag.core.logging.AndroidLogger
 import com.alexbomber12.memtag.core.logging.Logger
-import com.alexbomber12.memtag.data.queue.DefaultQueueRepository
-import com.alexbomber12.memtag.data.queue.QueueRepository
+import com.alexbomber12.memtag.data.batch.BatchRepository
+import com.alexbomber12.memtag.data.batch.DefaultBatchRepository
 import com.alexbomber12.memtag.data.repository.DefaultMementoRepository
 import com.alexbomber12.memtag.data.repository.MementoRepository
 import com.alexbomber12.memtag.data.settings.PreferencesSettingsStore
 import com.alexbomber12.memtag.data.settings.SettingsStore
 import com.alexbomber12.memtag.db.MIGRATION_1_2
 import com.alexbomber12.memtag.db.MIGRATION_2_3
+import com.alexbomber12.memtag.db.MIGRATION_3_4
 import com.alexbomber12.memtag.db.MemTagDatabase
 import com.alexbomber12.memtag.domain.LookupByEpcUseCase
 import com.alexbomber12.memtag.domain.SyncMementoLibraryUseCase
@@ -44,7 +45,7 @@ class AppContainer(context: Context) {
 
     val database: MemTagDatabase =
         Room.databaseBuilder(applicationContext, MemTagDatabase::class.java, "memtag.db")
-            .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
             .fallbackToDestructiveMigration()
             .build()
     val actionsLogDao = database.actionsLogDao()
@@ -59,11 +60,11 @@ class AppContainer(context: Context) {
             mementoClient = mementoClient,
             logger = logger,
         )
-    val queueRepository: QueueRepository =
-        DefaultQueueRepository(
+    val batchRepository: BatchRepository =
+        DefaultBatchRepository(
             database = database,
-            queueDao = database.queueDao(),
-            queueMetaDao = database.queueMetaDao(),
+            batchDao = database.batchDao(),
+            batchMetaDao = database.batchMetaDao(),
         )
     val syncMementoLibraryUseCase = SyncMementoLibraryUseCase(mementoRepository)
     val syncCoordinator = SyncCoordinator(settingsStore, mementoRepository, syncMementoLibraryUseCase, appScope)
