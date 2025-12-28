@@ -52,6 +52,7 @@ class PreferencesSettingsStore(
             preferences[Keys.LAST_FIND_TARGET_EPC] = updated.lastFindTargetEpc
             preferences[Keys.RFID_KEY_CODES] = updated.rfidKeyCodes
             preferences[Keys.SCAN_KEY_CODES] = updated.scanKeyCodes
+            preferences[Keys.SHOW_DIAGNOSTICS_TAB] = updated.showDiagnosticsTab
         }
     }
 
@@ -115,6 +116,7 @@ class PreferencesSettingsStore(
             lastFindTargetEpc = this[Keys.LAST_FIND_TARGET_EPC] ?: AppDefaults.LAST_FIND_TARGET_EPC,
             rfidKeyCodes = this[Keys.RFID_KEY_CODES] ?: AppDefaults.RFID_KEY_CODES,
             scanKeyCodes = this[Keys.SCAN_KEY_CODES] ?: AppDefaults.SCAN_KEY_CODES,
+            showDiagnosticsTab = this[Keys.SHOW_DIAGNOSTICS_TAB] ?: AppDefaults.SHOW_DIAGNOSTICS_TAB,
         ).sanitized()
     }
 
@@ -134,5 +136,6 @@ class PreferencesSettingsStore(
         val LAST_FIND_TARGET_EPC = stringPreferencesKey("last_find_target_epc")
         val RFID_KEY_CODES = stringPreferencesKey("rfid_key_codes")
         val SCAN_KEY_CODES = stringPreferencesKey("scan_key_codes")
+        val SHOW_DIAGNOSTICS_TAB = booleanPreferencesKey("show_diagnostics_tab")
     }
 }

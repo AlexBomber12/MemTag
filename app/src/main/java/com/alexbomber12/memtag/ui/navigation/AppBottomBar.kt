@@ -8,8 +8,8 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.navigation.NavController
-import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.currentBackStackEntryAsState
 
 @Composable
@@ -25,30 +25,10 @@ fun AppBottomBar(
         destinations.forEach { destination ->
             NavigationBarItem(
                 selected = currentRoot == destination.route,
-                onClick = {
-                    if (navController.currentBackStackEntry == null || navController.graph.nodes.size() == 0) {
-                        return@NavigationBarItem
-                    }
-                    val targetRoute =
-                        if (destination.route == AppDestinations.Find.route) {
-                            AppDestinations.findRoute()
-                        } else {
-                            destination.route
-                        }
-                    val startId = runCatching { navController.graph.findStartDestination().id }.getOrNull()
-                    navController.navigate(targetRoute) {
-                        if (startId != null) {
-                            popUpTo(startId) {
-                                saveState = true
-                            }
-                        }
-                        launchSingleTop = true
-                        restoreState = true
-                    }
-                },
+                onClick = { navController.navigateToTopLevel(destination) },
                 icon = { Icon(destination.icon, contentDescription = destination.label) },
-                label = { Text(text = destination.label) },
-                alwaysShowLabel = false,
+                label = { Text(text = destination.label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                alwaysShowLabel = true,
             )
         }
     }

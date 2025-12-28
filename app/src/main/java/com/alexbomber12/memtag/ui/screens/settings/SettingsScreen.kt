@@ -6,6 +6,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -23,6 +24,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -30,6 +32,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
@@ -42,11 +45,15 @@ import com.alexbomber12.memtag.ui.components.AppCard
 import com.alexbomber12.memtag.ui.components.ErrorState
 import com.alexbomber12.memtag.ui.components.LoadingState
 import com.alexbomber12.memtag.ui.components.PrimaryButton
+import com.alexbomber12.memtag.ui.components.SecondaryButton
 import java.text.DateFormat
 import java.util.Date
 
 @Composable
-fun SettingsScreen(viewModel: SettingsViewModel) {
+fun SettingsScreen(
+    viewModel: SettingsViewModel,
+    onOpenDiagnostics: () -> Unit,
+) {
     val settings by viewModel.settingsState.collectAsStateWithLifecycle()
     val syncStatus by viewModel.syncStatusState.collectAsStateWithLifecycle()
     val lastSyncState by viewModel.lastSyncState.collectAsStateWithLifecycle()
@@ -62,8 +69,19 @@ fun SettingsScreen(viewModel: SettingsViewModel) {
     var scanKeyCodes by rememberSaveable { mutableStateOf(settings.scanKeyCodes) }
     var tokenVisible by rememberSaveable { mutableStateOf(false) }
     var regionExpanded by rememberSaveable { mutableStateOf(false) }
+    var pendingOpenDiagnostics by rememberSaveable { mutableStateOf(false) }
 
-    LaunchedEffect(settings) {
+    LaunchedEffect(
+        settings.mementoBaseUrl,
+        settings.mementoToken,
+        settings.mementoLibraryId,
+        settings.uhfRegion,
+        settings.uhfPower,
+        settings.scan2dAction,
+        settings.scan2dExtraKey,
+        settings.rfidKeyCodes,
+        settings.scanKeyCodes,
+    ) {
         baseUrl = settings.mementoBaseUrl
         token = settings.mementoToken
         libraryId = settings.mementoLibraryId
@@ -73,6 +91,13 @@ fun SettingsScreen(viewModel: SettingsViewModel) {
         scanExtraKey = settings.scan2dExtraKey
         rfidKeyCodes = settings.rfidKeyCodes
         scanKeyCodes = settings.scanKeyCodes
+    }
+
+    LaunchedEffect(settings.showDiagnosticsTab, pendingOpenDiagnostics) {
+        if (pendingOpenDiagnostics && settings.showDiagnosticsTab) {
+            pendingOpenDiagnostics = false
+            onOpenDiagnostics()
+        }
     }
 
     Column(
@@ -200,6 +225,43 @@ fun SettingsScreen(viewModel: SettingsViewModel) {
                 onValueChange = { scanKeyCodes = it },
                 label = { Text(text = "Scan key codes") },
                 supportingText = { Text(text = "Comma-separated key codes for QR scan.") },
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+
+        AppCard(title = "Diagnostics") {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(text = "Show Diagnostics tab", style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        text = "Add Diagnostics to the bottom bar.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                Switch(
+                    checked = settings.showDiagnosticsTab,
+                    onCheckedChange = { enabled ->
+                        if (!enabled) {
+                            pendingOpenDiagnostics = false
+                        }
+                        viewModel.toggleShowDiagnosticsTab(enabled)
+                    },
+                )
+            }
+            SecondaryButton(
+                text = "Open Diagnostics",
+                onClick = {
+                    if (settings.showDiagnosticsTab) {
+                        onOpenDiagnostics()
+                    } else {
+                        pendingOpenDiagnostics = true
+                        viewModel.toggleShowDiagnosticsTab(true)
+                    }
+                },
                 modifier = Modifier.fillMaxWidth(),
             )
         }

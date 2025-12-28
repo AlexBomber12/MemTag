@@ -104,6 +104,12 @@ class SettingsViewModel(
         }
     }
 
+    fun toggleShowDiagnosticsTab(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsStore.update { current -> current.copy(showDiagnosticsTab = enabled) }
+        }
+    }
+
     fun syncNow() {
         syncCoordinator.requestManualSync()
     }

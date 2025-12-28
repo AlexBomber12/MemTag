@@ -20,6 +20,7 @@ object AppDefaults {
     const val LAST_FIND_TARGET_EPC = ""
     const val RFID_KEY_CODES = ""
     const val SCAN_KEY_CODES = ""
+    const val SHOW_DIAGNOSTICS_TAB = false
 
     fun normalizeBaseUrl(input: String): String {
         var trimmed = input.trim()
