@@ -1,6 +1,7 @@
 package com.alexbomber12.memtag.data.batch
 
 import com.alexbomber12.memtag.domain.batch.BatchExportRow
+import com.alexbomber12.memtag.domain.batch.BatchStatus
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -13,30 +14,34 @@ object BatchCsvExporter {
         zoneId: ZoneId = ZoneId.systemDefault(),
     ): String {
         val builder = StringBuilder()
-        builder.append("epc,name,status,lastSeenAt,lastRssi,source,note\n")
+        builder.append("Name,Status,EPC,UpdatedAt\n")
         rows.forEach { row ->
-            val lastSeen =
-                if (row.lastSeenAt != null) {
-                    formatter.format(Instant.ofEpochMilli(row.lastSeenAt).atZone(zoneId))
+            val updatedAt =
+                if (row.status == BatchStatus.FOUND && row.updatedAt != null && row.updatedAt > 0) {
+                    formatter.format(Instant.ofEpochMilli(row.updatedAt).atZone(zoneId))
                 } else {
                     ""
                 }
-            val lastRssi = row.lastRssi?.toString().orEmpty()
-            val source = row.source?.name.orEmpty()
             val values =
                 listOf(
+                    row.name,
+                    statusLabel(row.status),
                     row.epc,
-                    row.name.orEmpty(),
-                    row.status.name,
-                    lastSeen,
-                    lastRssi,
-                    source,
-                    row.note.orEmpty(),
+                    updatedAt,
                 )
             val line = values.joinToString(",") { value -> escapeCsv(value) }
             builder.append(line).append("\n")
         }
         return builder.toString()
+    }
+
+    private fun statusLabel(status: BatchStatus): String {
+        return when (status) {
+            BatchStatus.UNKNOWN -> "Unknown"
+            BatchStatus.FOUND -> "Found"
+            BatchStatus.NOT_FOUND -> "NotFound"
+            BatchStatus.EXTRA -> "Extra"
+        }
     }
 
     private fun escapeCsv(value: String): String {

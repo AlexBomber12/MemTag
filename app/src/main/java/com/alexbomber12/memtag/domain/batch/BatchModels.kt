@@ -2,8 +2,8 @@ package com.alexbomber12.memtag.domain.batch
 
 enum class BatchStatus {
     UNKNOWN,
-    PRESENT,
-    MISSING,
+    FOUND,
+    NOT_FOUND,
     EXTRA,
 }
 
@@ -15,8 +15,7 @@ enum class BatchSource {
 
 data class BatchInputItem(
     val epcNormalized: String,
-    val name: String?,
-    val note: String?,
+    val name: String,
 )
 
 data class BatchSessionEntry(
@@ -42,12 +41,9 @@ data class BatchMeta(
 
 data class BatchExportRow(
     val epc: String,
-    val name: String?,
+    val name: String,
     val status: BatchStatus,
-    val lastSeenAt: Long?,
-    val lastRssi: Int?,
-    val source: BatchSource?,
-    val note: String?,
+    val updatedAt: Long?,
 )
 
 data class BatchExtraEntry(

@@ -79,7 +79,7 @@ class BatchDaoTest {
 
             dao.updateSession(
                 epcNormalized = "ABCDEF12",
-                status = "PRESENT",
+                status = "FOUND",
                 updatedAt = now + 500L,
                 lastSeenAt = now + 250L,
                 lastRssi = -43,
@@ -87,7 +87,7 @@ class BatchDaoTest {
             )
 
             val loaded = dao.getByEpc("ABCDEF12")
-            assertEquals("PRESENT", loaded?.status)
+            assertEquals("FOUND", loaded?.status)
             assertEquals(now + 500L, loaded?.updatedAt)
             assertEquals(now + 250L, loaded?.lastSeenAt)
             assertEquals(-43, loaded?.lastProximity)
@@ -113,7 +113,7 @@ class BatchDaoTest {
                     BatchItemEntity(
                         epcNormalized = "A2",
                         name = null,
-                        status = "PRESENT",
+                        status = "FOUND",
                         createdAt = 5L,
                         updatedAt = 5L,
                         note = null,
@@ -124,7 +124,7 @@ class BatchDaoTest {
                     BatchItemEntity(
                         epcNormalized = "A3",
                         name = null,
-                        status = "MISSING",
+                        status = "NOT_FOUND",
                         createdAt = 20L,
                         updatedAt = 20L,
                         note = null,

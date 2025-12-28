@@ -15,7 +15,6 @@ object BatchCsvParser {
         val items = mutableListOf<BatchInputItem>()
         val invalidRows = mutableListOf<Int>()
         var duplicateCount = 0
-        var headerChecked = false
         var headerIndices: HeaderIndices? = null
 
         text.lineSequence().forEachIndexed { index, rawLine ->
@@ -31,19 +30,15 @@ object BatchCsvParser {
             if (firstNonEmpty == null) {
                 return@forEachIndexed
             }
-            if (!headerChecked) {
-                headerChecked = true
+            if (headerIndices == null) {
                 val header = trimmed.map { it.trim().trimStart('\uFEFF') }
-                val parsedHeader = parseHeader(header)
-                if (parsedHeader != null) {
-                    headerIndices = parsedHeader
-                    return@forEachIndexed
-                }
+                headerIndices =
+                    parseHeader(header)
+                        ?: throw IllegalArgumentException("CSV must contain columns: Name, EPC")
+                return@forEachIndexed
             }
-            val epcCandidate =
-                headerIndices?.let { indices ->
-                    cellValue(trimmed, indices.epcIndex)
-                } ?: firstNonEmpty.trimStart('\uFEFF')
+            val indices = headerIndices ?: return@forEachIndexed
+            val epcCandidate = cellValue(trimmed, indices.epcIndex)
             if (epcCandidate.isBlank()) {
                 invalidRows.add(index + 1)
                 return@forEachIndexed
@@ -57,19 +52,17 @@ object BatchCsvParser {
                 duplicateCount += 1
                 return@forEachIndexed
             }
-            val name =
-                headerIndices?.let { indices -> cellValue(trimmed, indices.nameIndex) }
-                    ?: trimmed.getOrNull(1).orEmpty()
-            val note =
-                headerIndices?.let { indices -> cellValue(trimmed, indices.noteIndex) }
-                    ?: trimmed.getOrNull(2).orEmpty()
+            val name = cellValue(trimmed, indices.nameIndex)
             items.add(
                 BatchInputItem(
                     epcNormalized = normalized,
-                    name = name.ifBlank { null },
-                    note = note.ifBlank { null },
+                    name = name,
                 ),
             )
+        }
+
+        if (headerIndices == null) {
+            throw IllegalArgumentException("CSV must contain columns: Name, EPC")
         }
 
         return Result(
@@ -81,38 +74,29 @@ object BatchCsvParser {
 
     private data class HeaderIndices(
         val epcIndex: Int,
-        val nameIndex: Int?,
-        val noteIndex: Int?,
+        val nameIndex: Int,
     )
 
     private fun parseHeader(cells: List<String>): HeaderIndices? {
         var epcIndex: Int? = null
         var nameIndex: Int? = null
-        var noteIndex: Int? = null
         cells.forEachIndexed { index, value ->
-            val normalized = value.trim().lowercase()
+            val normalized = value.trim().trimStart('\uFEFF').lowercase()
             when (normalized) {
                 "epc" -> epcIndex = index
-                "name", "label" -> nameIndex = index
-                "note", "notes" -> noteIndex = index
+                "name" -> nameIndex = index
             }
         }
         val resolvedEpc = epcIndex ?: return null
-        return HeaderIndices(
-            epcIndex = resolvedEpc,
-            nameIndex = nameIndex,
-            noteIndex = noteIndex,
-        )
+        val resolvedName = nameIndex ?: return null
+        return HeaderIndices(epcIndex = resolvedEpc, nameIndex = resolvedName)
     }
 
     private fun cellValue(
         cells: List<String>,
-        index: Int?,
+        index: Int,
     ): String {
-        if (index == null) {
-            return ""
-        }
-        return cells.getOrNull(index).orEmpty().trim().trimStart('\uFEFF')
+        return cells.getOrNull(index).orEmpty().trim()
     }
 
     private fun parseCsvLine(line: String): List<String> {

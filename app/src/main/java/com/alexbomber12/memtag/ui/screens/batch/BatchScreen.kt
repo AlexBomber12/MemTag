@@ -19,7 +19,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.Checkbox
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -120,15 +119,15 @@ fun BatchScreen(
         )
     }
 
-    val canExport = state.inputItems.isNotEmpty() || state.extras.isNotEmpty()
+    val canExport = state.inputItems.isNotEmpty()
 
     val filteredItems =
         if (state.mode == BatchMode.MANUAL_SCAN) {
             when (state.manualFilter) {
                 BatchFilter.ALL -> state.inputItems
-                BatchFilter.MISSING ->
+                BatchFilter.NOT_FOUND ->
                     state.inputItems.filter {
-                        state.sessionMap[it.epcNormalized]?.status == BatchStatus.MISSING
+                        state.sessionMap[it.epcNormalized]?.status == BatchStatus.NOT_FOUND
                     }
                 BatchFilter.UNKNOWN ->
                     state.inputItems.filter {
@@ -174,6 +173,18 @@ fun BatchScreen(
                     modifier = Modifier.fillMaxWidth(),
                     enabled = state.inputItems.isNotEmpty() || state.extras.isNotEmpty(),
                 )
+                Text(
+                    text = "Import supports Memento CSV with columns Name and EPC.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                Text(
+                    text = "Export columns: Name, Status, EPC, UpdatedAt.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                Text(
+                    text = "Status: Unknown (not scanned), Found (seen), NotFound (finished, not seen).",
+                    style = MaterialTheme.typography.bodySmall,
+                )
                 if (state.isImporting) {
                     LoadingState(message = "Importing CSV...")
                 }
@@ -193,8 +204,8 @@ fun BatchScreen(
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     SummaryChip(label = "Total", count = state.summary.total)
-                    SummaryChip(label = "Present", count = state.summary.present)
-                    SummaryChip(label = "Missing", count = state.summary.missing)
+                    SummaryChip(label = "Found", count = state.summary.found)
+                    SummaryChip(label = "Not found", count = state.summary.notFound)
                     SummaryChip(label = "Unknown", count = state.summary.unknown)
                     SummaryChip(label = "Extra", count = state.summary.extra)
                 }
@@ -228,7 +239,6 @@ fun BatchScreen(
                 SweepPanel(
                     state = state,
                     onDurationChange = viewModel::setSweepDuration,
-                    onIncludeExtrasChange = viewModel::setIncludeExtrasInExport,
                     onStart = viewModel::startSweep,
                     onStop = viewModel::stopSweep,
                 )
@@ -239,7 +249,8 @@ fun BatchScreen(
                     state = state,
                     dateFormatter = dateFormatter,
                     onScan = viewModel::scanOnce,
-                    onMarkMissing = viewModel::markMissingCurrent,
+                    onMarkNotFound = viewModel::markNotFoundCurrent,
+                    onFinishSession = viewModel::finishManualSession,
                     onUndo = viewModel::undoLast,
                     onFilterChange = viewModel::setManualFilter,
                 )
@@ -313,7 +324,6 @@ fun BatchScreen(
 private fun SweepPanel(
     state: BatchUiState,
     onDurationChange: (Long) -> Unit,
-    onIncludeExtrasChange: (Boolean) -> Unit,
     onStart: () -> Unit,
     onStop: () -> Unit,
 ) {
@@ -332,16 +342,6 @@ private fun SweepPanel(
                     enabled = !state.sweepRunning,
                 )
             }
-        }
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Checkbox(
-                checked = state.includeExtrasInExport,
-                onCheckedChange = onIncludeExtrasChange,
-            )
-            Text(text = "Include EXTRA tags in export")
         }
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -371,7 +371,8 @@ private fun ManualPanel(
     state: BatchUiState,
     dateFormatter: DateFormat,
     onScan: () -> Unit,
-    onMarkMissing: () -> Unit,
+    onMarkNotFound: () -> Unit,
+    onFinishSession: () -> Unit,
     onUndo: () -> Unit,
     onFilterChange: (BatchFilter) -> Unit,
 ) {
@@ -387,7 +388,7 @@ private fun ManualPanel(
             )
             val session = state.sessionMap[current]
             val updatedAt = session?.updatedAt
-            if (updatedAt != null && updatedAt > 0) {
+            if (updatedAt != null) {
                 Text(
                     text = "Updated: ${dateFormatter.format(Date(updatedAt))}",
                     style = MaterialTheme.typography.bodySmall,
@@ -415,12 +416,18 @@ private fun ManualPanel(
                 enabled = !state.isScanning && !state.sweepRunning,
             )
             SecondaryButton(
-                text = "Mark missing",
-                onClick = onMarkMissing,
+                text = "Mark not found",
+                onClick = onMarkNotFound,
                 modifier = Modifier.weight(1f),
                 enabled = current != null,
             )
         }
+        SecondaryButton(
+            text = "Finish session",
+            onClick = onFinishSession,
+            modifier = Modifier.fillMaxWidth(),
+            enabled = state.summary.unknown > 0,
+        )
         SecondaryButton(
             text = "Undo last",
             onClick = onUndo,
@@ -441,9 +448,9 @@ private fun ManualPanel(
                 label = { Text(text = "All") },
             )
             FilterChip(
-                selected = state.manualFilter == BatchFilter.MISSING,
-                onClick = { onFilterChange(BatchFilter.MISSING) },
-                label = { Text(text = "Missing") },
+                selected = state.manualFilter == BatchFilter.NOT_FOUND,
+                onClick = { onFilterChange(BatchFilter.NOT_FOUND) },
+                label = { Text(text = "Not found") },
             )
             FilterChip(
                 selected = state.manualFilter == BatchFilter.UNKNOWN,
@@ -519,29 +526,25 @@ private fun BatchItemRow(
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
+            val nameText = item.name.ifBlank { "--" }
+            Text(
+                text = nameText,
+                style = MaterialTheme.typography.bodyMedium,
+            )
             Text(
                 text = item.epcNormalized,
-                style = MaterialTheme.typography.bodyMedium,
+                style = MaterialTheme.typography.bodySmall,
                 fontFamily = FontFamily.Monospace,
             )
-            item.name?.let { name ->
-                Text(text = name, style = MaterialTheme.typography.bodySmall)
-            }
-            item.note?.let { note ->
-                Text(text = note, style = MaterialTheme.typography.bodySmall)
-            }
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 StatusBadge(status = session?.status ?: BatchStatus.UNKNOWN)
-                val lastSeen =
-                    session?.lastSeenAt?.let { dateFormatter.format(Date(it)) }
-                        ?: session?.updatedAt?.let { dateFormatter.format(Date(it)) }
-                        ?: "--"
+                val updatedAt = session?.updatedAt?.let { dateFormatter.format(Date(it)) } ?: "--"
                 Text(
-                    text = lastSeen,
+                    text = "Updated: $updatedAt",
                     style = MaterialTheme.typography.labelSmall,
                 )
             }
@@ -576,15 +579,15 @@ private fun StatusBadge(status: BatchStatus) {
                     MaterialTheme.colorScheme.tertiaryContainer,
                     MaterialTheme.colorScheme.onTertiaryContainer,
                 )
-            BatchStatus.PRESENT ->
+            BatchStatus.FOUND ->
                 Triple(
-                    "Present",
+                    "Found",
                     MaterialTheme.colorScheme.primaryContainer,
                     MaterialTheme.colorScheme.onPrimaryContainer,
                 )
-            BatchStatus.MISSING ->
+            BatchStatus.NOT_FOUND ->
                 Triple(
-                    "Missing",
+                    "Not found",
                     MaterialTheme.colorScheme.errorContainer,
                     MaterialTheme.colorScheme.onErrorContainer,
                 )

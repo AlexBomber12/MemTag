@@ -7,8 +7,8 @@ import org.junit.Test
 
 class BatchCsvParserTest {
     @Test
-    fun parsesHeaderAndNormalizesEpc() {
-        val csv = "\uFEFFEPC,Name,Note\r\nab cd 12 34,Widget,Fragile\r\n"
+    fun parsesMementoCsvWithCyrillicName() {
+        val csv = "\uFEFFName,EPC\r\nПример,ab cd 12 34\r\n"
 
         val result = BatchCsvParser.parse(csv)
 
@@ -16,8 +16,7 @@ class BatchCsvParserTest {
             listOf(
                 BatchInputItem(
                     epcNormalized = "ABCD1234",
-                    name = "Widget",
-                    note = "Fragile",
+                    name = "Пример",
                 ),
             ),
             result.items,
@@ -27,34 +26,53 @@ class BatchCsvParserTest {
     }
 
     @Test
-    fun usesFirstNonEmptyCellAndDedupes() {
-        val csv =
-            """
-            ABCDEF12
-            ABCDEF12
-            , , abcdef12 , extra
-            """.trimIndent()
+    fun ignoresExtraColumns() {
+        val csv = "Name,EPC,Ignored\r\nWidget,ABCDEF12,extra\r\n"
 
         val result = BatchCsvParser.parse(csv)
 
-        assertEquals(listOf(BatchInputItem(epcNormalized = "ABCDEF12", name = null, note = null)), result.items)
-        assertEquals(2, result.duplicateCount)
+        assertEquals(listOf(BatchInputItem(epcNormalized = "ABCDEF12", name = "Widget")), result.items)
         assertTrue(result.invalidRows.isEmpty())
+        assertEquals(0, result.duplicateCount)
     }
 
     @Test
     fun tracksInvalidRows() {
         val csv =
             """
-            EPC
+            Name,EPC
             NOTHEX
-            1234
-            ABCDEF12
+            Widget,1234
+            Widget,ABCDEF12
             """.trimIndent()
 
         val result = BatchCsvParser.parse(csv)
 
-        assertEquals(listOf(BatchInputItem(epcNormalized = "ABCDEF12", name = null, note = null)), result.items)
+        assertEquals(listOf(BatchInputItem(epcNormalized = "ABCDEF12", name = "Widget")), result.items)
         assertEquals(listOf(2, 3), result.invalidRows)
+    }
+
+    @Test
+    fun failsWhenMissingEpcColumn() {
+        val csv = "Name,Label\r\nWidget,ABCDEF12\r\n"
+
+        val error =
+            runCatching {
+                BatchCsvParser.parse(csv)
+            }.exceptionOrNull()
+
+        assertEquals("CSV must contain columns: Name, EPC", error?.message)
+    }
+
+    @Test
+    fun failsWhenMissingNameColumn() {
+        val csv = "EPC,Label\r\nABCDEF12,Widget\r\n"
+
+        val error =
+            runCatching {
+                BatchCsvParser.parse(csv)
+            }.exceptionOrNull()
+
+        assertEquals("CSV must contain columns: Name, EPC", error?.message)
     }
 }
