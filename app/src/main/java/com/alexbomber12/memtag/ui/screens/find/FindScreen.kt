@@ -9,12 +9,14 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
@@ -56,176 +58,189 @@ fun FindScreen(
     val uiState by viewModel.uiState.collectAsState()
     var debugExpanded by rememberSaveable { mutableStateOf(false) }
 
-    Column(
-        modifier =
-            Modifier
-                .fillMaxSize()
-                .padding(16.dp),
+    DisposableEffect(Unit) {
+        onDispose { viewModel.stopFind() }
+    }
+    LaunchedEffect(initialEpc, autoStart) {
+        if (initialEpc.isNotBlank()) {
+            viewModel.applyExternalEpc(initialEpc, autoStart)
+        }
+    }
+    LaunchedEffect(hardwareActions) {
+        hardwareActions.collect { action ->
+            if (action == HardwareAction.Rfid) {
+                viewModel.toggleFind()
+            }
+        }
+    }
+    val isValid = uiState.epcInput.isBlank() || EpcValidator.isValidEpcHex(uiState.epcInput)
+    val showInputError = uiState.epcInput.isNotBlank() && !isValid
+    val targetValue = uiState.targetEpcNormalized ?: uiState.epcInput.takeIf { it.isNotBlank() }
+    val targetLabel = formatTargetLabel(targetValue)
+    val errorMessage = uiState.lastErrorMessage?.takeIf { it.isNotBlank() }
+    val statusLine =
+        when {
+            !uiState.isRunning -> "Idle. Press trigger or tap Start."
+            uiState.targetEpcNormalized.isNullOrBlank() -> "Running. Set a target EPC to use proximity."
+            uiState.proximity <= 0 -> "Running. No signal yet, move closer to the tag."
+            else -> "Running. Signal detected."
+        }
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        DisposableEffect(Unit) {
-            onDispose { viewModel.stopFind() }
-        }
-        LaunchedEffect(initialEpc, autoStart) {
-            if (initialEpc.isNotBlank()) {
-                viewModel.applyExternalEpc(initialEpc, autoStart)
-            }
-        }
-        LaunchedEffect(hardwareActions) {
-            hardwareActions.collect { action ->
-                if (action == HardwareAction.Rfid) {
-                    viewModel.toggleFind()
-                }
-            }
-        }
-        val isValid = uiState.epcInput.isBlank() || EpcValidator.isValidEpcHex(uiState.epcInput)
-        val showInputError = uiState.epcInput.isNotBlank() && !isValid
-        val statusLabel =
-            when (uiState.status) {
-                FindStatus.Idle -> "Idle"
-                FindStatus.Running -> "Running"
-                FindStatus.NoSignal -> "No signal"
-                is FindStatus.Error -> "Error"
-            }
-
-        AppCard(title = "RFID") {
-            OutlinedTextField(
-                value = uiState.epcInput,
-                onValueChange = viewModel::onEpcInputChange,
+        item {
+            AppCard(
+                title = "RFID",
                 modifier = Modifier.fillMaxWidth(),
-                label = { Text(text = "RFID") },
-                placeholder = { Text(text = "RFID (hex)") },
-                singleLine = true,
-                enabled = !uiState.isRunning,
-                isError = showInputError,
-                supportingText = {
-                    val message =
-                        if (showInputError) {
-                            "Invalid EPC. Use 8-64 hex characters."
-                        } else {
-                            "Paste or type the tag EPC."
-                        }
-                    Text(text = message)
-                },
-            )
-            if (uiState.lastScannedEpc.isNotBlank()) {
-                TextButton(onClick = viewModel::useLastScannedEpc, enabled = !uiState.isRunning) {
-                    Text(text = "Use last scanned RFID")
-                }
-                Text(
-                    text = uiState.lastScannedEpc,
-                    style = MaterialTheme.typography.bodySmall,
+            ) {
+                OutlinedTextField(
+                    value = uiState.epcInput,
+                    onValueChange = viewModel::onEpcInputChange,
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text(text = "RFID") },
+                    placeholder = { Text(text = "RFID (hex)") },
+                    singleLine = true,
+                    enabled = !uiState.isRunning,
+                    isError = showInputError,
+                    supportingText = {
+                        val message =
+                            if (showInputError) {
+                                "Invalid EPC. Use 8-64 hex characters."
+                            } else {
+                                "Paste or type the tag EPC."
+                            }
+                        Text(text = message)
+                    },
                 )
-            }
-        }
-
-        AppCard(title = "Proximity") {
-            val isNearbyMode = uiState.targetEpcNormalized.isNullOrBlank()
-            val canSetTargetFromLastSeen =
-                uiState.lastSeenAnyEpc != null &&
-                    (isNearbyMode || uiState.matchStatus == MatchStatus.NotMatchedYet)
-
-            ProximityMeter(
-                proximity = uiState.proximity,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            if (isNearbyMode) {
-                Text(
-                    text = "Mode: Nearby tag",
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-            }
-            Text(
-                text = "Status: $statusLabel",
-                style = MaterialTheme.typography.bodyMedium,
-            )
-            if (uiState.status is FindStatus.Error) {
-                Text(
-                    text = uiState.lastErrorMessage.orEmpty(),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.error,
-                )
-            }
-            when {
-                uiState.isRunning && isNearbyMode && uiState.tagsSeenAny == 0 -> {
+                if (uiState.lastScannedEpc.isNotBlank()) {
+                    TextButton(onClick = viewModel::useLastScannedEpc, enabled = !uiState.isRunning) {
+                        Text(text = "Use last scanned RFID")
+                    }
                     Text(
-                        text = "No tags seen yet, bring a tag closer.",
+                        text = uiState.lastScannedEpc,
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }
+            }
+        }
 
-                uiState.isRunning &&
+        item {
+            AppCard(
+                title = "Proximity",
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                val isNearbyMode = uiState.targetEpcNormalized.isNullOrBlank()
+                val canSetTargetFromLastSeen =
+                    uiState.lastSeenAnyEpc != null &&
+                        (isNearbyMode || uiState.matchStatus == MatchStatus.NotMatchedYet)
+
+                Text(
+                    text = statusLine,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Text(
+                    text = "Target: $targetLabel",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (errorMessage != null) {
+                    ErrorBanner(
+                        message = errorMessage,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    PrimaryButton(
+                        text = if (uiState.isRunning) "Stop" else "Start",
+                        onClick = viewModel::toggleFind,
+                        modifier = Modifier.weight(1f),
+                        enabled = uiState.isRunning || isValid,
+                    )
+                    if (errorMessage != null) {
+                        SecondaryButton(
+                            text = "Clear error",
+                            onClick = viewModel::clearError,
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                }
+                ProximityMeter(
+                    proximity = uiState.proximity,
+                    isRunning = uiState.isRunning,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                if (uiState.isRunning &&
                     !isNearbyMode &&
                     uiState.tagsSeenMatched == 0 &&
-                    uiState.tagsSeenAny > 0 -> {
+                    uiState.tagsSeenAny > 0
+                ) {
                     Text(
                         text = "Target not seen yet, but tags nearby: ${uiState.lastSeenAnyEpc.orEmpty()}",
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }
-            }
-            if (canSetTargetFromLastSeen) {
-                SecondaryButton(
-                    text = "Set target from last seen tag",
-                    onClick = viewModel::setTargetFromLastSeenAny,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            }
-        }
-
-        if (uiState.debugOverlayEnabled) {
-            AppCard(title = "Find Debug") {
-                TextButton(
-                    onClick = { debugExpanded = !debugExpanded },
-                    modifier = Modifier.align(Alignment.End),
-                ) {
-                    Text(text = if (debugExpanded) "Hide details" else "Show details")
-                }
-                AnimatedVisibility(visible = debugExpanded) {
-                    DebugPanel(
-                        uiState = uiState,
-                        onDisableFilterChange = viewModel::setDebugDisableFilter,
+                if (canSetTargetFromLastSeen) {
+                    SecondaryButton(
+                        text = "Set target from last seen tag",
+                        onClick = viewModel::setTargetFromLastSeenAny,
+                        modifier = Modifier.fillMaxWidth(),
                     )
                 }
             }
         }
 
-        AppCard(title = "Controls") {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                PrimaryButton(
-                    text = "Start",
-                    onClick = viewModel::startFind,
-                    modifier = Modifier.weight(1f),
-                    enabled = isValid && !uiState.isRunning,
-                )
-                SecondaryButton(
-                    text = "Stop",
-                    onClick = viewModel::stopFind,
-                    modifier = Modifier.weight(1f),
-                    enabled = uiState.isRunning,
-                )
-            }
-            ToggleRow(
-                title = "Sound",
-                description = "Ticking audio feedback",
-                checked = uiState.soundEnabled,
-                onCheckedChange = viewModel::setSoundEnabled,
-            )
-            ToggleRow(
-                title = "Haptic",
-                description = "Vibration pulses",
-                checked = uiState.hapticEnabled,
-                onCheckedChange = viewModel::setHapticEnabled,
-            )
-            if (showBackToBatch) {
-                SecondaryButton(
-                    text = "Back to Batch",
-                    onClick = onBackToBatch,
+        if (uiState.debugOverlayEnabled) {
+            item {
+                AppCard(
+                    title = "Find Debug",
                     modifier = Modifier.fillMaxWidth(),
+                ) {
+                    TextButton(
+                        onClick = { debugExpanded = !debugExpanded },
+                        modifier = Modifier.align(Alignment.End),
+                    ) {
+                        Text(text = if (debugExpanded) "Hide details" else "Show details")
+                    }
+                    AnimatedVisibility(visible = debugExpanded) {
+                        DebugPanel(
+                            uiState = uiState,
+                            onDisableFilterChange = viewModel::setDebugDisableFilter,
+                        )
+                    }
+                }
+            }
+        }
+
+        item {
+            AppCard(
+                title = "Controls",
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                ToggleRow(
+                    title = "Sound",
+                    description = "Ticking audio feedback",
+                    checked = uiState.soundEnabled,
+                    onCheckedChange = viewModel::setSoundEnabled,
                 )
+                ToggleRow(
+                    title = "Haptic",
+                    description = "Vibration pulses",
+                    checked = uiState.hapticEnabled,
+                    onCheckedChange = viewModel::setHapticEnabled,
+                )
+                if (showBackToBatch) {
+                    SecondaryButton(
+                        text = "Back to Batch",
+                        onClick = onBackToBatch,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
             }
         }
     }
@@ -234,6 +249,7 @@ fun FindScreen(
 @Composable
 private fun ProximityMeter(
     proximity: Int,
+    isRunning: Boolean,
     modifier: Modifier = Modifier,
 ) {
     val animatedProgress by
@@ -244,10 +260,20 @@ private fun ProximityMeter(
         )
     val displayValue = (animatedProgress * 100f).roundToInt().coerceIn(0, 100)
     val barColor =
-        when {
-            displayValue < 35 -> MaterialTheme.colorScheme.error
-            displayValue < 70 -> MaterialTheme.colorScheme.tertiary
-            else -> MaterialTheme.colorScheme.primary
+        if (!isRunning) {
+            MaterialTheme.colorScheme.outline
+        } else {
+            when {
+                displayValue < 35 -> MaterialTheme.colorScheme.error
+                displayValue < 70 -> MaterialTheme.colorScheme.tertiary
+                else -> MaterialTheme.colorScheme.primary
+            }
+        }
+    val labelColor =
+        if (!isRunning) {
+            MaterialTheme.colorScheme.onSurfaceVariant
+        } else {
+            barColor
         }
     Column(
         modifier = modifier,
@@ -257,7 +283,7 @@ private fun ProximityMeter(
         Text(
             text = displayValue.toString(),
             style = MaterialTheme.typography.displaySmall,
-            color = barColor,
+            color = labelColor,
         )
         EqualizerBar(
             progress = animatedProgress,
@@ -293,6 +319,37 @@ private fun EqualizerBar(
                     .background(color),
         )
     }
+}
+
+@Composable
+private fun ErrorBanner(
+    message: String,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        modifier =
+            modifier
+                .clip(MaterialTheme.shapes.small)
+                .background(MaterialTheme.colorScheme.errorContainer)
+                .padding(12.dp),
+    ) {
+        Text(
+            text = message,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onErrorContainer,
+        )
+    }
+}
+
+private fun formatTargetLabel(value: String?): String {
+    val epc = value?.trim().orEmpty()
+    if (epc.isBlank()) {
+        return "not set"
+    }
+    if (epc.length <= 12) {
+        return epc
+    }
+    return "${epc.take(6)}...${epc.takeLast(4)}"
 }
 
 @Composable
