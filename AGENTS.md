@@ -49,3 +49,9 @@
 - Navigation works across all screens.
 - Settings are persisted and restored.
 - CI runs Windows-friendly Gradle commands and passes.
+
+## Codex CI Rule
+- After any code changes, run: `.\scripts\android-ci.ps1 -Mode ci`
+- If it fails, fix and rerun until it passes.
+- Do not claim success unless it exits with code 0.
+- For pre-push local verification you may run: `.\scripts\android-ci.ps1 -Mode full`
