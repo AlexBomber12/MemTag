@@ -24,8 +24,17 @@ jobs:
             platform-tools
             platforms;android-36
             build-tools;36.0.0
-      - name: Build, unit tests, lint
-        run: .\gradlew.bat --no-daemon clean :app:assembleMockDebug :app:testMockDebugUnitTest :app:lintMockDebug
+
+      - name: Build, unit tests, lint, ktlint
+        shell: pwsh
+        run: .\scripts\android-ci.ps1 -Mode ci -LogPath artifacts\ci.log
+
+      - name: Upload CI log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-log
+          path: artifacts/ci.log
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
