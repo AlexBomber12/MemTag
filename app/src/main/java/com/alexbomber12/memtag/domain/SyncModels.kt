@@ -10,7 +10,14 @@ data class SyncResult(
     val durationMs: Long,
     val pagingStrategy: PagingStrategy?,
     val errorMessage: String?,
-)
+) {
+    val downloadedCount: Int
+        get() = fetchedCount
+    val savedCount: Int
+        get() = storedCount
+    val ignoredCount: Int
+        get() = skippedCount
+}
 
 data class SyncProgress(
     val stage: SyncStage,
@@ -18,7 +25,14 @@ data class SyncProgress(
     val storedCount: Int,
     val skippedCount: Int,
     val message: String? = null,
-)
+) {
+    val downloadedCount: Int
+        get() = fetchedCount
+    val savedCount: Int
+        get() = storedCount
+    val ignoredCount: Int
+        get() = skippedCount
+}
 
 data class SyncState(
     val libraryId: String,
