@@ -7,6 +7,21 @@ import org.junit.Test
 
 class ProximityCalculatorTest {
     @Test
+    fun strongerRssiProducesHigherScore() {
+        val low =
+            ProximityCalculator(
+                targetEpc = "E2000017221101441890ABCD",
+            ).onReading(reading(-75, 0L)) ?: error("Missing snapshot")
+
+        val high =
+            ProximityCalculator(
+                targetEpc = "E2000017221101441890ABCD",
+            ).onReading(reading(-55, 0L)) ?: error("Missing snapshot")
+
+        assertTrue(high.rawScore > low.rawScore)
+    }
+
+    @Test
     fun increasesAsRssiAndHitRateImprove() {
         val calculator =
             ProximityCalculator(
@@ -65,6 +80,33 @@ class ProximityCalculatorTest {
         assertTrue(afterGap < steady)
         assertTrue(afterGap > 0f)
         assertTrue(later < afterGap)
+    }
+
+    @Test
+    fun wakeUpBoostsFirstHitAfterIdle() {
+        val calculator =
+            ProximityCalculator(
+                targetEpc = "E2000017221101441890ABCD",
+                config =
+                    ProximityCalculator.Config(
+                        windowMs = 400L,
+                        hitsMax = 4,
+                        alpha = 0.3f,
+                        noSignalMs = 400L,
+                        decayPerSecond = 0.3f,
+                        wakeUpIdleMs = 1000L,
+                        wakeUpBoost = 1.4f,
+                    ),
+            )
+
+        calculator.onReading(reading(-70, 0L))
+        val afterDecay = calculator.onTick(3000L).smoothedScore
+        val wake =
+            calculator.onReading(reading(-70, 3200L)) ?: error("Missing snapshot")
+
+        assertTrue(afterDecay < 0.05f)
+        assertTrue(wake.smoothedScore > 0.1f)
+        assertTrue(wake.lastWakeUpIdleMs != null)
     }
 
     @Test

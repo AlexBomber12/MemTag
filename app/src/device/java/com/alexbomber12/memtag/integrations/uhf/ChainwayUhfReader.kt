@@ -1097,6 +1097,86 @@ class ChainwayUhfReader(
         }
     }
 
+    override suspend fun applyFindProfile(
+        targetEpcHex: String?,
+        useHardwareFilter: Boolean,
+    ): Result<Unit> =
+        mutex.withLock {
+            if (!initialized) {
+                return@withLock Result.failure(UhfError.NotInitialized.asException())
+            }
+            val instance = reader ?: return@withLock Result.failure(UhfError.HardwareUnavailable.asException())
+            val normalizedTarget =
+                targetEpcHex
+                    ?.takeIf { it.isNotBlank() }
+                    ?.let { runCatching { EpcNormalizer.normalize(it) }.getOrNull() }
+            val filterTarget = normalizedTarget
+            val ptrBits = if (filterTarget != null) FIND_FILTER_PTR_BITS else 0
+            val cntBits = if (filterTarget != null) filterTarget.length * 4 else 0
+            val filterEnabled = useHardwareFilter && filterTarget != null
+            withContext(Dispatchers.IO) {
+                var firstError: Throwable? = null
+                val epcModeOk: Boolean
+                val filterOk: Boolean
+                uhfMutex.withLock {
+                    val epcModeResult = runCatching { instance.setEPCMode() }
+                    if (epcModeResult.isFailure && firstError == null) {
+                        firstError = epcModeResult.exceptionOrNull()
+                    }
+                    epcModeOk = epcModeResult.getOrDefault(false)
+                    val clearResult =
+                        runCatching { instance.setFilter(IUHF.Bank_EPC, 0, 0, "") }
+                    if (clearResult.isFailure && firstError == null) {
+                        firstError = clearResult.exceptionOrNull()
+                    }
+                    val clearOk = clearResult.getOrDefault(false)
+                    val applyOk =
+                        if (filterEnabled && filterTarget != null) {
+                            val applyResult =
+                                runCatching {
+                                    instance.setFilter(IUHF.Bank_EPC, ptrBits, cntBits, filterTarget)
+                                }
+                            if (applyResult.isFailure && firstError == null) {
+                                firstError = applyResult.exceptionOrNull()
+                            }
+                            applyResult.getOrDefault(false)
+                        } else {
+                            true
+                        }
+                    filterOk = clearOk && applyOk
+                }
+                UhfLogger.i(
+                    "Find RF profile applied: epcModeOk=$epcModeOk " +
+                        "filterOk=$filterOk ptrBits=$ptrBits cntBits=$cntBits",
+                )
+                if (!epcModeOk || !filterOk) {
+                    val message = "Find RF profile failed: epcModeOk=$epcModeOk filterOk=$filterOk"
+                    Result.failure(UhfError.VendorError(message).asException(cause = firstError))
+                } else {
+                    Result.success(Unit)
+                }
+            }
+        }
+
+    override suspend fun clearFindProfile(): Result<Unit> =
+        mutex.withLock {
+            if (!initialized) {
+                return@withLock Result.failure(UhfError.NotInitialized.asException())
+            }
+            val instance = reader ?: return@withLock Result.failure(UhfError.HardwareUnavailable.asException())
+            withContext(Dispatchers.IO) {
+                val filterClearedOk: Boolean
+                uhfMutex.withLock {
+                    filterClearedOk =
+                        runCatching { instance.setFilter(IUHF.Bank_EPC, 0, 0, "") }
+                            .getOrDefault(false)
+                    runCatching { instance.setEPCAndTIDMode() }
+                }
+                UhfLogger.i("Find RF profile cleared: filterClearedOk=$filterClearedOk")
+                Result.success(Unit)
+            }
+        }
+
     override suspend fun runMatrixProbe(): List<MatrixProbeResult> =
         mutex.withLock {
             if (!initialized) {
@@ -1684,5 +1764,7 @@ class ChainwayUhfReader(
         const val MATRIX_READS = 10
         const val MATRIX_READ_DELAY_MS = 100L
         const val BUSY_LOG_THROTTLE_MS = 2_000L
+        const val FIND_FILTER_PTR_WORDS = 2
+        const val FIND_FILTER_PTR_BITS = FIND_FILTER_PTR_WORDS * 16
     }
 }

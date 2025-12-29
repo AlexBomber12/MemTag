@@ -342,6 +342,25 @@ class FakeUhfReader(
             Result.success(result)
         }
 
+    override suspend fun applyFindProfile(
+        targetEpcHex: String?,
+        useHardwareFilter: Boolean,
+    ): Result<Unit> =
+        mutex.withLock {
+            if (!initialized) {
+                return@withLock Result.failure(UhfError.NotInitialized.asException())
+            }
+            Result.success(Unit)
+        }
+
+    override suspend fun clearFindProfile(): Result<Unit> =
+        mutex.withLock {
+            if (!initialized) {
+                return@withLock Result.failure(UhfError.NotInitialized.asException())
+            }
+            Result.success(Unit)
+        }
+
     override suspend fun runMatrixProbe(): List<MatrixProbeResult> =
         mutex.withLock {
             listOf(
