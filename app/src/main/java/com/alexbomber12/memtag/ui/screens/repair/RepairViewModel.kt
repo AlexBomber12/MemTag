@@ -2,7 +2,6 @@ package com.alexbomber12.memtag.ui.screens.repair
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.alexbomber12.memtag.data.settings.AppSettings
 import com.alexbomber12.memtag.data.settings.SettingsStore
 import com.alexbomber12.memtag.db.ActionsLogDao
 import com.alexbomber12.memtag.db.ActionsLogEntity
@@ -29,6 +28,8 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+private const val EXPECTED_MISSING_MESSAGE = "Scan in Lookup to set Expected EPC."
+
 sealed class VerifyWriteStatus {
     data class NotScanned(
         val expectedEpc: String,
@@ -48,29 +49,15 @@ sealed class VerifyWriteStatus {
     ) : VerifyWriteStatus()
 }
 
-enum class ExpectedSource {
-    AutoFind,
-    AutoLookup,
-    Manual,
-    None,
-}
-
-enum class WriteWarning {
-    NOT_SCANNED,
-    MISMATCH,
-}
-
 data class WriteConfirmation(
     val expectedEpc: String,
-    val scannedEpc: String?,
-    val warning: WriteWarning?,
+    val scannedEpc: String,
 )
 
 data class RepairUiState(
     val expectedEpc: String = "",
-    val expectedSource: ExpectedSource = ExpectedSource.None,
     val scannedEpc: String? = null,
-    val status: VerifyWriteStatus = VerifyWriteStatus.Invalid("Expected EPC is required."),
+    val status: VerifyWriteStatus = VerifyWriteStatus.Invalid(EXPECTED_MISSING_MESSAGE),
     val isReading: Boolean = false,
     val isScanningQr: Boolean = false,
     val isWriting: Boolean = false,
@@ -92,8 +79,6 @@ class RepairViewModel(
     val uiState: StateFlow<RepairUiState> = mutableState
 
     private var operationJob: Job? = null
-    private var expectedEditedByUser = false
-    private var latestSettings: AppSettings = AppSettings()
 
     init {
         viewModelScope.launch {
@@ -101,26 +86,14 @@ class RepairViewModel(
         }
         viewModelScope.launch {
             settingsStore.settingsFlow.collect { settings ->
-                latestSettings = settings
                 updateStateWithStatus { state ->
-                    val selection =
-                        if (shouldAutoSelect(state)) {
-                            selectExpectedFromSettings(settings)
-                        } else {
-                            null
-                        }
-                    val expectedEpc = selection?.epc ?: state.expectedEpc
-                    val expectedSource =
-                        when {
-                            selection != null -> selection.source
-                            expectedEditedByUser && expectedEpc.isNotBlank() -> ExpectedSource.Manual
-                            expectedEpc.isBlank() -> ExpectedSource.None
-                            else -> state.expectedSource
-                        }
+                    val expectedEpc = settings.lastScannedEpc
+                    val shouldClearFeedback = expectedEpc != state.expectedEpc
                     state.copy(
                         expectedEpc = expectedEpc,
-                        expectedSource = expectedSource,
-                        confirmation = if (selection != null) null else state.confirmation,
+                        confirmation = null,
+                        message = if (shouldClearFeedback) null else state.message,
+                        errorMessage = if (shouldClearFeedback) null else state.errorMessage,
                     )
                 }
             }
@@ -138,34 +111,11 @@ class RepairViewModel(
         }
     }
 
-    fun onExpectedEpcChange(value: String) {
-        if (value.isBlank()) {
-            expectedEditedByUser = false
-            applyAutoExpected(clearFeedback = true)
-            return
-        }
-        expectedEditedByUser = true
-        updateStateWithStatus { state ->
-            state.copy(
-                expectedEpc = value,
-                expectedSource = ExpectedSource.Manual,
-                confirmation = null,
-                message = null,
-                errorMessage = null,
-            )
-        }
-    }
-
-    fun resetExpectedToAuto() {
-        expectedEditedByUser = false
-        applyAutoExpected(clearFeedback = true)
-    }
-
     fun scanRfid() {
         val state = uiState.value
-        if (operationJob != null || state.confirmation != null) {
-            if (state.isReading || state.isScanningQr) {
-                UhfLogger.i("verifyWrite scan ignored: already scanning")
+        if (operationJob != null || state.confirmation != null || isBusy(state)) {
+            if (state.isReading || state.isScanningQr || state.isWriting || state.isVerifying) {
+                UhfLogger.i("verifyWrite scan ignored: already busy")
             }
             return
         }
@@ -214,9 +164,9 @@ class RepairViewModel(
 
     fun scanQr() {
         val state = uiState.value
-        if (operationJob != null || state.confirmation != null) {
-            if (state.isReading || state.isScanningQr) {
-                UhfLogger.i("verifyWrite scan ignored: already scanning")
+        if (operationJob != null || state.confirmation != null || isBusy(state)) {
+            if (state.isReading || state.isScanningQr || state.isWriting || state.isVerifying) {
+                UhfLogger.i("verifyWrite scan ignored: already busy")
             }
             return
         }
@@ -264,39 +214,17 @@ class RepairViewModel(
         }
         val status = evaluateStatus(state.expectedEpc, state.scannedEpc)
         mutableState.update { it.copy(status = status) }
-        when (status) {
-            is VerifyWriteStatus.Invalid -> return
-            is VerifyWriteStatus.Ok -> {
-                mutableState.update { it.copy(message = "Tag already matches expected EPC.") }
-                return
-            }
-            is VerifyWriteStatus.NotScanned -> {
-                mutableState.update {
-                    it.copy(
-                        confirmation =
-                            WriteConfirmation(
-                                expectedEpc = status.expectedEpc,
-                                scannedEpc = null,
-                                warning = WriteWarning.NOT_SCANNED,
-                            ),
-                        message = null,
-                        errorMessage = null,
-                    )
-                }
-            }
-            is VerifyWriteStatus.Mismatch -> {
-                mutableState.update {
-                    it.copy(
-                        confirmation =
-                            WriteConfirmation(
-                                expectedEpc = status.expectedEpc,
-                                scannedEpc = status.scannedEpc,
-                                warning = WriteWarning.MISMATCH,
-                            ),
-                        message = null,
-                        errorMessage = null,
-                    )
-                }
+        if (status is VerifyWriteStatus.Mismatch) {
+            mutableState.update {
+                it.copy(
+                    confirmation =
+                        WriteConfirmation(
+                            expectedEpc = status.expectedEpc,
+                            scannedEpc = status.scannedEpc,
+                        ),
+                    message = null,
+                    errorMessage = null,
+                )
             }
         }
     }
@@ -307,7 +235,7 @@ class RepairViewModel(
 
     fun confirmWrite() {
         val confirmation = uiState.value.confirmation ?: return
-        if (operationJob != null) {
+        if (operationJob != null || isBusy(uiState.value)) {
             return
         }
         mutableState.update { it.copy(confirmation = null) }
@@ -472,25 +400,6 @@ class RepairViewModel(
         mutableState.update { it.copy(logs = entries.map { entry -> entry.toDomain() }) }
     }
 
-    private fun applyAutoExpected(clearFeedback: Boolean) {
-        val selection = selectExpectedFromSettings(latestSettings)
-        updateStateWithStatus { state ->
-            val expectedEpc = selection?.epc.orEmpty()
-            val expectedSource = selection?.source ?: ExpectedSource.None
-            val updated =
-                state.copy(
-                    expectedEpc = expectedEpc,
-                    expectedSource = expectedSource,
-                    confirmation = null,
-                )
-            if (clearFeedback) {
-                updated.copy(message = null, errorMessage = null)
-            } else {
-                updated
-            }
-        }
-    }
-
     private fun updateStateWithStatus(transform: (RepairUiState) -> RepairUiState) {
         var snapshot: RepairUiState? = null
         mutableState.update { state ->
@@ -500,26 +409,6 @@ class RepairViewModel(
             withStatus
         }
         snapshot?.let { logComparison(it) }
-    }
-
-    private fun selectExpectedFromSettings(settings: AppSettings): ExpectedSelection? {
-        val findCandidate = settings.lastFindTargetEpc.takeIf { it.isNotBlank() }
-        val lookupCandidate = settings.lastScannedEpc.takeIf { it.isNotBlank() }
-        return when {
-            findCandidate != null &&
-                (settings.lastFindTargetEpcAt >= settings.lastScannedEpcAt || lookupCandidate == null) ->
-                ExpectedSelection(findCandidate, ExpectedSource.AutoFind)
-            lookupCandidate != null ->
-                ExpectedSelection(lookupCandidate, ExpectedSource.AutoLookup)
-            else -> null
-        }
-    }
-
-    private fun shouldAutoSelect(state: RepairUiState): Boolean {
-        if (expectedEditedByUser) {
-            return false
-        }
-        return state.expectedEpc.isBlank() || state.expectedSource.isAuto()
     }
 
     private fun clearScanFlags() {
@@ -537,8 +426,7 @@ class RepairViewModel(
         val scannedLabel = state.scannedEpc?.ifBlank { "--" } ?: "--"
         val isMatch = state.status is VerifyWriteStatus.Ok
         UhfLogger.i(
-            "verifyWrite expectedSource=${state.expectedSource} " +
-                "expected=$expectedLabel scanned=$scannedLabel match=$isMatch",
+            "verifyWrite expected=$expectedLabel scanned=$scannedLabel match=$isMatch",
         )
     }
 
@@ -547,7 +435,7 @@ class RepairViewModel(
         scannedEpc: String?,
     ): VerifyWriteStatus {
         if (expectedEpc.isBlank()) {
-            return VerifyWriteStatus.Invalid("Expected EPC is required.")
+            return VerifyWriteStatus.Invalid(EXPECTED_MISSING_MESSAGE)
         }
         val normalizedExpected =
             runCatching { EpcNormalizer.normalize(expectedEpc) }.getOrElse { error ->
@@ -565,10 +453,6 @@ class RepairViewModel(
         } else {
             VerifyWriteStatus.Mismatch(expectedEpc = normalizedExpected, scannedEpc = normalizedScanned)
         }
-    }
-
-    private fun ExpectedSource.isAuto(): Boolean {
-        return this == ExpectedSource.AutoFind || this == ExpectedSource.AutoLookup || this == ExpectedSource.None
     }
 
     private fun normalizedExpectedOrNull(expectedEpc: String): String? {
@@ -646,11 +530,6 @@ class RepairViewModel(
     private fun isBusy(state: RepairUiState): Boolean {
         return state.isReading || state.isScanningQr || state.isWriting || state.isVerifying
     }
-
-    private data class ExpectedSelection(
-        val epc: String,
-        val source: ExpectedSource,
-    )
 
     private companion object {
         const val READ_TIMEOUT_MS = 4_000L

@@ -37,9 +37,10 @@ class RepairViewModelTest {
             val reader = FakeUhfReader(dispatcher = mainDispatcherRule.dispatcher)
             reader.nextReadResult = Result.success("E2000017221101441890ABCD")
             val logs = FakeActionsLogDao()
-            val viewModel = createViewModel(reader, logs)
+            val settingsStore = FakeSettingsStore(AppSettings(lastScannedEpc = "E2000017221101441890ABCD"))
+            val viewModel = createViewModel(reader, logs, settingsStore = settingsStore)
 
-            viewModel.onExpectedEpcChange("E2000017221101441890ABCD")
+            advanceUntilIdle()
             viewModel.scanRfid()
             advanceUntilIdle()
 
@@ -54,9 +55,10 @@ class RepairViewModelTest {
             val reader = FakeUhfReader(dispatcher = mainDispatcherRule.dispatcher)
             reader.nextReadResult = Result.success("E2000017221101441890ABCE")
             val logs = FakeActionsLogDao()
-            val viewModel = createViewModel(reader, logs)
+            val settingsStore = FakeSettingsStore(AppSettings(lastScannedEpc = "E2000017221101441890ABCD"))
+            val viewModel = createViewModel(reader, logs, settingsStore = settingsStore)
 
-            viewModel.onExpectedEpcChange("E2000017221101441890ABCD")
+            advanceUntilIdle()
             viewModel.scanRfid()
             advanceUntilIdle()
 
@@ -72,19 +74,19 @@ class RepairViewModelTest {
         }
 
     @Test
-    fun writeWithoutScanShowsWarning() =
+    fun writeWithoutScanDoesNotConfirm() =
         runTest(mainDispatcherRule.dispatcher) {
             val reader = FakeUhfReader(dispatcher = mainDispatcherRule.dispatcher)
             val logs = FakeActionsLogDao()
-            val viewModel = createViewModel(reader, logs)
+            val settingsStore = FakeSettingsStore(AppSettings(lastScannedEpc = "E2000017221101441890ABCD"))
+            val viewModel = createViewModel(reader, logs, settingsStore = settingsStore)
 
-            viewModel.onExpectedEpcChange("E2000017221101441890ABCD")
+            advanceUntilIdle()
             viewModel.startWriteConfirmation()
             advanceUntilIdle()
 
             val confirmation = viewModel.uiState.value.confirmation
-            assertNotNull(confirmation)
-            assertEquals(WriteWarning.NOT_SCANNED, confirmation?.warning)
+            assertEquals(null, confirmation)
         }
 
     @Test
@@ -94,9 +96,10 @@ class RepairViewModelTest {
             reader.nextReadResult = Result.success("E2000017221101441890ABCE")
             reader.writeResultOverride = Result.failure(UhfError.VendorError("Locked").asException())
             val logs = FakeActionsLogDao()
-            val viewModel = createViewModel(reader, logs)
+            val settingsStore = FakeSettingsStore(AppSettings(lastScannedEpc = "E2000017221101441890ABCD"))
+            val viewModel = createViewModel(reader, logs, settingsStore = settingsStore)
 
-            viewModel.onExpectedEpcChange("E2000017221101441890ABCD")
+            advanceUntilIdle()
             viewModel.scanRfid()
             advanceUntilIdle()
 
@@ -118,9 +121,10 @@ class RepairViewModelTest {
             reader.nextReadResult = Result.success("E2000017221101441890ABCE")
             reader.verifyResultOverride = Result.success(false)
             val logs = FakeActionsLogDao()
-            val viewModel = createViewModel(reader, logs)
+            val settingsStore = FakeSettingsStore(AppSettings(lastScannedEpc = "E2000017221101441890ABCD"))
+            val viewModel = createViewModel(reader, logs, settingsStore = settingsStore)
 
-            viewModel.onExpectedEpcChange("E2000017221101441890ABCD")
+            advanceUntilIdle()
             viewModel.scanRfid()
             advanceUntilIdle()
 
@@ -136,7 +140,7 @@ class RepairViewModelTest {
         }
 
     @Test
-    fun autoExpectedPrefersLatestTimestamp() =
+    fun expectedEpcComesFromLookup() =
         runTest(mainDispatcherRule.dispatcher) {
             val reader = FakeUhfReader(dispatcher = mainDispatcherRule.dispatcher)
             val logs = FakeActionsLogDao()
@@ -154,8 +158,7 @@ class RepairViewModelTest {
             advanceUntilIdle()
 
             val state = viewModel.uiState.value
-            assertEquals("E2000017221101441890ABCD", state.expectedEpc)
-            assertEquals(ExpectedSource.AutoFind, state.expectedSource)
+            assertEquals("E2000017221101441890ABCE", state.expectedEpc)
         }
 
     private fun createViewModel(
