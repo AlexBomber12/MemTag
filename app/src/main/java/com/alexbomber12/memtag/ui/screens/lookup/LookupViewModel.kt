@@ -66,7 +66,7 @@ data class LookupUiState(
     val lastSyncState: SyncState? = null,
 )
 
-// Lookup v2: search-first; scan fills query; selection writes lastScannedEpc.
+// Lookup v2: search-first; scan fills query; selection persists to settings.
 @OptIn(FlowPreview::class, ExperimentalCoroutinesApi::class)
 class LookupViewModel(
     private val settingsStore: SettingsStore,
@@ -117,7 +117,7 @@ class LookupViewModel(
     fun selectItem(item: InventoryItem) {
         val epc = item.epcNormalized
         mutableState.update { it.copy(selectedEpc = epc) }
-        persistSelection(epc)
+        persistSelection(item)
     }
 
     fun scanQr() {
@@ -243,7 +243,10 @@ class LookupViewModel(
                     )
                 }
                 if (autoSelected != null && autoSelected != previousSelected) {
-                    persistSelection(autoSelected)
+                    val selectedItem = items.firstOrNull { it.epcNormalized == autoSelected }
+                    if (selectedItem != null) {
+                        persistSelection(selectedItem)
+                    }
                 }
             }
             .onFailure { error ->
@@ -274,8 +277,21 @@ class LookupViewModel(
         return items.firstOrNull { it.epcNormalized == normalized }?.epcNormalized
     }
 
-    private fun persistSelection(epc: String) {
-        persistLastScannedEpc(epc)
+    private fun persistSelection(item: InventoryItem) {
+        viewModelScope.launch {
+            val timestamp = System.currentTimeMillis()
+            settingsStore.update { settings ->
+                settings.copy(
+                    selectedLookupEpc = item.epcNormalized,
+                    selectedLookupName = item.name?.trim().orEmpty(),
+                    selectedLookupStatus = item.status?.trim().orEmpty(),
+                    selectedLookupLocation = item.locationPath?.trim().orEmpty(),
+                    selectedLookupAt = timestamp,
+                    lastScannedEpc = item.epcNormalized,
+                    lastScannedEpcAt = timestamp,
+                )
+            }
+        }
     }
 
     private fun persistLastScannedEpc(epc: String) {

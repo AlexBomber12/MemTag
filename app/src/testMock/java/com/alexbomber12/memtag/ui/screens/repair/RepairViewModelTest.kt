@@ -37,7 +37,7 @@ class RepairViewModelTest {
             val reader = FakeUhfReader(dispatcher = mainDispatcherRule.dispatcher)
             reader.nextReadResult = Result.success("E2000017221101441890ABCD")
             val logs = FakeActionsLogDao()
-            val settingsStore = FakeSettingsStore(AppSettings(lastScannedEpc = "E2000017221101441890ABCD"))
+            val settingsStore = FakeSettingsStore(AppSettings(selectedLookupEpc = "E2000017221101441890ABCD"))
             val viewModel = createViewModel(reader, logs, settingsStore = settingsStore)
 
             advanceUntilIdle()
@@ -55,7 +55,7 @@ class RepairViewModelTest {
             val reader = FakeUhfReader(dispatcher = mainDispatcherRule.dispatcher)
             reader.nextReadResult = Result.success("E2000017221101441890ABCE")
             val logs = FakeActionsLogDao()
-            val settingsStore = FakeSettingsStore(AppSettings(lastScannedEpc = "E2000017221101441890ABCD"))
+            val settingsStore = FakeSettingsStore(AppSettings(selectedLookupEpc = "E2000017221101441890ABCD"))
             val viewModel = createViewModel(reader, logs, settingsStore = settingsStore)
 
             advanceUntilIdle()
@@ -70,7 +70,8 @@ class RepairViewModelTest {
             assertEquals(1, reader.verifyCalls)
             assertTrue(viewModel.uiState.value.status is VerifyWriteStatus.Ok)
             assertEquals("Write verified.", viewModel.uiState.value.message)
-            assertTrue(viewModel.uiState.value.logs.any { it.actionType == RepairActionType.REPAIR_WRITE_SUCCESS })
+            val entries = logs.recentLogs(20)
+            assertTrue(entries.any { it.actionType == RepairActionType.REPAIR_WRITE_SUCCESS.name })
         }
 
     @Test
@@ -78,7 +79,7 @@ class RepairViewModelTest {
         runTest(mainDispatcherRule.dispatcher) {
             val reader = FakeUhfReader(dispatcher = mainDispatcherRule.dispatcher)
             val logs = FakeActionsLogDao()
-            val settingsStore = FakeSettingsStore(AppSettings(lastScannedEpc = "E2000017221101441890ABCD"))
+            val settingsStore = FakeSettingsStore(AppSettings(selectedLookupEpc = "E2000017221101441890ABCD"))
             val viewModel = createViewModel(reader, logs, settingsStore = settingsStore)
 
             advanceUntilIdle()
@@ -96,7 +97,7 @@ class RepairViewModelTest {
             reader.nextReadResult = Result.success("E2000017221101441890ABCE")
             reader.writeResultOverride = Result.failure(UhfError.VendorError("Locked").asException())
             val logs = FakeActionsLogDao()
-            val settingsStore = FakeSettingsStore(AppSettings(lastScannedEpc = "E2000017221101441890ABCD"))
+            val settingsStore = FakeSettingsStore(AppSettings(selectedLookupEpc = "E2000017221101441890ABCD"))
             val viewModel = createViewModel(reader, logs, settingsStore = settingsStore)
 
             advanceUntilIdle()
@@ -109,8 +110,9 @@ class RepairViewModelTest {
 
             val error = viewModel.uiState.value.errorMessage
             assertNotNull(error)
-            val lastLog = viewModel.uiState.value.logs.first { it.actionType == RepairActionType.REPAIR_WRITE_FAILED }
-            assertEquals(RepairActionResult.FAILURE, lastLog.result)
+            val entries = logs.recentLogs(20)
+            val lastLog = entries.first { it.actionType == RepairActionType.REPAIR_WRITE_FAILED.name }
+            assertEquals(RepairActionResult.FAILURE.name, lastLog.result)
             assertEquals("Locked", lastLog.message)
         }
 
@@ -121,7 +123,7 @@ class RepairViewModelTest {
             reader.nextReadResult = Result.success("E2000017221101441890ABCE")
             reader.verifyResultOverride = Result.success(false)
             val logs = FakeActionsLogDao()
-            val settingsStore = FakeSettingsStore(AppSettings(lastScannedEpc = "E2000017221101441890ABCD"))
+            val settingsStore = FakeSettingsStore(AppSettings(selectedLookupEpc = "E2000017221101441890ABCD"))
             val viewModel = createViewModel(reader, logs, settingsStore = settingsStore)
 
             advanceUntilIdle()
@@ -134,7 +136,8 @@ class RepairViewModelTest {
 
             val error = viewModel.uiState.value.errorMessage
             assertNotNull(error)
-            assertTrue(viewModel.uiState.value.logs.any { it.actionType == RepairActionType.REPAIR_WRITE_FAILED })
+            val entries = logs.recentLogs(20)
+            assertTrue(entries.any { it.actionType == RepairActionType.REPAIR_WRITE_FAILED.name })
             val message = viewModel.uiState.value.message
             assertTrue(message == null || !message.contains("Write verified"))
         }
@@ -147,10 +150,11 @@ class RepairViewModelTest {
             val settingsStore =
                 FakeSettingsStore(
                     AppSettings(
-                        lastScannedEpc = "E2000017221101441890ABCE",
-                        lastScannedEpcAt = 1_700_000_000_000L,
-                        lastFindTargetEpc = "E2000017221101441890ABCD",
-                        lastFindTargetEpcAt = 1_700_000_000_500L,
+                        selectedLookupEpc = "E2000017221101441890ABCE",
+                        selectedLookupName = "Tray 12",
+                        selectedLookupStatus = "In stock",
+                        selectedLookupLocation = "Aisle 3",
+                        selectedLookupAt = 1_700_000_000_000L,
                     ),
                 )
             val viewModel = createViewModel(reader, logs, settingsStore = settingsStore)

@@ -10,8 +10,14 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.AssistChip
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -19,13 +25,12 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.alexbomber12.memtag.app.HardwareAction
-import com.alexbomber12.memtag.domain.repair.RepairActionLog
-import com.alexbomber12.memtag.domain.repair.RepairActionResult
 import com.alexbomber12.memtag.ui.components.AppCard
 import com.alexbomber12.memtag.ui.components.ErrorState
 import com.alexbomber12.memtag.ui.components.LoadingState
@@ -33,8 +38,6 @@ import com.alexbomber12.memtag.ui.components.PrimaryButton
 import com.alexbomber12.memtag.ui.components.SecondaryButton
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.collect
-import java.text.DateFormat
-import java.util.Date
 
 @Composable
 fun RepairScreen(
@@ -42,6 +45,7 @@ fun RepairScreen(
     hardwareActions: Flow<HardwareAction>,
 ) {
     val state = viewModel.uiState.collectAsStateWithLifecycle().value
+    val clipboard = LocalClipboardManager.current
 
     state.confirmation?.let { confirmation ->
         ConfirmationDialog(
@@ -77,6 +81,11 @@ fun RepairScreen(
             !expectedBlank &&
             !scannedBlank &&
             state.status is VerifyWriteStatus.Mismatch
+    val selectedLabel =
+        state.selectedLookup?.name?.takeIf { it.isNotBlank() }
+            ?: state.selectedLookup?.epc?.takeIf { it.isNotBlank() }
+    val selectedLine = selectedLabel ?: "none"
+    val hasSelection = !state.selectedLookup?.epc.isNullOrBlank()
 
     LazyColumn(
         modifier =
@@ -145,11 +154,45 @@ fun RepairScreen(
                         ErrorState(message = status.message)
                     }
                 }
-                EpcLine(
-                    label = "Expected EPC",
-                    epc = state.expectedEpc.ifBlank { "--" },
-                    color = highlightColor,
+                OutlinedTextField(
+                    value = state.expectedEpc,
+                    onValueChange = viewModel::onExpectedEpcChange,
+                    label = { Text(text = "Expected EPC") },
+                    placeholder = { Text(text = "Expected EPC (hex)") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    enabled = !isBusy,
+                    trailingIcon = {
+                        IconButton(
+                            onClick = {
+                                val text = clipboard.getText()?.text.orEmpty()
+                                viewModel.pasteExpectedEpc(text)
+                            },
+                            enabled = !isBusy,
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.ContentPaste,
+                                contentDescription = "Paste",
+                            )
+                        }
+                    },
                 )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = "Selected card: $selectedLine",
+                        style = MaterialTheme.typography.labelMedium,
+                        modifier = Modifier.weight(1f),
+                    )
+                    AssistChip(
+                        onClick = viewModel::useSelectedLookup,
+                        label = { Text(text = "Use selected card") },
+                        enabled = hasSelection && !isBusy,
+                    )
+                }
                 EpcLine(
                     label = "Scanned EPC",
                     epc = state.scannedEpc?.ifBlank { "--" } ?: "--",
@@ -179,16 +222,6 @@ fun RepairScreen(
                 )
             }
         }
-
-        if (state.logs.isNotEmpty()) {
-            item {
-                AppCard(title = "Recent actions") {
-                    state.logs.forEach { log ->
-                        LogRow(log = log)
-                    }
-                }
-            }
-        }
     }
 }
 
@@ -216,7 +249,7 @@ private fun ConfirmationDialog(
                     valueStyle = MaterialTheme.typography.titleMedium,
                 )
                 Text(
-                    text = "Write expected EPC to tag?",
+                    text = "Write EPC ${confirmation.expectedEpc} to tag?",
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.error,
                 )
@@ -258,47 +291,4 @@ private fun EpcLine(
             modifier = Modifier.widthIn(min = 180.dp),
         )
     }
-}
-
-@Composable
-private fun LogRow(log: RepairActionLog) {
-    val color =
-        when (log.result) {
-            RepairActionResult.SUCCESS -> MaterialTheme.colorScheme.primary
-            RepairActionResult.FAILURE -> MaterialTheme.colorScheme.error
-            RepairActionResult.CANCELLED -> MaterialTheme.colorScheme.tertiary
-        }
-    Column(
-        modifier =
-            Modifier
-                .fillMaxWidth()
-                .padding(vertical = 4.dp),
-        verticalArrangement = Arrangement.spacedBy(2.dp),
-    ) {
-        Text(
-            text = "${formatTimestamp(log.createdAtEpochMs)} - ${formatAction(log.actionType.name)}",
-            style = MaterialTheme.typography.labelMedium,
-            color = color,
-        )
-        Text(
-            text = "Result: ${log.result.name}",
-            style = MaterialTheme.typography.bodySmall,
-            color = color,
-        )
-        log.message?.takeIf { it.isNotBlank() }?.let { message ->
-            Text(text = message, style = MaterialTheme.typography.bodySmall)
-        }
-    }
-}
-
-private fun formatTimestamp(epochMs: Long): String {
-    val formatter = DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT)
-    return formatter.format(Date(epochMs))
-}
-
-private fun formatAction(action: String): String {
-    return action
-        .replace('_', ' ')
-        .lowercase()
-        .replaceFirstChar { char -> char.uppercase() }
 }
