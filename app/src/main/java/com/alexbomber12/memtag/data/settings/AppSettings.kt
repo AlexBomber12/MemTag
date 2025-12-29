@@ -19,6 +19,11 @@ data class AppSettings(
     val lastFindTargetEpc: String = AppDefaults.LAST_FIND_TARGET_EPC,
     val lastScannedEpcAt: Long = AppDefaults.LAST_SCANNED_EPC_AT,
     val lastFindTargetEpcAt: Long = AppDefaults.LAST_FIND_TARGET_EPC_AT,
+    val selectedLookupEpc: String = AppDefaults.SELECTED_LOOKUP_EPC,
+    val selectedLookupName: String = AppDefaults.SELECTED_LOOKUP_NAME,
+    val selectedLookupStatus: String = AppDefaults.SELECTED_LOOKUP_STATUS,
+    val selectedLookupLocation: String = AppDefaults.SELECTED_LOOKUP_LOCATION,
+    val selectedLookupAt: Long = AppDefaults.SELECTED_LOOKUP_AT,
     val rfidKeyCodes: String = AppDefaults.RFID_KEY_CODES,
     val scanKeyCodes: String = AppDefaults.SCAN_KEY_CODES,
     val showDiagnosticsTab: Boolean = AppDefaults.SHOW_DIAGNOSTICS_TAB,
@@ -36,6 +41,9 @@ data class AppSettings(
         val normalizedFindTarget = runCatching { EpcNormalizer.normalize(lastFindTargetEpc) }.getOrNull().orEmpty()
         val normalizedLastScannedAt = lastScannedEpcAt.coerceAtLeast(0L)
         val normalizedFindTargetAt = lastFindTargetEpcAt.coerceAtLeast(0L)
+        val normalizedSelectedLookupEpc =
+            runCatching { EpcNormalizer.normalize(selectedLookupEpc) }.getOrNull().orEmpty()
+        val normalizedSelectedLookupAt = selectedLookupAt.coerceAtLeast(0L)
         return copy(
             mementoBaseUrl = AppDefaults.normalizeBaseUrl(mementoBaseUrl),
             uhfRegion = normalizedRegion,
@@ -45,6 +53,11 @@ data class AppSettings(
             lastFindTargetEpc = normalizedFindTarget,
             lastScannedEpcAt = normalizedLastScannedAt,
             lastFindTargetEpcAt = normalizedFindTargetAt,
+            selectedLookupEpc = normalizedSelectedLookupEpc,
+            selectedLookupName = selectedLookupName.trim(),
+            selectedLookupStatus = selectedLookupStatus.trim(),
+            selectedLookupLocation = selectedLookupLocation.trim(),
+            selectedLookupAt = normalizedSelectedLookupAt,
             rfidKeyCodes = rfidKeyCodes.trim(),
             scanKeyCodes = scanKeyCodes.trim(),
         )
@@ -53,7 +66,28 @@ data class AppSettings(
     fun rfidKeyCodeSet(): Set<Int> = parseKeyCodes(rfidKeyCodes)
 
     fun scanKeyCodeSet(): Set<Int> = parseKeyCodes(scanKeyCodes)
+
+    fun selectedLookupCardOrNull(): SelectedLookupCard? {
+        if (selectedLookupEpc.isBlank()) {
+            return null
+        }
+        return SelectedLookupCard(
+            name = selectedLookupName.trim(),
+            epc = selectedLookupEpc,
+            status = selectedLookupStatus.trim(),
+            location = selectedLookupLocation.trim(),
+            selectedAt = selectedLookupAt.takeIf { it > 0L },
+        )
+    }
 }
+
+data class SelectedLookupCard(
+    val name: String,
+    val epc: String,
+    val status: String,
+    val location: String,
+    val selectedAt: Long?,
+)
 
 private fun parseKeyCodes(raw: String): Set<Int> {
     return raw

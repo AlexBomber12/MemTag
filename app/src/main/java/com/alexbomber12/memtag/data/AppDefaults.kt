@@ -21,6 +21,11 @@ object AppDefaults {
     const val LAST_FIND_TARGET_EPC = ""
     const val LAST_SCANNED_EPC_AT = 0L
     const val LAST_FIND_TARGET_EPC_AT = 0L
+    const val SELECTED_LOOKUP_EPC = ""
+    const val SELECTED_LOOKUP_NAME = ""
+    const val SELECTED_LOOKUP_STATUS = ""
+    const val SELECTED_LOOKUP_LOCATION = ""
+    const val SELECTED_LOOKUP_AT = 0L
     const val RFID_KEY_CODES = ""
     const val SCAN_KEY_CODES = ""
     const val SHOW_DIAGNOSTICS_TAB = false

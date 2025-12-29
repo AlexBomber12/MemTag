@@ -2,10 +2,10 @@ package com.alexbomber12.memtag.ui.screens.repair
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.alexbomber12.memtag.data.settings.SelectedLookupCard
 import com.alexbomber12.memtag.data.settings.SettingsStore
 import com.alexbomber12.memtag.db.ActionsLogDao
 import com.alexbomber12.memtag.db.ActionsLogEntity
-import com.alexbomber12.memtag.domain.repair.RepairActionLog
 import com.alexbomber12.memtag.domain.repair.RepairActionResult
 import com.alexbomber12.memtag.domain.repair.RepairActionType
 import com.alexbomber12.memtag.integrations.scan2d.Scan2dError
@@ -28,7 +28,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-private const val EXPECTED_MISSING_MESSAGE = "Scan in Lookup to set Expected EPC."
+private const val EXPECTED_MISSING_MESSAGE = "Expected EPC required."
 
 sealed class VerifyWriteStatus {
     data class NotScanned(
@@ -56,7 +56,9 @@ data class WriteConfirmation(
 
 data class RepairUiState(
     val expectedEpc: String = "",
+    val expectedEdited: Boolean = false,
     val scannedEpc: String? = null,
+    val selectedLookup: SelectedLookupCard? = null,
     val status: VerifyWriteStatus = VerifyWriteStatus.Invalid(EXPECTED_MISSING_MESSAGE),
     val isReading: Boolean = false,
     val isScanningQr: Boolean = false,
@@ -65,7 +67,6 @@ data class RepairUiState(
     val confirmation: WriteConfirmation? = null,
     val message: String? = null,
     val errorMessage: String? = null,
-    val logs: List<RepairActionLog> = emptyList(),
 )
 
 class RepairViewModel(
@@ -82,16 +83,13 @@ class RepairViewModel(
 
     init {
         viewModelScope.launch {
-            refreshLogs()
-        }
-        viewModelScope.launch {
             settingsStore.settingsFlow.collect { settings ->
                 updateStateWithStatus { state ->
-                    val expectedEpc = settings.lastScannedEpc
-                    val shouldClearFeedback = expectedEpc != state.expectedEpc
-                    state.copy(
-                        expectedEpc = expectedEpc,
-                        confirmation = null,
+                    val selectedLookup = settings.selectedLookupCardOrNull()
+                    val updated = applySelectionIfNeeded(state, selectedLookup)
+                    val shouldClearFeedback = updated.expectedEpc != state.expectedEpc
+                    updated.copy(
+                        confirmation = if (shouldClearFeedback) null else state.confirmation,
                         message = if (shouldClearFeedback) null else state.message,
                         errorMessage = if (shouldClearFeedback) null else state.errorMessage,
                     )
@@ -102,8 +100,54 @@ class RepairViewModel(
 
     fun onScreenOpened() {
         updateStateWithStatus { state ->
-            state.copy(
+            val updated = applySelectionIfNeeded(state, state.selectedLookup)
+            updated.copy(
                 scannedEpc = null,
+                confirmation = null,
+                message = null,
+                errorMessage = null,
+            )
+        }
+    }
+
+    fun onExpectedEpcChange(value: String) {
+        updateStateWithStatus { state ->
+            state.copy(
+                expectedEpc = value,
+                expectedEdited = true,
+                confirmation = null,
+                message = null,
+                errorMessage = null,
+            )
+        }
+    }
+
+    fun pasteExpectedEpc(raw: String) {
+        val trimmed = raw.trim()
+        if (trimmed.isEmpty()) {
+            return
+        }
+        val normalized = runCatching { EpcNormalizer.normalize(trimmed) }.getOrElse { trimmed }
+        updateStateWithStatus { state ->
+            state.copy(
+                expectedEpc = normalized,
+                expectedEdited = true,
+                confirmation = null,
+                message = null,
+                errorMessage = null,
+            )
+        }
+    }
+
+    fun useSelectedLookup() {
+        val selected = uiState.value.selectedLookup ?: return
+        if (selected.epc.isBlank()) {
+            return
+        }
+        updateStateWithStatus { state ->
+            state.copy(
+                expectedEpc = selected.epc,
+                expectedEdited = false,
                 confirmation = null,
                 message = null,
                 errorMessage = null,
@@ -392,12 +436,6 @@ class RepairViewModel(
                 message = message,
             ),
         )
-        refreshLogs()
-    }
-
-    private suspend fun refreshLogs() {
-        val entries = actionsLogDao.recentLogs(LOG_LIMIT)
-        mutableState.update { it.copy(logs = entries.map { entry -> entry.toDomain() }) }
     }
 
     private fun updateStateWithStatus(transform: (RepairUiState) -> RepairUiState) {
@@ -513,18 +551,21 @@ class RepairViewModel(
         }
     }
 
-    private fun ActionsLogEntity.toDomain(): RepairActionLog {
-        val action = RepairActionType.values().firstOrNull { it.name == actionType } ?: RepairActionType.REPAIR_WRITE_FAILED
-        val resultValue = RepairActionResult.values().firstOrNull { it.name == result } ?: RepairActionResult.FAILURE
-        return RepairActionLog(
-            id = id,
-            createdAtEpochMs = createdAtEpochMs,
-            actionType = action,
-            expectedEpc = expectedEpc,
-            currentEpc = currentEpc,
-            result = resultValue,
-            message = message,
-        )
+    private fun applySelectionIfNeeded(
+        state: RepairUiState,
+        selectedLookup: SelectedLookupCard?,
+    ): RepairUiState {
+        val selectedEpc = selectedLookup?.epc?.takeIf { it.isNotBlank() }
+        val shouldPrefill = selectedEpc != null && (state.expectedEpc.isBlank() || !state.expectedEdited)
+        return if (shouldPrefill) {
+            state.copy(
+                expectedEpc = selectedEpc,
+                expectedEdited = false,
+                selectedLookup = selectedLookup,
+            )
+        } else {
+            state.copy(selectedLookup = selectedLookup)
+        }
     }
 
     private fun isBusy(state: RepairUiState): Boolean {
@@ -535,6 +576,5 @@ class RepairViewModel(
         const val READ_TIMEOUT_MS = 4_000L
         const val WRITE_TIMEOUT_MS = 7_000L
         const val VERIFY_TIMEOUT_MS = 7_000L
-        const val LOG_LIMIT = 20
     }
 }

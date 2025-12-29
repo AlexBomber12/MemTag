@@ -56,6 +56,11 @@ class SettingsStoreTest {
             assertEquals(AppDefaults.LAST_FIND_TARGET_EPC, settings.lastFindTargetEpc)
             assertEquals(AppDefaults.LAST_SCANNED_EPC_AT, settings.lastScannedEpcAt)
             assertEquals(AppDefaults.LAST_FIND_TARGET_EPC_AT, settings.lastFindTargetEpcAt)
+            assertEquals(AppDefaults.SELECTED_LOOKUP_EPC, settings.selectedLookupEpc)
+            assertEquals(AppDefaults.SELECTED_LOOKUP_NAME, settings.selectedLookupName)
+            assertEquals(AppDefaults.SELECTED_LOOKUP_STATUS, settings.selectedLookupStatus)
+            assertEquals(AppDefaults.SELECTED_LOOKUP_LOCATION, settings.selectedLookupLocation)
+            assertEquals(AppDefaults.SELECTED_LOOKUP_AT, settings.selectedLookupAt)
             assertEquals(AppDefaults.RFID_KEY_CODES, settings.rfidKeyCodes)
             assertEquals(AppDefaults.SCAN_KEY_CODES, settings.scanKeyCodes)
         }
@@ -80,6 +85,11 @@ class SettingsStoreTest {
                     lastFindTargetEpc = "E2000017221101441890ABCE",
                     lastScannedEpcAt = 1_700_000_000_000L,
                     lastFindTargetEpcAt = 1_700_000_000_500L,
+                    selectedLookupEpc = "E2000017221101441890ABCF",
+                    selectedLookupName = "Tray 12",
+                    selectedLookupStatus = "In stock",
+                    selectedLookupLocation = "Aisle 3",
+                    selectedLookupAt = 1_700_000_000_900L,
                     rfidKeyCodes = "131, 132",
                     scanKeyCodes = "133",
                 )
@@ -105,6 +115,11 @@ class SettingsStoreTest {
             assertEquals("E2000017221101441890ABCE", settings.lastFindTargetEpc)
             assertEquals(1_700_000_000_000L, settings.lastScannedEpcAt)
             assertEquals(1_700_000_000_500L, settings.lastFindTargetEpcAt)
+            assertEquals("E2000017221101441890ABCF", settings.selectedLookupEpc)
+            assertEquals("Tray 12", settings.selectedLookupName)
+            assertEquals("In stock", settings.selectedLookupStatus)
+            assertEquals("Aisle 3", settings.selectedLookupLocation)
+            assertEquals(1_700_000_000_900L, settings.selectedLookupAt)
             assertEquals("131, 132", settings.rfidKeyCodes)
             assertEquals("133", settings.scanKeyCodes)
         }
