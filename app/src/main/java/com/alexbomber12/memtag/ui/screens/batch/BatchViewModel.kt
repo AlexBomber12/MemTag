@@ -15,11 +15,14 @@ import com.alexbomber12.memtag.domain.batch.BatchSessionEntry
 import com.alexbomber12.memtag.domain.batch.BatchSource
 import com.alexbomber12.memtag.domain.batch.BatchStatus
 import com.alexbomber12.memtag.domain.batch.BatchUhfUseCase
+import com.alexbomber12.memtag.integrations.uhf.TagReading
 import com.alexbomber12.memtag.integrations.uhf.UhfError
 import com.alexbomber12.memtag.integrations.uhf.UhfException
 import com.alexbomber12.memtag.util.epc.EpcNormalizer
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
@@ -30,7 +33,7 @@ import java.io.IOException
 import kotlin.collections.ArrayDeque
 
 enum class BatchMode {
-    SWEEP,
+    INVENTORY_SWEEP,
     MANUAL_SCAN,
 }
 
@@ -40,8 +43,8 @@ enum class BatchFilter {
     UNKNOWN,
 }
 
-private const val DEFAULT_SWEEP_DURATION_MS = 5_000L
 private const val SCAN_TIMEOUT_MS = 1_500L
+private const val TRIGGER_DEBOUNCE_MS = 300L
 private const val MAX_INVALID_ROWS = 50
 
 data class BatchSummary(
@@ -64,9 +67,8 @@ data class BatchUiState(
     val sessionMap: Map<String, BatchSessionEntry> = emptyMap(),
     val extras: Map<String, BatchExtraEntry> = emptyMap(),
     val summary: BatchSummary = BatchSummary(),
-    val mode: BatchMode = BatchMode.SWEEP,
+    val mode: BatchMode = BatchMode.INVENTORY_SWEEP,
     val sweepRunning: Boolean = false,
-    val sweepDurationMs: Long = DEFAULT_SWEEP_DURATION_MS,
     val currentRowEpc: String? = null,
     val lastScanEpc: String? = null,
     val lastScanRssi: Int? = null,
@@ -93,6 +95,12 @@ class BatchViewModel(
     private var sweepJob: Job? = null
     private var scanJob: Job? = null
     private val undoStack = ArrayDeque<BatchUndoAction>()
+    private val sweepEntries = mutableMapOf<String, BatchUhfUseCase.SweepEntry>()
+    private val sweepExtras = mutableMapOf<String, BatchUhfUseCase.SweepEntry>()
+    private val sweepMatched = mutableSetOf<String>()
+    private var sweepInputSet: Set<String> = emptySet()
+    private var sweepTotalCount: Int = 0
+    private var lastTriggerAtMs: Long = 0L
 
     init {
         viewModelScope.launch {
@@ -108,10 +116,16 @@ class BatchViewModel(
                         repository.setCurrentEpc(resolvedCurrent)
                     }
                     mutableState.update { state ->
+                        val nextSummary =
+                            if (state.sweepRunning) {
+                                state.summary
+                            } else {
+                                summaryFor(inputItems, sessionMap, state.extras)
+                            }
                         state.copy(
                             inputItems = inputItems,
                             sessionMap = sessionMap,
-                            summary = summaryFor(inputItems, sessionMap, state.extras),
+                            summary = nextSummary,
                             currentRowEpc = resolvedCurrent,
                         )
                     }
@@ -124,13 +138,6 @@ class BatchViewModel(
             return
         }
         mutableState.update { it.copy(mode = mode, lastErrorMessage = null, lastInfoMessage = null) }
-    }
-
-    fun setSweepDuration(durationMs: Long) {
-        if (uiState.value.sweepRunning) {
-            return
-        }
-        mutableState.update { it.copy(sweepDurationMs = durationMs) }
     }
 
     fun setManualFilter(filter: BatchFilter) {
@@ -251,92 +258,58 @@ class BatchViewModel(
 
     fun startSweep() {
         val state = uiState.value
-        if (state.sweepRunning || scanJob != null) {
+        if (state.sweepRunning) {
             return
         }
-        mutableState.update { it.copy(sweepRunning = true, lastErrorMessage = null, lastInfoMessage = null) }
+        scanJob?.cancel()
+        resetSweepTracking(state.inputItems)
+        mutableState.update {
+            it.copy(
+                sweepRunning = true,
+                lastErrorMessage = null,
+                lastInfoMessage = null,
+                extras = emptyMap(),
+                summary =
+                    BatchSummary(
+                        total = sweepTotalCount,
+                        found = 0,
+                        notFound = 0,
+                        unknown = sweepTotalCount,
+                        extra = 0,
+                    ),
+            )
+        }
         val job =
             viewModelScope.launch {
-                val durationMs = uiState.value.sweepDurationMs
-                val result = runCatching { uhfUseCase.runSweep(durationMs) }
-                if (result.isFailure) {
+                val result = runCatching { uhfUseCase.collectSweep(::handleSweepReading) }
+                val error = result.exceptionOrNull()
+                if (error != null && error !is CancellationException) {
                     mutableState.update {
                         it.copy(
                             sweepRunning = false,
-                            lastErrorMessage = mapUhfError(result.exceptionOrNull()),
+                            lastErrorMessage = mapUhfError(error),
                         )
                     }
-                    return@launch
-                }
-                val sweepResult = result.getOrNull()
-                val now = clock()
-                val seenEntries = sweepResult?.entries.orEmpty()
-                val inputItems = uiState.value.inputItems
-                val sessionMap = uiState.value.sessionMap
-                withContext(Dispatchers.IO) {
-                    inputItems.forEach { item ->
-                        val previous = sessionMap[item.epcNormalized]
-                        val seen = seenEntries[item.epcNormalized]
-                        val previousStatus = previous?.status ?: BatchStatus.UNKNOWN
-                        val previousUpdatedAt = previous?.updatedAt ?: 0L
-                        val nextStatus =
-                            if (seen != null) {
-                                BatchStatus.FOUND
-                            } else if (previousStatus == BatchStatus.UNKNOWN) {
-                                BatchStatus.NOT_FOUND
-                            } else {
-                                previousStatus
-                            }
-                        val updatedAt =
-                            if (nextStatus == BatchStatus.FOUND) {
-                                if (previousStatus == BatchStatus.FOUND && previousUpdatedAt > 0L) {
-                                    previousUpdatedAt
-                                } else {
-                                    now
-                                }
-                            } else {
-                                0L
-                            }
-                        val lastSeenAt = seen?.lastSeenAt ?: previous?.lastSeenAt
-                        val lastRssi = seen?.bestRssi ?: previous?.lastRssi
-                        val source =
-                            if (seen != null || (previousStatus == BatchStatus.UNKNOWN && nextStatus == BatchStatus.NOT_FOUND)) {
-                                BatchSource.INVENTORY
-                            } else {
-                                previous?.source
-                            }
-                        repository.updateSession(
-                            epcNormalized = item.epcNormalized,
-                            status = nextStatus,
-                            updatedAt = updatedAt,
-                            lastSeenAt = lastSeenAt,
-                            lastRssi = lastRssi,
-                            source = source,
-                        )
-                    }
-                }
-                val extras = buildExtrasFromSweep(seenEntries, inputItems)
-                undoStack.clear()
-                mutableState.update { state ->
-                    state.copy(
-                        sweepRunning = false,
-                        extras = extras,
-                        summary = summaryFor(state.inputItems, state.sessionMap, extras),
-                        canUndo = false,
-                    )
                 }
             }
         sweepJob = job
-        job.invokeOnCompletion {
+        job.invokeOnCompletion { cause ->
             sweepJob = null
-            mutableState.update { it.copy(sweepRunning = false) }
+            if (cause != null && cause !is CancellationException) {
+                mutableState.update { it.copy(sweepRunning = false) }
+            }
         }
     }
 
     fun stopSweep() {
-        sweepJob?.cancel()
-        sweepJob = null
-        mutableState.update { it.copy(sweepRunning = false) }
+        if (!uiState.value.sweepRunning) {
+            return
+        }
+        val job = sweepJob
+        viewModelScope.launch {
+            job?.cancelAndJoin()
+            finalizeSweep()
+        }
     }
 
     fun scanOnce() {
@@ -375,7 +348,10 @@ class BatchViewModel(
                 mutableState.update { it.copy(isScanning = false) }
             }
         scanJob = job
-        job.invokeOnCompletion { scanJob = null }
+        job.invokeOnCompletion {
+            scanJob = null
+            mutableState.update { it.copy(isScanning = false) }
+        }
     }
 
     fun markNotFoundCurrent() {
@@ -433,8 +409,13 @@ class BatchViewModel(
     }
 
     fun onHardwareTrigger() {
+        val now = clock()
+        if (now - lastTriggerAtMs < TRIGGER_DEBOUNCE_MS) {
+            return
+        }
+        lastTriggerAtMs = now
         val state = uiState.value
-        if (state.mode == BatchMode.SWEEP) {
+        if (state.mode == BatchMode.INVENTORY_SWEEP) {
             if (state.sweepRunning) {
                 stopSweep()
             } else {
@@ -442,6 +423,103 @@ class BatchViewModel(
             }
         } else {
             scanOnce()
+        }
+    }
+
+    private fun resetSweepTracking(inputItems: List<BatchInputItem>) {
+        sweepEntries.clear()
+        sweepExtras.clear()
+        sweepMatched.clear()
+        sweepInputSet = inputItems.map { it.epcNormalized }.toSet()
+        sweepTotalCount = inputItems.size
+    }
+
+    private fun handleSweepReading(reading: TagReading) {
+        val normalized = runCatching { EpcNormalizer.normalize(reading.epcHex) }.getOrNull() ?: return
+        val previous = sweepEntries[normalized]
+        val bestRssi = bestRssi(previous?.bestRssi, reading.rssi)
+        val entry =
+            BatchUhfUseCase.SweepEntry(
+                epcNormalized = normalized,
+                lastSeenAt = reading.timestampMs,
+                bestRssi = bestRssi,
+            )
+        sweepEntries[normalized] = entry
+        val isInput = sweepInputSet.contains(normalized)
+        if (!isInput) {
+            sweepExtras[normalized] = entry
+        }
+        if (previous == null) {
+            if (isInput) {
+                sweepMatched.add(normalized)
+            }
+            updateSweepSummary()
+        }
+    }
+
+    private fun updateSweepSummary() {
+        if (!uiState.value.sweepRunning) {
+            return
+        }
+        val found = sweepMatched.size
+        val unknown = (sweepTotalCount - found).coerceAtLeast(0)
+        mutableState.update {
+            it.copy(
+                summary =
+                    BatchSummary(
+                        total = sweepTotalCount,
+                        found = found,
+                        notFound = 0,
+                        unknown = unknown,
+                        extra = sweepExtras.size,
+                    ),
+            )
+        }
+    }
+
+    private suspend fun finalizeSweep() {
+        val entriesSnapshot = sweepEntries.toMap()
+        val inputItems = uiState.value.inputItems
+        val sessionMap = uiState.value.sessionMap
+        val now = clock()
+        withContext(Dispatchers.IO) {
+            inputItems.forEach { item ->
+                val previous = sessionMap[item.epcNormalized]
+                val seen = entriesSnapshot[item.epcNormalized]
+                val nextStatus = if (seen != null) BatchStatus.FOUND else BatchStatus.NOT_FOUND
+                val updatedAt = if (seen != null) now else 0L
+                val lastSeenAt = seen?.lastSeenAt ?: previous?.lastSeenAt
+                val lastRssi = seen?.bestRssi ?: previous?.lastRssi
+                repository.updateSession(
+                    epcNormalized = item.epcNormalized,
+                    status = nextStatus,
+                    updatedAt = updatedAt,
+                    lastSeenAt = lastSeenAt,
+                    lastRssi = lastRssi,
+                    source = BatchSource.INVENTORY,
+                )
+            }
+        }
+        val extras = buildExtrasFromSweep(entriesSnapshot, inputItems)
+        undoStack.clear()
+        mutableState.update { state ->
+            state.copy(
+                sweepRunning = false,
+                extras = extras,
+                summary = summaryFor(state.inputItems, state.sessionMap, extras),
+                canUndo = false,
+            )
+        }
+    }
+
+    private fun bestRssi(
+        current: Int?,
+        candidate: Int?,
+    ): Int? {
+        return when {
+            current == null -> candidate
+            candidate == null -> current
+            else -> maxOf(current, candidate)
         }
     }
 

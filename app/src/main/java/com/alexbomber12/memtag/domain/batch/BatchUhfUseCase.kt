@@ -7,7 +7,6 @@ import com.alexbomber12.memtag.integrations.uhf.UhfLogger
 import com.alexbomber12.memtag.integrations.uhf.UhfReader
 import com.alexbomber12.memtag.integrations.uhf.asException
 import com.alexbomber12.memtag.integrations.uhf.toErrorMessage
-import com.alexbomber12.memtag.util.epc.EpcNormalizer
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.firstOrNull
@@ -23,41 +22,24 @@ class BatchUhfUseCase(
         val bestRssi: Int?,
     )
 
-    data class SweepResult(
-        val entries: Map<String, SweepEntry>,
-    )
-
-    suspend fun runSweep(durationMs: Long): SweepResult {
+    suspend fun collectSweep(onReading: (TagReading) -> Unit) {
         val startAt = clock()
         UhfLogger.i("ScanRFID start (screen=batch source=sweep usedMethod=inventory)")
         ensureReady("batch-sweep")
-        val entries = mutableMapOf<String, SweepEntry>()
         try {
-            withTimeout(durationMs) {
-                uhfReader
-                    .startInventory()
-                    .collect { reading ->
-                        val normalized =
-                            runCatching { EpcNormalizer.normalize(reading.epcHex) }.getOrNull() ?: return@collect
-                        val existing = entries[normalized]
-                        val bestRssi = bestRssi(existing?.bestRssi, reading.rssi)
-                        entries[normalized] =
-                            SweepEntry(
-                                epcNormalized = normalized,
-                                lastSeenAt = reading.timestampMs,
-                                bestRssi = bestRssi,
-                            )
+            uhfReader
+                .startInventory()
+                .collect { reading ->
+                    if (reading.epcHex.isNotBlank()) {
+                        onReading(reading)
                     }
-            }
-        } catch (_: TimeoutCancellationException) {
-            // Expected when the sweep duration is reached.
+                }
         } finally {
             uhfReader.stopInventory()
             UhfLogger.i(
                 "ScanRFID end (screen=batch result=sweep durationMs=${clock() - startAt})",
             )
         }
-        return SweepResult(entries = entries)
     }
 
     suspend fun scanOnce(timeoutMs: Long): TagReading? {
@@ -121,17 +103,6 @@ class BatchUhfUseCase(
         val applied = applyResult.getOrNull()
         if (applied != null && !applied.success) {
             throw UhfError.VendorError(applied.toErrorMessage()).asException()
-        }
-    }
-
-    private fun bestRssi(
-        current: Int?,
-        candidate: Int?,
-    ): Int? {
-        return when {
-            current == null -> candidate
-            candidate == null -> current
-            else -> maxOf(current, candidate)
         }
     }
 }
