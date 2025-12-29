@@ -23,4 +23,6 @@ interface MementoRepository {
     fun observeSyncState(libraryId: String): Flow<SyncState?>
 
     suspend fun getSyncState(libraryId: String): SyncState?
+
+    fun observeLocalItemCount(): Flow<Int>
 }

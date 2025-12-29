@@ -66,6 +66,10 @@ class DefaultMementoRepository(
         }
     }
 
+    override fun observeLocalItemCount(): Flow<Int> {
+        return inventoryItemDao.observeCount()
+    }
+
     override suspend fun syncLibrary(
         libraryId: String,
         onProgress: (SyncProgress) -> Unit,

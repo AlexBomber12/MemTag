@@ -56,6 +56,16 @@ class SettingsViewModel(
                 initialValue = null,
             )
 
+    val localItemCount: StateFlow<Int?> =
+        repository.observeLocalItemCount()
+            .distinctUntilChanged()
+            .map<Int, Int?> { count -> count }
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(5_000),
+                initialValue = null,
+            )
+
     fun saveSettings(settings: AppSettings) {
         viewModelScope.launch {
             settingsStore.update { current ->

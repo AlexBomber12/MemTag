@@ -30,6 +30,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -41,6 +42,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.alexbomber12.memtag.app.SyncStatusState
 import com.alexbomber12.memtag.data.AppDefaults
 import com.alexbomber12.memtag.data.settings.AppSettings
+import com.alexbomber12.memtag.domain.SyncResult
 import com.alexbomber12.memtag.ui.components.AppCard
 import com.alexbomber12.memtag.ui.components.ErrorState
 import com.alexbomber12.memtag.ui.components.LoadingState
@@ -57,6 +59,7 @@ fun SettingsScreen(
     val settings by viewModel.settingsState.collectAsStateWithLifecycle()
     val syncStatus by viewModel.syncStatusState.collectAsStateWithLifecycle()
     val lastSyncState by viewModel.lastSyncState.collectAsStateWithLifecycle()
+    val localItemCount by viewModel.localItemCount.collectAsStateWithLifecycle()
 
     var baseUrl by rememberSaveable { mutableStateOf(settings.mementoBaseUrl) }
     var token by rememberSaveable { mutableStateOf(settings.mementoToken) }
@@ -68,6 +71,7 @@ fun SettingsScreen(
     var tokenVisible by rememberSaveable { mutableStateOf(false) }
     var regionExpanded by rememberSaveable { mutableStateOf(false) }
     var pendingOpenDiagnostics by rememberSaveable { mutableStateOf(false) }
+    var lastSuccessfulResult by remember { mutableStateOf<SyncResult?>(null) }
 
     LaunchedEffect(
         settings.mementoBaseUrl,
@@ -91,6 +95,12 @@ fun SettingsScreen(
         if (pendingOpenDiagnostics && settings.showDiagnosticsTab) {
             pendingOpenDiagnostics = false
             onOpenDiagnostics()
+        }
+    }
+
+    LaunchedEffect(syncStatus) {
+        if (syncStatus is SyncStatusState.Completed) {
+            lastSuccessfulResult = (syncStatus as SyncStatusState.Completed).result
         }
     }
 
@@ -318,11 +328,14 @@ fun SettingsScreen(
 
                 is SyncStatusState.Running -> {
                     val progress = (syncStatus as SyncStatusState.Running).progress
-                    LoadingState(
-                        message =
-                            "Syncing... fetched=${progress.fetchedCount} " +
-                                "stored=${progress.storedCount} " +
-                                "skipped=${progress.skippedCount}",
+                    LoadingState(message = "Syncing...")
+                    Text(
+                        text =
+                            syncCountersText(
+                                downloaded = progress.downloadedCount,
+                                saved = progress.savedCount,
+                                ignored = progress.ignoredCount,
+                            ),
                     )
                 }
 
@@ -331,15 +344,38 @@ fun SettingsScreen(
                     Text(text = "Sync complete.")
                     Text(
                         text =
-                            "Fetched: ${result.fetchedCount} | " +
-                                "Stored: ${result.storedCount} | " +
-                                "Skipped: ${result.skippedCount}",
+                            syncCountersText(
+                                downloaded = result.downloadedCount,
+                                saved = result.savedCount,
+                                ignored = result.ignoredCount,
+                            ),
+                    )
+                    Text(text = "Local library: ${formatCount(localItemCount)} items")
+                    Text(
+                        text = "Last run only (not total library size).",
+                        style = MaterialTheme.typography.bodySmall,
                     )
                 }
 
                 is SyncStatusState.Error -> {
                     val message = (syncStatus as SyncStatusState.Error).message
                     ErrorState(message = message)
+                    val lastResult = lastSuccessfulResult
+                    if (lastResult != null) {
+                        Text(
+                            text =
+                                syncCountersText(
+                                    downloaded = lastResult.downloadedCount,
+                                    saved = lastResult.savedCount,
+                                    ignored = lastResult.ignoredCount,
+                                ),
+                        )
+                        Text(text = "Local library: ${formatCount(localItemCount)} items")
+                        Text(
+                            text = "Last run only (from last successful run, not total library size).",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
                 }
             }
 
@@ -373,7 +409,23 @@ fun SettingsScreen(
     }
 }
 
+private const val UNKNOWN_COUNT_PLACEHOLDER = "--"
+
 private fun formatTimestamp(epochMs: Long): String {
     val formatter = DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT)
     return formatter.format(Date(epochMs))
+}
+
+private fun formatCount(count: Int?): String {
+    return count?.toString() ?: UNKNOWN_COUNT_PLACEHOLDER
+}
+
+private fun syncCountersText(
+    downloaded: Int?,
+    saved: Int?,
+    ignored: Int?,
+): String {
+    return "Downloaded: ${formatCount(downloaded)} | " +
+        "Saved: ${formatCount(saved)} | " +
+        "Ignored: ${formatCount(ignored)}"
 }
