@@ -4,7 +4,6 @@ import android.content.Context
 import android.util.Log
 import com.alexbomber12.memtag.data.settings.SettingsStore
 import com.alexbomber12.memtag.util.epc.EpcNormalizer
-import com.alexbomber12.memtag.util.epc.normalizeUhfEpc
 import com.rscja.deviceapi.RFIDWithUHFUART
 import com.rscja.deviceapi.entity.UHFTAGInfo
 import com.rscja.deviceapi.interfaces.IUHF
@@ -778,7 +777,11 @@ class ChainwayUhfReader(
             val afterPower = safeGetPowerLocked(instance)
             val modeApplied = afterMode?.let { it == desired.frequencyMode }
             val rfLinkApplied = afterRfLink?.let { it == desired.rfLink }
-            val powerApplied = afterPower?.let { it == desired.powerDbm }
+            val powerApplied =
+                afterPower?.let { it == desired.powerDbm || it == desired.powerDbm * 10 }
+            val modeSetForResult = if (modeApplied == null) null else setModeOk
+            val rfLinkSetForResult = if (rfLinkApplied == null) null else setRfLinkOk
+            val powerSetForResult = if (powerApplied == null) null else setPowerOk
             val result =
                 UhfApplyResult(
                     reason = reason,
@@ -790,10 +793,10 @@ class ChainwayUhfReader(
                     desiredPower = desired.powerDbm,
                     desiredProtocol = desired.protocol,
                     desiredRfLink = desired.rfLink,
-                    setModeOk = setModeOk,
-                    setPowerOk = setPowerOk,
+                    setModeOk = modeSetForResult,
+                    setPowerOk = powerSetForResult,
                     setProtocolOk = null,
-                    setRfLinkOk = setRfLinkOk,
+                    setRfLinkOk = rfLinkSetForResult,
                     afterMode = afterMode,
                     afterPower = afterPower,
                     afterProtocol = null,
@@ -1421,7 +1424,7 @@ class ChainwayUhfReader(
         source: String,
     ): ParsedTag {
         val rawEpc = normalizeProbeField(tagInfo.getEPC())
-        val epc = normalizeUhfEpc(rawEpc)
+        val epc = rawEpc?.let { runCatching { EpcNormalizer.normalize(it) }.getOrNull() }
         val tid = normalizeProbeField(tagInfo.getTid())
         val rssiRaw = normalizeProbeField(tagInfo.getRssi())
         val rssi = rssiRaw?.trim()?.toFloatOrNull()?.roundToInt()

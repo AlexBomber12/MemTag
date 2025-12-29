@@ -5,10 +5,22 @@ private const val MAX_EPC_LENGTH = 64
 private val WHITESPACE_REGEX = Regex("\\s+")
 
 private fun normalizeCandidate(raw: String): String {
-    return raw
-        .trim()
-        .replace(WHITESPACE_REGEX, "")
-        .uppercase()
+    val trimmed = raw.trim()
+    if (trimmed.isEmpty()) {
+        return ""
+    }
+    var candidate = trimmed.replace(WHITESPACE_REGEX, "").uppercase()
+    candidate =
+        when {
+            candidate.startsWith("EPC:") -> candidate.removePrefix("EPC:")
+            candidate.startsWith("EPC=") -> candidate.removePrefix("EPC=")
+            candidate.startsWith("EPC") -> candidate.removePrefix("EPC")
+            else -> candidate
+        }
+    if (candidate.startsWith("0X")) {
+        candidate = candidate.removePrefix("0X")
+    }
+    return candidate
 }
 
 private fun isHexOnly(value: String): Boolean {
@@ -18,7 +30,7 @@ private fun isHexOnly(value: String): Boolean {
 }
 
 private fun isValidLength(value: String): Boolean {
-    return value.length in MIN_EPC_LENGTH..MAX_EPC_LENGTH
+    return value.length in MIN_EPC_LENGTH..MAX_EPC_LENGTH && value.length % 2 == 0
 }
 
 object EpcNormalizer {

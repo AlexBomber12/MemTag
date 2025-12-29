@@ -44,6 +44,11 @@ class EpcNormalizerTest {
         assertFalse(EpcValidator.isValidEpcHex("A".repeat(65)))
     }
 
+    @Test
+    fun validatorRejectsOddLength() {
+        assertFalse(EpcValidator.isValidEpcHex("ABC12345F"))
+    }
+
     @Test(expected = IllegalArgumentException::class)
     fun normalizeRejectsNonHex() {
         EpcNormalizer.normalize("GGGG1234")
@@ -64,6 +69,11 @@ class EpcNormalizerTest {
         EpcNormalizer.normalize("A".repeat(65))
     }
 
+    @Test(expected = IllegalArgumentException::class)
+    fun normalizeRejectsOddLength() {
+        EpcNormalizer.normalize("ABC12345F")
+    }
+
     @Test
     fun normalizeUhfEpcHandlesPrefixesAndWhitespace() {
         val result = normalizeUhfEpc("  epc: 3008 33b2 ddd9 0140 0000 0000 ")
@@ -71,9 +81,9 @@ class EpcNormalizerTest {
     }
 
     @Test
-    fun normalizeUhfEpcStripsNonHexCharacters() {
+    fun normalizeUhfEpcRejectsNonHexCharacters() {
         val result = normalizeUhfEpc("EPC=E2000017-2211-01441890ABCD")
-        assertEquals("E2000017221101441890ABCD", result)
+        assertNull(result)
     }
 
     @Test
