@@ -83,6 +83,7 @@ class FindViewModel(
     private var inventoryJob: Job? = null
     private var tickerJob: Job? = null
     private var feedbackJob: Job? = null
+    private var reapplyProfileJob: Job? = null
     private var calculator: ProximityCalculator? = null
     private var autoStartConsumedForEpc: String? = null
     private var scanStartMs: Long? = null
@@ -314,7 +315,11 @@ class FindViewModel(
                     }
                     val targetEpc = targetNormalized
                     val useHardwareFilter = targetEpc != null && !uiState.value.debugDisableFilter
-                    uhfReader.applyFindProfile(targetEpc, useHardwareFilter)
+                    val findProfileResult = uhfReader.applyFindProfile(targetEpc, useHardwareFilter)
+                    if (findProfileResult.isFailure) {
+                        handleInventoryError(findProfileResult.exceptionOrNull())
+                        return@launch
+                    }
                     uhfReader
                         .startInventory(filterEpcHex = null)
                         .catch { error -> handleInventoryError(error) }
@@ -387,6 +392,8 @@ class FindViewModel(
     fun stopFind() {
         inventoryJob?.cancel()
         inventoryJob = null
+        reapplyProfileJob?.cancel()
+        reapplyProfileJob = null
         stopTickerAndFeedback()
         viewModelScope.launch {
             uhfReader.stopInventory()
@@ -539,14 +546,21 @@ class FindViewModel(
     }
 
     private fun reapplyFindProfile() {
-        if (!uiState.value.isRunning) {
+        val snapshot = uiState.value
+        if (!snapshot.isRunning) {
             return
         }
-        val target = uiState.value.targetEpcNormalized
-        val useHardwareFilter = target != null && !uiState.value.debugDisableFilter
-        viewModelScope.launch {
-            uhfReader.applyFindProfile(target, useHardwareFilter)
-        }
+        reapplyProfileJob?.cancel()
+        reapplyProfileJob =
+            viewModelScope.launch {
+                val state = uiState.value
+                if (!state.isRunning) {
+                    return@launch
+                }
+                val target = state.targetEpcNormalized
+                val useHardwareFilter = target != null && !state.debugDisableFilter
+                uhfReader.applyFindProfile(target, useHardwareFilter)
+            }
     }
 
     private fun computeStatus(state: FindUiState): FindStatus {

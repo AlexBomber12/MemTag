@@ -1115,18 +1115,31 @@ class ChainwayUhfReader(
             val cntBits = if (filterTarget != null) filterTarget.length * 4 else 0
             val filterEnabled = useHardwareFilter && filterTarget != null
             withContext(Dispatchers.IO) {
+                var firstError: Throwable? = null
                 val epcModeOk: Boolean
                 val filterOk: Boolean
                 uhfMutex.withLock {
-                    epcModeOk = runCatching { instance.setEPCMode() }.getOrDefault(false)
-                    val clearOk =
+                    val epcModeResult = runCatching { instance.setEPCMode() }
+                    if (epcModeResult.isFailure && firstError == null) {
+                        firstError = epcModeResult.exceptionOrNull()
+                    }
+                    epcModeOk = epcModeResult.getOrDefault(false)
+                    val clearResult =
                         runCatching { instance.setFilter(IUHF.Bank_EPC, 0, 0, "") }
-                            .getOrDefault(false)
+                    if (clearResult.isFailure && firstError == null) {
+                        firstError = clearResult.exceptionOrNull()
+                    }
+                    val clearOk = clearResult.getOrDefault(false)
                     val applyOk =
                         if (filterEnabled && filterTarget != null) {
-                            runCatching {
-                                instance.setFilter(IUHF.Bank_EPC, ptrBits, cntBits, filterTarget)
-                            }.getOrDefault(false)
+                            val applyResult =
+                                runCatching {
+                                    instance.setFilter(IUHF.Bank_EPC, ptrBits, cntBits, filterTarget)
+                                }
+                            if (applyResult.isFailure && firstError == null) {
+                                firstError = applyResult.exceptionOrNull()
+                            }
+                            applyResult.getOrDefault(false)
                         } else {
                             true
                         }
@@ -1136,7 +1149,12 @@ class ChainwayUhfReader(
                     "Find RF profile applied: epcModeOk=$epcModeOk " +
                         "filterOk=$filterOk ptrBits=$ptrBits cntBits=$cntBits",
                 )
-                Result.success(Unit)
+                if (!epcModeOk || !filterOk) {
+                    val message = "Find RF profile failed: epcModeOk=$epcModeOk filterOk=$filterOk"
+                    Result.failure(UhfError.VendorError(message).asException(cause = firstError))
+                } else {
+                    Result.success(Unit)
+                }
             }
         }
 
