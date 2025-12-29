@@ -81,9 +81,9 @@ class EpcNormalizerTest {
     }
 
     @Test
-    fun normalizeUhfEpcStripsNonHexCharacters() {
+    fun normalizeUhfEpcRejectsNonHexCharacters() {
         val result = normalizeUhfEpc("EPC=E2000017-2211-01441890ABCD")
-        assertEquals("E2000017221101441890ABCD", result)
+        assertNull(result)
     }
 
     @Test

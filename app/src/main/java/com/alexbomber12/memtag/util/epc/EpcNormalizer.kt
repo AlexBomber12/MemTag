@@ -15,10 +15,16 @@ private fun normalizeCandidate(raw: String): String {
             candidate.startsWith("EPC:") -> candidate.removePrefix("EPC:")
             candidate.startsWith("EPC=") -> candidate.removePrefix("EPC=")
             candidate.startsWith("EPC") -> candidate.removePrefix("EPC")
-            candidate.startsWith("0X") -> candidate.removePrefix("0X")
             else -> candidate
         }
-    return candidate.filter { char ->
+    if (candidate.startsWith("0X")) {
+        candidate = candidate.removePrefix("0X")
+    }
+    return candidate
+}
+
+private fun isHexOnly(value: String): Boolean {
+    return value.all { char ->
         char in '0'..'9' || char in 'A'..'F'
     }
 }
@@ -32,6 +38,7 @@ object EpcNormalizer {
         val normalized = normalizeCandidate(raw)
         require(normalized.isNotEmpty()) { "EPC cannot be empty." }
         require(isValidLength(normalized)) { "EPC must be 8-64 hex characters." }
+        require(isHexOnly(normalized)) { "EPC must contain only hex characters." }
         return normalized
     }
 }
@@ -39,6 +46,6 @@ object EpcNormalizer {
 object EpcValidator {
     fun isValidEpcHex(epc: String): Boolean {
         val normalized = normalizeCandidate(epc)
-        return normalized.isNotEmpty() && isValidLength(normalized)
+        return normalized.isNotEmpty() && isValidLength(normalized) && isHexOnly(normalized)
     }
 }
