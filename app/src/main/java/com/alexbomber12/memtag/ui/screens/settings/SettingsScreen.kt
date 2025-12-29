@@ -63,8 +63,6 @@ fun SettingsScreen(
     var libraryId by rememberSaveable { mutableStateOf(settings.mementoLibraryId) }
     var region by rememberSaveable { mutableStateOf(settings.uhfRegion) }
     var power by rememberSaveable { mutableStateOf(settings.uhfPower.toFloat()) }
-    var scanAction by rememberSaveable { mutableStateOf(settings.scan2dAction) }
-    var scanExtraKey by rememberSaveable { mutableStateOf(settings.scan2dExtraKey) }
     var rfidKeyCodes by rememberSaveable { mutableStateOf(settings.rfidKeyCodes) }
     var scanKeyCodes by rememberSaveable { mutableStateOf(settings.scanKeyCodes) }
     var tokenVisible by rememberSaveable { mutableStateOf(false) }
@@ -77,8 +75,6 @@ fun SettingsScreen(
         settings.mementoLibraryId,
         settings.uhfRegion,
         settings.uhfPower,
-        settings.scan2dAction,
-        settings.scan2dExtraKey,
         settings.rfidKeyCodes,
         settings.scanKeyCodes,
     ) {
@@ -87,8 +83,6 @@ fun SettingsScreen(
         libraryId = settings.mementoLibraryId
         region = settings.uhfRegion
         power = settings.uhfPower.toFloat()
-        scanAction = settings.scan2dAction
-        scanExtraKey = settings.scan2dExtraKey
         rfidKeyCodes = settings.rfidKeyCodes
         scanKeyCodes = settings.scanKeyCodes
     }
@@ -197,21 +191,6 @@ fun SettingsScreen(
             )
         }
 
-        AppCard(title = "2D Scan") {
-            OutlinedTextField(
-                value = scanAction,
-                onValueChange = { scanAction = it },
-                label = { Text(text = "Broadcast action") },
-                modifier = Modifier.fillMaxWidth(),
-            )
-            OutlinedTextField(
-                value = scanExtraKey,
-                onValueChange = { scanExtraKey = it },
-                label = { Text(text = "Broadcast extra key") },
-                modifier = Modifier.fillMaxWidth(),
-            )
-        }
-
         AppCard(title = "Hardware keys") {
             OutlinedTextField(
                 value = rfidKeyCodes,
@@ -230,6 +209,40 @@ fun SettingsScreen(
         }
 
         AppCard(title = "Find") {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(text = "Sound", style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        text = "Ticking audio feedback.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                Switch(
+                    checked = settings.findSoundEnabled,
+                    onCheckedChange = viewModel::toggleFindSound,
+                )
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(text = "Haptic", style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        text = "Vibration pulses.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                Switch(
+                    checked = settings.findHapticEnabled,
+                    onCheckedChange = viewModel::toggleFindHaptic,
+                )
+            }
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -348,8 +361,8 @@ fun SettingsScreen(
                         mementoLibraryId = libraryId,
                         uhfRegion = region,
                         uhfPower = power.toInt(),
-                        scan2dAction = scanAction,
-                        scan2dExtraKey = scanExtraKey,
+                        scan2dAction = settings.scan2dAction,
+                        scan2dExtraKey = settings.scan2dExtraKey,
                         rfidKeyCodes = rfidKeyCodes,
                         scanKeyCodes = scanKeyCodes,
                     ),
