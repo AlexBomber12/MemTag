@@ -160,6 +160,7 @@ class FindViewModel(
         if (epcRaw.isBlank()) {
             return
         }
+        val wasRunning = uiState.value.isRunning
         val normalized = canonicalizeEpc(epcRaw) ?: return
         val shouldUpdate = uiState.value.epcInput != normalized
         if (shouldUpdate) {
@@ -179,6 +180,10 @@ class FindViewModel(
                 )
             }
             persistFindTarget(normalized)
+        }
+        if (shouldUpdate && wasRunning) {
+            refreshCalculator()
+            reapplyFindProfile()
         }
         if (autoStart && autoStartConsumedForEpc != normalized && !uiState.value.isRunning) {
             autoStartConsumedForEpc = normalized
