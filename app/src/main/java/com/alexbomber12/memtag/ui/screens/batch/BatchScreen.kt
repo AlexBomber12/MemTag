@@ -118,24 +118,7 @@ fun BatchScreen(
         )
     }
 
-    val canExport = state.inputItems.isNotEmpty()
-
-    val filteredItems =
-        if (state.mode == BatchMode.MANUAL_SCAN) {
-            when (state.manualFilter) {
-                BatchFilter.ALL -> state.inputItems
-                BatchFilter.NOT_FOUND ->
-                    state.inputItems.filter {
-                        state.sessionMap[it.epcNormalized]?.status == BatchStatus.NOT_FOUND
-                    }
-                BatchFilter.UNKNOWN ->
-                    state.inputItems.filter {
-                        state.sessionMap[it.epcNormalized]?.status == BatchStatus.UNKNOWN
-                    }
-            }
-        } else {
-            state.inputItems
-        }
+    val canExport = state.inputItems.isNotEmpty() && !state.manualSessionActive
 
     LazyColumn(
         modifier =
@@ -209,13 +192,13 @@ fun BatchScreen(
                         selected = state.mode == BatchMode.INVENTORY_SWEEP,
                         onClick = { viewModel.setMode(BatchMode.INVENTORY_SWEEP) },
                         label = { Text(text = "Inventory sweep") },
-                        enabled = !state.sweepRunning,
+                        enabled = !state.sweepRunning && !state.manualSessionActive,
                     )
                     FilterChip(
                         selected = state.mode == BatchMode.MANUAL_SCAN,
                         onClick = { viewModel.setMode(BatchMode.MANUAL_SCAN) },
                         label = { Text(text = "Manual scan") },
-                        enabled = !state.sweepRunning,
+                        enabled = !state.sweepRunning && !state.manualSessionActive,
                     )
                 }
             }
@@ -240,10 +223,8 @@ fun BatchScreen(
                     state = state,
                     dateFormatter = dateFormatter,
                     onScan = viewModel::scanOnce,
-                    onMarkNotFound = viewModel::markNotFoundCurrent,
-                    onFinishSession = viewModel::finishManualSession,
+                    onToggleSession = viewModel::toggleManualSession,
                     onUndo = viewModel::undoLast,
-                    onFilterChange = viewModel::setManualFilter,
                 )
             }
         }
@@ -277,12 +258,8 @@ fun BatchScreen(
             item {
                 Text(text = "Import a CSV to get started.")
             }
-        } else if (filteredItems.isEmpty()) {
-            item {
-                Text(text = "No items match the current filter.")
-            }
         } else {
-            items(filteredItems, key = { it.epcNormalized }) { item ->
+            items(state.inputItems, key = { it.epcNormalized }) { item ->
                 val session = state.sessionMap[item.epcNormalized]
                 BatchItemRow(
                     item = item,
@@ -324,15 +301,38 @@ private fun ManualPanel(
     state: BatchUiState,
     dateFormatter: DateFormat,
     onScan: () -> Unit,
-    onMarkNotFound: () -> Unit,
-    onFinishSession: () -> Unit,
+    onToggleSession: () -> Unit,
     onUndo: () -> Unit,
-    onFilterChange: (BatchFilter) -> Unit,
 ) {
     AppCard(title = "Manual Scan") {
+        val sessionLabel = if (state.manualSessionActive) "Running" else "Stopped"
+        Text(
+            text = "Session: $sessionLabel",
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        Row(
+            modifier = Modifier.horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            SummaryChip(label = "Scans", count = state.manualScanCount)
+            SummaryChip(label = "Found", count = state.manualFoundCount)
+            if (state.manualSessionActive) {
+                SummaryChip(label = "Remaining", count = state.manualUnknownCount)
+            }
+        }
+        if (!state.manualSessionActive && state.summary.total > 0 && state.summary.unknown == 0) {
+            Row(
+                modifier = Modifier.horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                SummaryChip(label = "Found", count = state.summary.found)
+                SummaryChip(label = "Not found", count = state.summary.notFound)
+                SummaryChip(label = "Extras", count = state.summary.extra)
+            }
+        }
         val current = state.currentRowEpc
         if (current == null) {
-            Text(text = "Select an item from the list to get started.")
+            Text(text = "Select an item to highlight it.")
         } else {
             Text(
                 text = "Current: $current",
@@ -350,8 +350,15 @@ private fun ManualPanel(
         }
         if (state.lastScanEpc != null) {
             val rssiLabel = state.lastScanRssi?.let { " RSSI $it" }.orEmpty()
+            val matchLabel =
+                when (state.lastScanMatched) {
+                    true -> "Matched"
+                    false -> "Extra"
+                    null -> null
+                }
+            val matchSuffix = matchLabel?.let { " ($it)" }.orEmpty()
             Text(
-                text = "Last scan: ${state.lastScanEpc}$rssiLabel",
+                text = "Last scan: ${state.lastScanEpc}$rssiLabel$matchSuffix",
                 style = MaterialTheme.typography.bodySmall,
             )
         }
@@ -363,53 +370,31 @@ private fun ManualPanel(
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             PrimaryButton(
-                text = "Scan",
-                onClick = onScan,
+                text = if (state.manualSessionActive) "Finish session" else "Start session",
+                onClick = onToggleSession,
                 modifier = Modifier.weight(1f),
                 enabled = !state.isScanning && !state.sweepRunning,
             )
             SecondaryButton(
-                text = "Mark not found",
-                onClick = onMarkNotFound,
+                text = "Scan",
+                onClick = onScan,
                 modifier = Modifier.weight(1f),
-                enabled = current != null,
+                enabled = state.manualSessionActive && !state.isScanning && !state.sweepRunning,
             )
         }
-        SecondaryButton(
-            text = "Finish session",
-            onClick = onFinishSession,
-            modifier = Modifier.fillMaxWidth(),
-            enabled = state.summary.unknown > 0,
-        )
         SecondaryButton(
             text = "Undo last",
             onClick = onUndo,
             modifier = Modifier.fillMaxWidth(),
             enabled = state.canUndo,
         )
+        Text(
+            text = "Trigger scans once while the session is running.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
         if (state.isScanning) {
             LoadingState(message = "Scanning RFID...")
-        }
-        Text(text = "Filter")
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            FilterChip(
-                selected = state.manualFilter == BatchFilter.ALL,
-                onClick = { onFilterChange(BatchFilter.ALL) },
-                label = { Text(text = "All") },
-            )
-            FilterChip(
-                selected = state.manualFilter == BatchFilter.NOT_FOUND,
-                onClick = { onFilterChange(BatchFilter.NOT_FOUND) },
-                label = { Text(text = "Not found") },
-            )
-            FilterChip(
-                selected = state.manualFilter == BatchFilter.UNKNOWN,
-                onClick = { onFilterChange(BatchFilter.UNKNOWN) },
-                label = { Text(text = "Unknown") },
-            )
         }
     }
 }
