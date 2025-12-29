@@ -39,7 +39,6 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.alexbomber12.memtag.app.HardwareAction
-import com.alexbomber12.memtag.domain.batch.BatchExtraEntry
 import com.alexbomber12.memtag.domain.batch.BatchInputItem
 import com.alexbomber12.memtag.domain.batch.BatchSessionEntry
 import com.alexbomber12.memtag.domain.batch.BatchStatus
@@ -173,18 +172,6 @@ fun BatchScreen(
                     modifier = Modifier.fillMaxWidth(),
                     enabled = state.inputItems.isNotEmpty() || state.extras.isNotEmpty(),
                 )
-                Text(
-                    text = "Import supports Memento CSV with columns Name and EPC.",
-                    style = MaterialTheme.typography.bodySmall,
-                )
-                Text(
-                    text = "Export columns: Name, Status, EPC, UpdatedAt.",
-                    style = MaterialTheme.typography.bodySmall,
-                )
-                Text(
-                    text = "Status: Unknown (not scanned), Found (seen), NotFound (finished, not seen).",
-                    style = MaterialTheme.typography.bodySmall,
-                )
                 if (state.isImporting) {
                     LoadingState(message = "Importing CSV...")
                 }
@@ -219,8 +206,8 @@ fun BatchScreen(
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     FilterChip(
-                        selected = state.mode == BatchMode.SWEEP,
-                        onClick = { viewModel.setMode(BatchMode.SWEEP) },
+                        selected = state.mode == BatchMode.INVENTORY_SWEEP,
+                        onClick = { viewModel.setMode(BatchMode.INVENTORY_SWEEP) },
                         label = { Text(text = "Inventory sweep") },
                         enabled = !state.sweepRunning,
                     )
@@ -234,13 +221,17 @@ fun BatchScreen(
             }
         }
 
-        if (state.mode == BatchMode.SWEEP) {
+        if (state.mode == BatchMode.INVENTORY_SWEEP) {
             item {
                 SweepPanel(
                     state = state,
-                    onDurationChange = viewModel::setSweepDuration,
-                    onStart = viewModel::startSweep,
-                    onStop = viewModel::stopSweep,
+                    onToggle = {
+                        if (state.sweepRunning) {
+                            viewModel.stopSweep()
+                        } else {
+                            viewModel.startSweep()
+                        }
+                    },
                 )
             }
         } else {
@@ -282,20 +273,6 @@ fun BatchScreen(
             }
         }
 
-        item {
-            ExtrasPanel(
-                extras = state.extras,
-                dateFormatter = dateFormatter,
-            )
-        }
-
-        item {
-            Text(
-                text = "Batch Items",
-                style = MaterialTheme.typography.titleMedium,
-            )
-        }
-
         if (state.inputItems.isEmpty()) {
             item {
                 Text(text = "Import a CSV to get started.")
@@ -323,43 +300,19 @@ fun BatchScreen(
 @Composable
 private fun SweepPanel(
     state: BatchUiState,
-    onDurationChange: (Long) -> Unit,
-    onStart: () -> Unit,
-    onStop: () -> Unit,
+    onToggle: () -> Unit,
 ) {
     AppCard(title = "Inventory Sweep") {
-        Text(text = "Duration")
-        Row(
+        PrimaryButton(
+            text = if (state.sweepRunning) "Stop sweep" else "Start sweep",
+            onClick = onToggle,
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            val options = listOf(2_000L to "2s", 5_000L to "5s", 10_000L to "10s")
-            options.forEach { (duration, label) ->
-                FilterChip(
-                    selected = state.sweepDurationMs == duration,
-                    onClick = { onDurationChange(duration) },
-                    label = { Text(text = label) },
-                    enabled = !state.sweepRunning,
-                )
-            }
-        }
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            PrimaryButton(
-                text = "Start sweep",
-                onClick = onStart,
-                modifier = Modifier.weight(1f),
-                enabled = !state.sweepRunning,
-            )
-            SecondaryButton(
-                text = "Stop",
-                onClick = onStop,
-                modifier = Modifier.weight(1f),
-                enabled = state.sweepRunning,
-            )
-        }
+        )
+        Text(
+            text = "Trigger toggles start/stop",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
         if (state.sweepRunning) {
             LoadingState(message = "Sweeping tags...")
         }
@@ -458,45 +411,6 @@ private fun ManualPanel(
                 label = { Text(text = "Unknown") },
             )
         }
-    }
-}
-
-@Composable
-private fun ExtrasPanel(
-    extras: Map<String, BatchExtraEntry>,
-    dateFormatter: DateFormat,
-) {
-    AppCard(title = "Extras") {
-        if (extras.isEmpty()) {
-            Text(text = "No extra tags scanned yet.")
-        } else {
-            extras.values.sortedBy { it.epcNormalized }.forEach { extra ->
-                ExtraRow(extra = extra, dateFormatter = dateFormatter)
-            }
-        }
-    }
-}
-
-@Composable
-private fun ExtraRow(
-    extra: BatchExtraEntry,
-    dateFormatter: DateFormat,
-) {
-    Column(
-        modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
-    ) {
-        Text(
-            text = extra.epcNormalized,
-            style = MaterialTheme.typography.bodyMedium,
-            fontFamily = FontFamily.Monospace,
-        )
-        val seen = extra.lastSeenAt?.let { dateFormatter.format(Date(it)) } ?: "--"
-        val rssi = extra.lastRssi?.toString() ?: "--"
-        Text(
-            text = "Last seen: $seen | RSSI: $rssi",
-            style = MaterialTheme.typography.bodySmall,
-        )
     }
 }
 
