@@ -603,9 +603,9 @@ class FindViewModel(
 
     private fun hapticDurationMs(proximity: Int): Long {
         return when {
-            proximity < 40 -> 25L
-            proximity < 70 -> 45L
-            else -> 70L
+            proximity < 40 -> 60L
+            proximity < 70 -> 70L
+            else -> 80L
         }
     }
 

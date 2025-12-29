@@ -3,6 +3,7 @@ package com.alexbomber12.memtag.integrations.feedback
 import android.content.Context
 import android.media.AudioManager
 import android.media.ToneGenerator
+import android.os.SystemClock
 
 interface FindFeedbackController {
     fun playSound()
@@ -14,9 +15,10 @@ interface FindFeedbackController {
 
 class DeviceFindFeedbackController(
     context: Context,
+    private val hapticEngine: HapticEngine = SystemHapticEngine(context),
 ) : FindFeedbackController {
-    private val appContext = context.applicationContext
     private var toneGenerator: ToneGenerator? = null
+    private var lastVibrateAtMs: Long = 0L
 
     override fun playSound() {
         val generator =
@@ -26,7 +28,12 @@ class DeviceFindFeedbackController(
     }
 
     override fun vibrate(durationMs: Long) {
-        VibrationHelper.vibrate(appContext, durationMs)
+        val now = SystemClock.elapsedRealtime()
+        if (now - lastVibrateAtMs < MIN_VIBRATE_INTERVAL_MS) {
+            return
+        }
+        lastVibrateAtMs = now
+        hapticEngine.pulse(durationMs)
     }
 
     override fun release() {
@@ -37,5 +44,6 @@ class DeviceFindFeedbackController(
     private companion object {
         const val TONE_VOLUME = 80
         const val TONE_DURATION_MS = 40
+        const val MIN_VIBRATE_INTERVAL_MS = 60L
     }
 }
