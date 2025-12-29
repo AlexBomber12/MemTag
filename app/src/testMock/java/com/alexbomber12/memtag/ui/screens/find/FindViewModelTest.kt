@@ -1,5 +1,6 @@
 package com.alexbomber12.memtag.ui.screens.find
 
+import com.alexbomber12.memtag.app.SessionFlagsStore
 import com.alexbomber12.memtag.data.settings.AppSettings
 import com.alexbomber12.memtag.data.settings.SettingsStore
 import com.alexbomber12.memtag.integrations.feedback.FindFeedbackController
@@ -77,6 +78,7 @@ class FindViewModelTest {
             settingsStore = FakeSettingsStore(),
             uhfReader = reader,
             feedbackController = FakeFeedbackController(),
+            sessionFlagsStore = SessionFlagsStore(),
         )
     }
 }

@@ -2,6 +2,7 @@ package com.alexbomber12.memtag.ui.screens.find
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.alexbomber12.memtag.app.SessionFlagsStore
 import com.alexbomber12.memtag.data.AppDefaults
 import com.alexbomber12.memtag.data.settings.SettingsStore
 import com.alexbomber12.memtag.domain.find.ProximityCalculator
@@ -75,6 +76,7 @@ class FindViewModel(
     private val settingsStore: SettingsStore,
     private val uhfReader: UhfReader,
     private val feedbackController: FindFeedbackController,
+    private val sessionFlagsStore: SessionFlagsStore,
     private val clock: () -> Long = { System.currentTimeMillis() },
 ) : ViewModel() {
     private val mutableState = MutableStateFlow(FindUiState())
@@ -290,6 +292,7 @@ class FindViewModel(
                 )
             updated.copy(matchStatus = computeMatchStatus(updated))
         }
+        sessionFlagsStore.setFindRunning(true)
         scanStartMs = System.currentTimeMillis()
         UhfLogger.i("ScanRFID start (screen=find source=inventory usedMethod=inventory)")
         startTicker()
@@ -373,6 +376,7 @@ class FindViewModel(
                 } finally {
                     uhfReader.stopInventory()
                     uhfReader.clearFindProfile()
+                    sessionFlagsStore.setFindRunning(false)
                 }
             }
         inventoryJob = job
@@ -390,6 +394,7 @@ class FindViewModel(
     }
 
     fun stopFind() {
+        sessionFlagsStore.setFindRunning(false)
         inventoryJob?.cancel()
         inventoryJob = null
         reapplyProfileJob?.cancel()
@@ -508,6 +513,7 @@ class FindViewModel(
                 status = FindStatus.Error(message),
             )
         }
+        sessionFlagsStore.setFindRunning(false)
         uhfReader.stopInventory()
         logScanEnd("error")
     }

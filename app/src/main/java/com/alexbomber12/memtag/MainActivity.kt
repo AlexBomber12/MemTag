@@ -7,12 +7,15 @@ import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.os.Bundle
 import android.view.KeyEvent
+import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import com.alexbomber12.memtag.app.HardwareAction
 import com.alexbomber12.memtag.app.MemTagApplication
@@ -38,6 +41,16 @@ class MainActivity : ComponentActivity() {
             }
         }
         setContent {
+            val sessionActive by appContainer.sessionFlagsStore.sessionActive.collectAsStateWithLifecycle(
+                initialValue = false,
+            )
+            LaunchedEffect(sessionActive) {
+                if (sessionActive) {
+                    window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                } else {
+                    window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                }
+            }
             MemTagTheme {
                 MemTagApp(
                     appContainer = appContainer,

@@ -2,6 +2,7 @@ package com.alexbomber12.memtag.ui.screens.repair
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.alexbomber12.memtag.app.SessionFlagsStore
 import com.alexbomber12.memtag.data.settings.SelectedLookupCard
 import com.alexbomber12.memtag.data.settings.SettingsStore
 import com.alexbomber12.memtag.db.ActionsLogDao
@@ -74,6 +75,7 @@ class RepairViewModel(
     private val scan2dScanner: Scan2dScanner,
     private val actionsLogDao: ActionsLogDao,
     private val settingsStore: SettingsStore,
+    private val sessionFlagsStore: SessionFlagsStore,
     private val clock: () -> Long = { System.currentTimeMillis() },
 ) : ViewModel() {
     private val mutableState = MutableStateFlow(RepairUiState())
@@ -164,6 +166,7 @@ class RepairViewModel(
             return
         }
         mutableState.update { it.copy(isReading = true, isScanningQr = false, message = null, errorMessage = null) }
+        sessionFlagsStore.setVerifyRunning(true)
         val job =
             viewModelScope.launch {
                 try {
@@ -198,6 +201,7 @@ class RepairViewModel(
                     applyScannedEpc(normalized)
                 } finally {
                     clearScanFlags()
+                    sessionFlagsStore.setVerifyRunning(false)
                 }
             }
         operationJob = job
@@ -215,6 +219,7 @@ class RepairViewModel(
             return
         }
         mutableState.update { it.copy(isScanningQr = true, isReading = false, message = null, errorMessage = null) }
+        sessionFlagsStore.setVerifyRunning(true)
         val job =
             viewModelScope.launch {
                 try {
@@ -243,6 +248,7 @@ class RepairViewModel(
                         }
                 } finally {
                     clearScanFlags()
+                    sessionFlagsStore.setVerifyRunning(false)
                 }
             }
         operationJob = job
@@ -287,6 +293,7 @@ class RepairViewModel(
     }
 
     fun cancelOperations() {
+        sessionFlagsStore.setVerifyRunning(false)
         operationJob?.cancel()
         operationJob = null
         viewModelScope.launch {
@@ -312,68 +319,75 @@ class RepairViewModel(
     }
 
     private fun performWrite(expectedEpc: String) {
+        sessionFlagsStore.setVerifyRunning(true)
         val job =
             viewModelScope.launch {
-                mutableState.update { it.copy(isWriting = true, isVerifying = false, message = null, errorMessage = null) }
-                logAction(
-                    actionType = RepairActionType.REPAIR_WRITE_ATTEMPT,
-                    expectedEpc = expectedEpc,
-                    currentEpc = uiState.value.scannedEpc,
-                    result = RepairActionResult.SUCCESS,
-                    message = null,
-                )
-                val initResult = uhfReader.initialize()
-                if (initResult.isFailure) {
-                    handleWriteFailure(initResult.exceptionOrNull())
-                    return@launch
-                }
-                uhfReader.stopInventory()
-                val applyResult = uhfReader.applyDesiredConfigBestEffort("verify-write")
-                if (applyResult.isFailure) {
-                    UhfLogger.w(
-                        "verifyWrite config apply failed: " +
-                            (applyResult.exceptionOrNull()?.message ?: "unknown"),
-                    )
-                } else {
-                    val applied = applyResult.getOrNull()
-                    if (applied != null && !applied.success) {
-                        UhfLogger.w("verifyWrite config apply incomplete: ${applied.toErrorMessage()}")
+                try {
+                    mutableState.update {
+                        it.copy(isWriting = true, isVerifying = false, message = null, errorMessage = null)
                     }
-                }
-                val writeResult = uhfReader.writeEpc(expectedEpc, WRITE_TIMEOUT_MS)
-                if (writeResult.isFailure) {
-                    handleWriteFailure(writeResult.exceptionOrNull())
-                    return@launch
-                }
-                mutableState.update { it.copy(isWriting = false, isVerifying = true) }
-                val verifyResult = uhfReader.verifyEpc(expectedEpc, VERIFY_TIMEOUT_MS)
-                val verified = verifyResult.getOrNull()
-                if (verifyResult.isFailure || verified != true) {
-                    val message =
-                        if (verifyResult.isFailure) {
-                            verifyResult.exceptionOrNull()?.message ?: "Verify failed."
-                        } else {
-                            "Verify mismatch after write."
-                        }
-                    handleWriteFailure(verifyResult.exceptionOrNull(), message)
-                    return@launch
-                }
-                updateStateWithStatus { state ->
-                    state.copy(
-                        isWriting = false,
-                        isVerifying = false,
-                        scannedEpc = expectedEpc,
-                        message = "Write verified.",
-                        errorMessage = null,
+                    logAction(
+                        actionType = RepairActionType.REPAIR_WRITE_ATTEMPT,
+                        expectedEpc = expectedEpc,
+                        currentEpc = uiState.value.scannedEpc,
+                        result = RepairActionResult.SUCCESS,
+                        message = null,
                     )
+                    val initResult = uhfReader.initialize()
+                    if (initResult.isFailure) {
+                        handleWriteFailure(initResult.exceptionOrNull())
+                        return@launch
+                    }
+                    uhfReader.stopInventory()
+                    val applyResult = uhfReader.applyDesiredConfigBestEffort("verify-write")
+                    if (applyResult.isFailure) {
+                        UhfLogger.w(
+                            "verifyWrite config apply failed: " +
+                                (applyResult.exceptionOrNull()?.message ?: "unknown"),
+                        )
+                    } else {
+                        val applied = applyResult.getOrNull()
+                        if (applied != null && !applied.success) {
+                            UhfLogger.w("verifyWrite config apply incomplete: ${applied.toErrorMessage()}")
+                        }
+                    }
+                    val writeResult = uhfReader.writeEpc(expectedEpc, WRITE_TIMEOUT_MS)
+                    if (writeResult.isFailure) {
+                        handleWriteFailure(writeResult.exceptionOrNull())
+                        return@launch
+                    }
+                    mutableState.update { it.copy(isWriting = false, isVerifying = true) }
+                    val verifyResult = uhfReader.verifyEpc(expectedEpc, VERIFY_TIMEOUT_MS)
+                    val verified = verifyResult.getOrNull()
+                    if (verifyResult.isFailure || verified != true) {
+                        val message =
+                            if (verifyResult.isFailure) {
+                                verifyResult.exceptionOrNull()?.message ?: "Verify failed."
+                            } else {
+                                "Verify mismatch after write."
+                            }
+                        handleWriteFailure(verifyResult.exceptionOrNull(), message)
+                        return@launch
+                    }
+                    updateStateWithStatus { state ->
+                        state.copy(
+                            isWriting = false,
+                            isVerifying = false,
+                            scannedEpc = expectedEpc,
+                            message = "Write verified.",
+                            errorMessage = null,
+                        )
+                    }
+                    logAction(
+                        actionType = RepairActionType.REPAIR_WRITE_SUCCESS,
+                        expectedEpc = expectedEpc,
+                        currentEpc = expectedEpc,
+                        result = RepairActionResult.SUCCESS,
+                        message = null,
+                    )
+                } finally {
+                    sessionFlagsStore.setVerifyRunning(false)
                 }
-                logAction(
-                    actionType = RepairActionType.REPAIR_WRITE_SUCCESS,
-                    expectedEpc = expectedEpc,
-                    currentEpc = expectedEpc,
-                    result = RepairActionResult.SUCCESS,
-                    message = null,
-                )
             }
         operationJob = job
         job.invokeOnCompletion { error ->

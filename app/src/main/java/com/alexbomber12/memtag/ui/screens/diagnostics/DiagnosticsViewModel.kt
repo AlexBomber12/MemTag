@@ -2,6 +2,7 @@ package com.alexbomber12.memtag.ui.screens.diagnostics
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.alexbomber12.memtag.app.SessionFlagsStore
 import com.alexbomber12.memtag.data.AppDefaults
 import com.alexbomber12.memtag.data.settings.AppSettings
 import com.alexbomber12.memtag.data.settings.SettingsStore
@@ -66,6 +67,7 @@ data class DiagnosticsUiState(
 class DiagnosticsViewModel(
     private val settingsStore: SettingsStore,
     private val uhfReader: UhfReader,
+    private val sessionFlagsStore: SessionFlagsStore,
 ) : ViewModel() {
     private val mutableState = MutableStateFlow(DiagnosticsUiState())
     val uiState: StateFlow<DiagnosticsUiState> = mutableState
@@ -342,6 +344,7 @@ class DiagnosticsViewModel(
         if (uiState.value.isMatrixProbeRunning) {
             return
         }
+        sessionFlagsStore.setDiagRunning(true)
         mutableState.update {
             it.copy(
                 isMatrixProbeRunning = true,
@@ -351,27 +354,31 @@ class DiagnosticsViewModel(
             )
         }
         viewModelScope.launch {
-            val wasInventoryRunning = uiState.value.isInventoryRunning
-            if (wasInventoryRunning) {
-                inventoryJob?.cancel()
-                inventoryJob = null
-            }
-            if (wasInventoryRunning) {
-                uhfReader.stopInventory()
-                setInventoryRunning(false)
-            }
-            val result = runCatching { uhfReader.runMatrixProbe() }
-            if (result.isSuccess) {
-                mutableState.update {
-                    it.copy(
-                        isMatrixProbeRunning = false,
-                        matrixProbeCurrent = null,
-                        matrixProbeResults = result.getOrNull().orEmpty(),
-                    )
+            try {
+                val wasInventoryRunning = uiState.value.isInventoryRunning
+                if (wasInventoryRunning) {
+                    inventoryJob?.cancel()
+                    inventoryJob = null
                 }
-            } else {
-                mutableState.update { it.copy(isMatrixProbeRunning = false, matrixProbeCurrent = null) }
-                updateError(result.exceptionOrNull())
+                if (wasInventoryRunning) {
+                    uhfReader.stopInventory()
+                    setInventoryRunning(false)
+                }
+                val result = runCatching { uhfReader.runMatrixProbe() }
+                if (result.isSuccess) {
+                    mutableState.update {
+                        it.copy(
+                            isMatrixProbeRunning = false,
+                            matrixProbeCurrent = null,
+                            matrixProbeResults = result.getOrNull().orEmpty(),
+                        )
+                    }
+                } else {
+                    mutableState.update { it.copy(isMatrixProbeRunning = false, matrixProbeCurrent = null) }
+                    updateError(result.exceptionOrNull())
+                }
+            } finally {
+                sessionFlagsStore.setDiagRunning(false)
             }
         }
     }
@@ -384,6 +391,7 @@ class DiagnosticsViewModel(
             return
         }
         mutableState.update { it.copy(lastErrorMessage = null) }
+        sessionFlagsStore.setDiagRunning(true)
         val job =
             viewModelScope.launch {
                 UhfLogger.i("ScanRFID start (screen=diagnostics source=inventory usedMethod=inventory)")
@@ -427,6 +435,7 @@ class DiagnosticsViewModel(
         job.invokeOnCompletion {
             inventoryJob = null
             setInventoryRunning(false)
+            sessionFlagsStore.setDiagRunning(false)
         }
     }
 
@@ -434,6 +443,7 @@ class DiagnosticsViewModel(
         if (uiState.value.isMatrixProbeRunning) {
             return
         }
+        sessionFlagsStore.setDiagRunning(false)
         inventoryJob?.cancel()
         inventoryJob = null
         viewModelScope.launch {
