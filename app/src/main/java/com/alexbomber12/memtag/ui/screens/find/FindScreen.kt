@@ -217,24 +217,12 @@ fun FindScreen(
             }
         }
 
-        item {
-            AppCard(
-                title = "Controls",
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                ToggleRow(
-                    title = "Sound",
-                    description = "Ticking audio feedback",
-                    checked = uiState.soundEnabled,
-                    onCheckedChange = viewModel::setSoundEnabled,
-                )
-                ToggleRow(
-                    title = "Haptic",
-                    description = "Vibration pulses",
-                    checked = uiState.hapticEnabled,
-                    onCheckedChange = viewModel::setHapticEnabled,
-                )
-                if (showBackToBatch) {
+        if (showBackToBatch) {
+            item {
+                AppCard(
+                    title = "Actions",
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
                     SecondaryButton(
                         text = "Back to Batch",
                         onClick = onBackToBatch,

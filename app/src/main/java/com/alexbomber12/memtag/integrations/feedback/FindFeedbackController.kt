@@ -3,9 +3,6 @@ package com.alexbomber12.memtag.integrations.feedback
 import android.content.Context
 import android.media.AudioManager
 import android.media.ToneGenerator
-import android.os.Build
-import android.os.VibrationEffect
-import android.os.Vibrator
 
 interface FindFeedbackController {
     fun playSound()
@@ -19,7 +16,6 @@ class DeviceFindFeedbackController(
     context: Context,
 ) : FindFeedbackController {
     private val appContext = context.applicationContext
-    private val vibrator = appContext.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator?
     private var toneGenerator: ToneGenerator? = null
 
     override fun playSound() {
@@ -30,16 +26,7 @@ class DeviceFindFeedbackController(
     }
 
     override fun vibrate(durationMs: Long) {
-        val vib = vibrator ?: return
-        if (!vib.hasVibrator()) {
-            return
-        }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            vib.vibrate(VibrationEffect.createOneShot(durationMs, VibrationEffect.DEFAULT_AMPLITUDE))
-        } else {
-            @Suppress("DEPRECATION")
-            vib.vibrate(durationMs)
-        }
+        VibrationHelper.vibrate(appContext, durationMs)
     }
 
     override fun release() {

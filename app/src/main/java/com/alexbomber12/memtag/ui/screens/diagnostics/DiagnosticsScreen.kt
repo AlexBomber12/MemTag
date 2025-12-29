@@ -33,10 +33,13 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.alexbomber12.memtag.data.AppDefaults
+import com.alexbomber12.memtag.integrations.feedback.VibrationHelper
+import com.alexbomber12.memtag.integrations.feedback.VibrationResult
 import com.alexbomber12.memtag.integrations.uhf.ProtocolSupport
 import com.alexbomber12.memtag.integrations.uhf.UHF_CONFIG_BUSY
 import com.alexbomber12.memtag.integrations.uhf.UHF_PROTOCOL_UNSUPPORTED
@@ -57,8 +60,10 @@ fun DiagnosticsScreen(viewModel: DiagnosticsViewModel) {
         }
     }
 
+    val context = LocalContext.current
     var regionExpanded by rememberSaveable { mutableStateOf(false) }
     var pendingPower by rememberSaveable { mutableStateOf(state.currentPower.toFloat()) }
+    var vibrationStatus by rememberSaveable { mutableStateOf<String?>(null) }
 
     LaunchedEffect(state.currentPower) {
         pendingPower = state.currentPower.toFloat()
@@ -362,6 +367,34 @@ fun DiagnosticsScreen(viewModel: DiagnosticsViewModel) {
                         enabled = canApplyConfig,
                         modifier = Modifier.weight(1f),
                     )
+                }
+            }
+        }
+
+        item {
+            AppCard(title = "Feedback") {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    PrimaryButton(
+                        text = "Test vibration",
+                        onClick = {
+                            vibrationStatus =
+                                when (VibrationHelper.shortPulse(context)) {
+                                    VibrationResult.Triggered -> "Vibration triggered"
+                                    VibrationResult.NoVibrator -> "No vibrator available"
+                                }
+                        },
+                        modifier = Modifier.weight(1f),
+                    )
+                    vibrationStatus?.let { status ->
+                        Text(
+                            text = status,
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
                 }
             }
         }

@@ -110,6 +110,18 @@ class SettingsViewModel(
         }
     }
 
+    fun toggleFindSound(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsStore.update { current -> current.copy(findSoundEnabled = enabled) }
+        }
+    }
+
+    fun toggleFindHaptic(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsStore.update { current -> current.copy(findHapticEnabled = enabled) }
+        }
+    }
+
     fun toggleFindDebugOverlay(enabled: Boolean) {
         viewModelScope.launch {
             settingsStore.update { current -> current.copy(showFindDebugOverlay = enabled) }

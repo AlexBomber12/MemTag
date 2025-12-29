@@ -204,20 +204,6 @@ class FindViewModel(
         persistFindTarget(normalized)
     }
 
-    fun setSoundEnabled(enabled: Boolean) {
-        mutableState.update { it.copy(soundEnabled = enabled) }
-        viewModelScope.launch {
-            settingsStore.update { it.copy(findSoundEnabled = enabled) }
-        }
-    }
-
-    fun setHapticEnabled(enabled: Boolean) {
-        mutableState.update { it.copy(hapticEnabled = enabled) }
-        viewModelScope.launch {
-            settingsStore.update { it.copy(findHapticEnabled = enabled) }
-        }
-    }
-
     fun setDebugDisableFilter(enabled: Boolean) {
         mutableState.update { state ->
             val updated = state.copy(debugDisableFilter = enabled)
