@@ -229,98 +229,121 @@ class ChainwayUhfReader(
 
     override suspend fun writeEpc(
         epcHex: String,
+        targetEpcHex: String?,
         timeoutMs: Long,
     ): Result<Unit> =
         mutex.withLock {
             if (!initialized) {
                 return@withLock Result.failure(UhfError.NotInitialized.asException())
             }
-            if (isUhfBusy()) {
-                return@withLock configBusyResult(op = "setPower", reason = "manual")
-            }
             val instance = reader ?: return@withLock Result.failure(UhfError.HardwareUnavailable.asException())
-            val normalized =
-                runCatching { EpcNormalizer.normalize(epcHex) }.getOrElse { error ->
+            if (scanRunning) {
+                UhfLogger.debugInfo("writeEpc blocked: scanRunning=true")
+                return@withLock Result.failure(UhfError.OperationInProgress.asException())
+            }
+            if (inventoryRunning || inventoryJob != null) {
+                val stopped = stopInventoryBestEffortLocked(instance)
+                if (!stopped) {
+                    UhfLogger.debugInfo("writeEpc blocked: stopInventory failed")
+                    return@withLock Result.failure(UhfError.OperationInProgress.asException())
+                }
+            }
+            val params =
+                runCatching { buildEpcWriteParams(epcHex) }.getOrElse { error ->
                     return@withLock Result.failure(
                         UhfError.VendorError(error.message ?: "Invalid EPC").asException(cause = error),
                     )
                 }
-            if (normalized.length % EPC_WORD_HEX_LENGTH != 0) {
-                return@withLock Result.failure(
-                    UhfError.VendorError("EPC must be a multiple of 4 hex characters.")
-                        .asException(),
-                )
-            }
-            val wordCount = normalized.length / EPC_WORD_HEX_LENGTH
-            if (wordCount > EPC_MAX_WORDS) {
+            if (params.wordCount > EPC_MAX_WORDS) {
                 return@withLock Result.failure(
                     UhfError.VendorError("EPC length exceeds maximum supported size.")
                         .asException(),
                 )
             }
+            val normalizedTarget =
+                targetEpcHex
+                    ?.takeIf { it.isNotBlank() }
+                    ?.let {
+                        runCatching { EpcNormalizer.normalize(it) }.getOrElse { error ->
+                            return@withLock Result.failure(
+                                UhfError.VendorError(error.message ?: "Invalid target EPC").asException(cause = error),
+                            )
+                        }
+                    }
+            val selectApplied = normalizedTarget != null
+            val selectPtrBits = if (selectApplied) EPC_SELECT_PTR_BITS else 0
+            val selectLenBits = if (selectApplied) normalizedTarget.length * 4 else 0
+            val payloadPreview = bytesToHexPrefix(params.payloadBytes, 4)
+            val accessPwdIsZero = DEFAULT_ACCESS_PASSWORD.all { it == '0' }
+            UhfLogger.debugInfo(
+                "writeEpc request expected=${params.normalizedEpc} scanned=${normalizedTarget ?: "--"} " +
+                    "bank=$EPC_MEMORY_BANK wordPtr=${params.wordPtr} wordCount=${params.wordCount} units=words " +
+                    "accessPwdZero=$accessPwdIsZero selectApplied=$selectApplied " +
+                    "selectSource=${if (selectApplied) "scanned" else "none"} " +
+                    "selectEpc=${normalizedTarget ?: "--"} " +
+                    "selectPtrUnits=bits selectPtrBits=$selectPtrBits selectLenBits=$selectLenBits " +
+                    "payloadFirst4=$payloadPreview payloadBytes=${params.payloadBytes.size}",
+            )
+            if (selectApplied && normalizedTarget != null) {
+                val selectOk = applyWriteFilterLocked(instance, normalizedTarget, selectPtrBits, selectLenBits)
+                if (!selectOk) {
+                    return@withLock Result.failure(
+                        UhfError.VendorError("Failed to apply tag filter.").asException(),
+                    )
+                }
+            }
             try {
                 withTimeout(timeoutMs) {
-                    val pcWord =
-                        withContext(Dispatchers.IO) {
-                            uhfMutex.withLock {
-                                instance.readData(DEFAULT_ACCESS_PASSWORD, EPC_MEMORY_BANK, EPC_PC_WORD, 1)
-                            }
-                        }
-                    val normalizedPc =
-                        runCatching { EpcNormalizer.normalize(pcWord.orEmpty()) }.getOrElse { error ->
-                            return@withTimeout Result.failure(
-                                UhfError.VendorError(error.message ?: "Failed to read PC word.")
-                                    .asException(cause = error),
-                            )
-                        }
-                    if (normalizedPc.length != EPC_WORD_HEX_LENGTH) {
-                        return@withTimeout Result.failure(
-                            UhfError.VendorError("Failed to read PC word.")
-                                .asException(),
-                        )
-                    }
-                    val pcValue =
-                        runCatching { normalizedPc.toInt(HEX_RADIX) }.getOrElse { error ->
-                            return@withTimeout Result.failure(
-                                UhfError.VendorError("Invalid PC word.")
-                                    .asException(cause = error),
-                            )
-                        }
-                    val updatedPc =
-                        (pcValue and EPC_PC_LENGTH_MASK) or
-                            ((wordCount and EPC_MAX_WORDS) shl EPC_PC_LENGTH_SHIFT)
-                    val updatedPcHex =
-                        updatedPc
-                            .toString(HEX_RADIX)
-                            .uppercase()
-                            .padStart(EPC_WORD_HEX_LENGTH, '0')
-                    val payload = updatedPcHex + normalized
-                    val totalWords = wordCount + 1
                     val success =
                         withContext(Dispatchers.IO) {
                             uhfMutex.withLock {
                                 instance.writeData(
                                     DEFAULT_ACCESS_PASSWORD,
                                     EPC_MEMORY_BANK,
-                                    EPC_PC_WORD,
-                                    totalWords,
-                                    payload,
+                                    params.wordPtr,
+                                    params.wordCount,
+                                    params.normalizedEpc,
                                 )
                             }
                         }
+                    val errCode =
+                        if (success) {
+                            null
+                        } else {
+                            withContext(Dispatchers.IO) {
+                                uhfMutex.withLock { getErrCodeIfSupported(instance) }
+                            }
+                        }
+                    UhfLogger.debugInfo(
+                        "writeEpc result success=$success errCode=${errCode ?: "n/a"} exception=none",
+                    )
                     if (success) {
                         Result.success(Unit)
                     } else {
-                        Result.failure(UhfError.VendorError("Failed to write EPC.").asException())
+                        val suffix = if (errCode != null) " (errCode=$errCode)" else ""
+                        Result.failure(UhfError.VendorError("Failed to write EPC.$suffix").asException())
                     }
                 }
             } catch (_: TimeoutCancellationException) {
+                UhfLogger.debugInfo("writeEpc result success=false error=Timeout")
                 Result.failure(UhfError.Timeout.asException())
             } catch (error: Throwable) {
+                val errCode =
+                    withContext(Dispatchers.IO) {
+                        uhfMutex.withLock { getErrCodeIfSupported(instance) }
+                    }
+                UhfLogger.debugInfo(
+                    "writeEpc result success=false error=${error::class.java.simpleName} " +
+                        "errCode=${errCode ?: "n/a"} message=${error.message}",
+                )
                 Result.failure(
                     UhfError.VendorError(error.message ?: "UHF write error")
                         .asException(cause = error),
                 )
+            } finally {
+                if (selectApplied) {
+                    clearWriteFilterLocked(instance)
+                }
             }
         }
 
@@ -337,6 +360,10 @@ class ChainwayUhfReader(
                 }
             val readResult = readSingleLocked(timeoutMs)
             if (readResult.isFailure) {
+                UhfLogger.debugInfo(
+                    "verifyEpc readback failed expected=$normalizedExpected " +
+                        "error=${readResult.exceptionOrNull()?.javaClass?.simpleName ?: "unknown"}",
+                )
                 return@withLock Result.failure(
                     readResult.exceptionOrNull() ?: UhfError.VendorError("Verify failed").asException(),
                 )
@@ -347,6 +374,10 @@ class ChainwayUhfReader(
                         UhfError.VendorError(error.message ?: "Invalid EPC").asException(cause = error),
                     )
                 }
+            UhfLogger.debugInfo(
+                "verifyEpc readback expected=$normalizedExpected read=$normalizedRead " +
+                    "match=${normalizedRead == normalizedExpected}",
+            )
             Result.success(normalizedRead == normalizedExpected)
         }
 
@@ -1158,6 +1189,52 @@ class ChainwayUhfReader(
             }
         }
 
+    private suspend fun applyWriteFilterLocked(
+        instance: IUHF,
+        targetEpc: String,
+        ptrBits: Int,
+        cntBits: Int,
+    ): Boolean {
+        var firstError: Throwable? = null
+        var epcModeOk = false
+        var clearOk = false
+        var applyOk = false
+        withContext(Dispatchers.IO) {
+            uhfMutex.withLock {
+                val epcModeResult = runCatching { instance.setEPCMode() }
+                if (epcModeResult.isFailure && firstError == null) {
+                    firstError = epcModeResult.exceptionOrNull()
+                }
+                epcModeOk = epcModeResult.getOrDefault(false)
+                val clearResult = runCatching { instance.setFilter(IUHF.Bank_EPC, 0, 0, "") }
+                if (clearResult.isFailure && firstError == null) {
+                    firstError = clearResult.exceptionOrNull()
+                }
+                clearOk = clearResult.getOrDefault(false)
+                val applyResult = runCatching { instance.setFilter(IUHF.Bank_EPC, ptrBits, cntBits, targetEpc) }
+                if (applyResult.isFailure && firstError == null) {
+                    firstError = applyResult.exceptionOrNull()
+                }
+                applyOk = applyResult.getOrDefault(false)
+            }
+        }
+        UhfLogger.debugInfo(
+            "writeEpc select applied epcModeOk=$epcModeOk clearOk=$clearOk applyOk=$applyOk " +
+                "ptrBits=$ptrBits cntBits=$cntBits error=${firstError?.message ?: "--"}",
+        )
+        return epcModeOk && clearOk && applyOk
+    }
+
+    private suspend fun clearWriteFilterLocked(instance: IUHF) {
+        withContext(Dispatchers.IO) {
+            uhfMutex.withLock {
+                runCatching { instance.setFilter(IUHF.Bank_EPC, 0, 0, "") }
+                runCatching { instance.setEPCAndTIDMode() }
+            }
+        }
+        UhfLogger.debugInfo("writeEpc select cleared")
+    }
+
     override suspend fun clearFindProfile(): Result<Unit> =
         mutex.withLock {
             if (!initialized) {
@@ -1747,13 +1824,7 @@ class ChainwayUhfReader(
     }
 
     private companion object {
-        const val EPC_MEMORY_BANK = 1
-        const val EPC_PC_WORD = 1
-        const val EPC_WORD_HEX_LENGTH = 4
-        const val EPC_PC_LENGTH_SHIFT = 11
-        const val EPC_PC_LENGTH_MASK = 0x07FF
         const val EPC_MAX_WORDS = 31
-        const val HEX_RADIX = 16
         const val DEFAULT_ACCESS_PASSWORD = "00000000"
         const val POWER_SCALE_FACTOR = 100
         const val SINGLE_READ_RETRY_DELAY_MS = 75L

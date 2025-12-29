@@ -1,10 +1,17 @@
 package com.alexbomber12.memtag.integrations.uhf
 
 import android.util.Log
+import com.alexbomber12.memtag.BuildConfig
 
 const val LOG_TAG = "memtag-uhf"
 
 object UhfLogger {
+    fun debugInfo(message: String) {
+        if (BuildConfig.DEBUG) {
+            runCatching { Log.i(LOG_TAG, message) }
+        }
+    }
+
     fun i(message: String) {
         runCatching { Log.i(LOG_TAG, message) }
     }

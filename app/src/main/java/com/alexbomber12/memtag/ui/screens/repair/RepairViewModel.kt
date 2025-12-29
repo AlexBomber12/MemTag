@@ -338,7 +338,25 @@ class RepairViewModel(
                             UhfLogger.w("verifyWrite config apply incomplete: ${applied.toErrorMessage()}")
                         }
                     }
-                    val writeResult = uhfReader.writeEpc(expectedEpc, WRITE_TIMEOUT_MS)
+                    val resolvedTarget =
+                        uiState.value.scannedEpc?.takeIf { it.isNotBlank() }
+                            ?: run {
+                                val readResult = uhfReader.readSingle(READ_TIMEOUT_MS)
+                                if (readResult.isFailure) {
+                                    handleWriteFailure(readResult.exceptionOrNull())
+                                    return@launch
+                                }
+                                val readEpc = readResult.getOrNull().orEmpty()
+                                if (readEpc.isBlank()) {
+                                    handleWriteFailure(IllegalStateException("Unable to resolve target EPC."))
+                                    return@launch
+                                }
+                                updateStateWithStatus { state ->
+                                    state.copy(scannedEpc = readEpc)
+                                }
+                                readEpc
+                            }
+                    val writeResult = uhfReader.writeEpc(expectedEpc, resolvedTarget, WRITE_TIMEOUT_MS)
                     if (writeResult.isFailure) {
                         handleWriteFailure(writeResult.exceptionOrNull())
                         return@launch
