@@ -15,7 +15,6 @@ import com.alexbomber12.memtag.db.MIGRATION_1_2
 import com.alexbomber12.memtag.db.MIGRATION_2_3
 import com.alexbomber12.memtag.db.MIGRATION_3_4
 import com.alexbomber12.memtag.db.MemTagDatabase
-import com.alexbomber12.memtag.domain.LookupByEpcUseCase
 import com.alexbomber12.memtag.domain.SyncMementoLibraryUseCase
 import com.alexbomber12.memtag.integrations.feedback.DeviceFindFeedbackController
 import com.alexbomber12.memtag.integrations.feedback.FindFeedbackController
@@ -68,7 +67,6 @@ class AppContainer(context: Context) {
         )
     val syncMementoLibraryUseCase = SyncMementoLibraryUseCase(mementoRepository)
     val syncCoordinator = SyncCoordinator(settingsStore, mementoRepository, syncMementoLibraryUseCase, appScope)
-    val lookupByEpcUseCase = LookupByEpcUseCase(mementoRepository)
     val uhfReader: UhfReader = UhfReaderProvider.create(applicationContext, settingsStore)
     val scan2dScanner: Scan2dScanner = Scan2dScannerProvider.create(applicationContext, settingsStore)
     val findFeedbackController: FindFeedbackController = DeviceFindFeedbackController(applicationContext)

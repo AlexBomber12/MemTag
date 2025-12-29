@@ -3,11 +3,8 @@ package com.alexbomber12.memtag.ui.screens.lookup
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.alexbomber12.memtag.data.repository.MementoRepository
-import com.alexbomber12.memtag.data.settings.AppSettings
 import com.alexbomber12.memtag.data.settings.SettingsStore
 import com.alexbomber12.memtag.domain.InventoryItem
-import com.alexbomber12.memtag.domain.LookupByEpcUseCase
-import com.alexbomber12.memtag.domain.LookupResult
 import com.alexbomber12.memtag.domain.SyncState
 import com.alexbomber12.memtag.integrations.scan2d.Scan2dError
 import com.alexbomber12.memtag.integrations.scan2d.Scan2dException
@@ -20,12 +17,16 @@ import com.alexbomber12.memtag.integrations.uhf.UhfReader
 import com.alexbomber12.memtag.integrations.uhf.asException
 import com.alexbomber12.memtag.integrations.uhf.toErrorMessage
 import com.alexbomber12.memtag.util.epc.EpcNormalizer
+import com.alexbomber12.memtag.util.epc.EpcValidator
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
@@ -33,22 +34,6 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-
-sealed class LookupStatus {
-    data object Idle : LookupStatus()
-
-    data object Loading : LookupStatus()
-
-    data class Found(
-        val item: InventoryItem,
-    ) : LookupStatus()
-
-    data object NotFound : LookupStatus()
-
-    data class Error(
-        val message: String,
-    ) : LookupStatus()
-}
 
 sealed class ScanQrStatus {
     data object Idle : ScanQrStatus()
@@ -71,17 +56,20 @@ sealed class ScanUhfStatus {
 }
 
 data class LookupUiState(
-    val lastScannedEpc: String = "",
-    val lookupStatus: LookupStatus = LookupStatus.Idle,
+    val query: String = "",
+    val isSearching: Boolean = false,
+    val results: List<InventoryItem> = emptyList(),
+    val selectedEpc: String? = null,
+    val searchError: String? = null,
     val scanStatus: ScanQrStatus = ScanQrStatus.Idle,
     val uhfScanStatus: ScanUhfStatus = ScanUhfStatus.Idle,
     val lastSyncState: SyncState? = null,
-    val currentSettings: AppSettings = AppSettings(),
 )
 
+// Lookup v2: search-first; scan fills query; selection writes lastScannedEpc.
+@OptIn(FlowPreview::class, ExperimentalCoroutinesApi::class)
 class LookupViewModel(
     private val settingsStore: SettingsStore,
-    private val lookupUseCase: LookupByEpcUseCase,
     private val repository: MementoRepository,
     private val scan2dScanner: Scan2dScanner,
     private val uhfReader: UhfReader,
@@ -89,21 +77,12 @@ class LookupViewModel(
     private val mutableState = MutableStateFlow(LookupUiState())
     val uiState: StateFlow<LookupUiState> = mutableState
 
-    private var lookupJob: Job? = null
+    private val queryFlow = MutableStateFlow("")
+
     private var scanJob: Job? = null
     private var scanUhfJob: Job? = null
 
     init {
-        viewModelScope.launch {
-            settingsStore.settingsFlow.collect { settings ->
-                mutableState.update {
-                    it.copy(
-                        currentSettings = settings,
-                        lastScannedEpc = settings.lastScannedEpc,
-                    )
-                }
-            }
-        }
         viewModelScope.launch {
             settingsStore.settingsFlow
                 .map { it.mementoLibraryId }
@@ -119,6 +98,26 @@ class LookupViewModel(
                     mutableState.update { it.copy(lastSyncState = state) }
                 }
         }
+        viewModelScope.launch {
+            queryFlow
+                .debounce(SEARCH_DEBOUNCE_MS)
+                .map { it.trim() }
+                .distinctUntilChanged()
+                .collectLatest { trimmed ->
+                    handleSearch(trimmed)
+                }
+        }
+    }
+
+    fun updateQuery(value: String) {
+        mutableState.update { it.copy(query = value) }
+        queryFlow.value = value
+    }
+
+    fun selectItem(item: InventoryItem) {
+        val epc = item.epcNormalized
+        mutableState.update { it.copy(selectedEpc = epc) }
+        persistSelection(epc)
     }
 
     fun scanQr() {
@@ -204,6 +203,89 @@ class LookupViewModel(
         super.onCleared()
     }
 
+    fun cancelUhfScan() {
+        scanUhfJob?.cancel()
+        scanUhfJob = null
+        mutableState.update { it.copy(uhfScanStatus = ScanUhfStatus.Idle) }
+    }
+
+    private suspend fun handleSearch(trimmed: String) {
+        if (trimmed.isBlank()) {
+            mutableState.update {
+                it.copy(
+                    isSearching = false,
+                    results = emptyList(),
+                    searchError = null,
+                    selectedEpc = null,
+                )
+            }
+            return
+        }
+        mutableState.update { it.copy(isSearching = true, searchError = null) }
+        val searchResult =
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    repository.searchInventory(trimmed, limit = SEARCH_LIMIT)
+                }
+            }
+        searchResult
+            .onSuccess { items ->
+                val autoSelected = resolveAutoSelection(trimmed, items)
+                val previousSelected = mutableState.value.selectedEpc
+                val resolvedSelection =
+                    autoSelected
+                        ?: previousSelected?.takeIf { selected -> items.any { it.epcNormalized == selected } }
+                mutableState.update { state ->
+                    state.copy(
+                        isSearching = false,
+                        results = items,
+                        selectedEpc = resolvedSelection,
+                    )
+                }
+                if (autoSelected != null && autoSelected != previousSelected) {
+                    persistSelection(autoSelected)
+                }
+            }
+            .onFailure { error ->
+                mutableState.update {
+                    it.copy(
+                        isSearching = false,
+                        results = emptyList(),
+                        searchError = error.message ?: "Search failed.",
+                        selectedEpc = null,
+                    )
+                }
+            }
+    }
+
+    private fun resolveAutoSelection(
+        query: String,
+        items: List<InventoryItem>,
+    ): String? {
+        val normalized =
+            if (EpcValidator.isValidEpcHex(query)) {
+                runCatching { EpcNormalizer.normalize(query) }.getOrNull()
+            } else {
+                null
+            }
+        if (normalized.isNullOrBlank()) {
+            return null
+        }
+        return items.firstOrNull { it.epcNormalized == normalized }?.epcNormalized
+    }
+
+    private fun persistSelection(epc: String) {
+        viewModelScope.launch {
+            val timestamp = System.currentTimeMillis()
+            settingsStore.update { settings ->
+                settings.copy(
+                    lastScannedEpc = epc,
+                    lastScannedEpcAt = timestamp,
+                )
+            }
+        }
+    }
+
     private fun scanErrorMessage(error: Throwable?): String {
         val scanError = (error as? Scan2dException)?.error
         return when (scanError) {
@@ -237,8 +319,6 @@ class LookupViewModel(
         rawEpc: String,
         source: ScanSource,
     ) {
-        lookupJob?.cancel()
-        lookupJob = null
         val normalized =
             runCatching { EpcNormalizer.normalize(rawEpc) }.getOrElse { error ->
                 val message = error.message ?: "Invalid EPC. Use 8-64 hex characters."
@@ -256,44 +336,18 @@ class LookupViewModel(
             }
         mutableState.update {
             it.copy(
-                lastScannedEpc = normalized,
-                lookupStatus = LookupStatus.Loading,
                 scanStatus = ScanQrStatus.Idle,
                 uhfScanStatus = ScanUhfStatus.Idle,
+                searchError = null,
             )
         }
-        viewModelScope.launch {
-            val timestamp = System.currentTimeMillis()
-            settingsStore.update { settings ->
-                settings.copy(
-                    lastScannedEpc = normalized,
-                    lastScannedEpcAt = timestamp,
-                )
-            }
-        }
-        val job =
-            viewModelScope.launch {
-                val result = lookupUseCase.execute(normalized)
-                mutableState.update { state ->
-                    when (result) {
-                        is LookupResult.Found -> state.copy(lookupStatus = LookupStatus.Found(result.item))
-                        is LookupResult.NotFound -> state.copy(lookupStatus = LookupStatus.NotFound)
-                        is LookupResult.Error -> state.copy(lookupStatus = LookupStatus.Error(result.message))
-                    }
-                }
-            }
-        lookupJob = job
-        job.invokeOnCompletion { lookupJob = null }
-    }
-
-    fun cancelUhfScan() {
-        scanUhfJob?.cancel()
-        scanUhfJob = null
-        mutableState.update { it.copy(uhfScanStatus = ScanUhfStatus.Idle) }
+        updateQuery(normalized)
     }
 
     private companion object {
         const val UHF_READ_TIMEOUT_MS = 4_000L
+        const val SEARCH_LIMIT = 20
+        const val SEARCH_DEBOUNCE_MS = 250L
     }
 }
 

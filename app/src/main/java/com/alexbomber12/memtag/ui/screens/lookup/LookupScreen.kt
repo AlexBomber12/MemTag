@@ -2,21 +2,30 @@
 
 package com.alexbomber12.memtag.ui.screens.lookup
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.alexbomber12.memtag.app.HardwareAction
+import com.alexbomber12.memtag.domain.InventoryItem
 import com.alexbomber12.memtag.ui.components.AppCard
 import com.alexbomber12.memtag.ui.components.ErrorState
 import com.alexbomber12.memtag.ui.components.LoadingState
@@ -32,6 +41,12 @@ fun LookupScreen(
     hardwareActions: Flow<HardwareAction>,
 ) {
     val state = viewModel.uiState.collectAsStateWithLifecycle().value
+    val selectedLabel =
+        remember(state.selectedEpc, state.results) {
+            val selectedItem = state.results.firstOrNull { it.epcNormalized == state.selectedEpc }
+            val name = selectedItem?.name?.takeIf { it.isNotBlank() }
+            name ?: state.selectedEpc
+        }
 
     DisposableEffect(Unit) {
         onDispose { viewModel.cancelUhfScan() }
@@ -54,6 +69,14 @@ fun LookupScreen(
     ) {
         item {
             AppCard(title = "Lookup") {
+                OutlinedTextField(
+                    value = state.query,
+                    onValueChange = viewModel::updateQuery,
+                    label = { Text(text = "Search") },
+                    placeholder = { Text(text = "Type name, EPC, status, location...") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                )
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -105,62 +128,52 @@ fun LookupScreen(
 
                     is ScanQrStatus.Idle -> Unit
                 }
-                Text(
-                    text = "Last scanned: ${state.lastScannedEpc.ifBlank { "--" }}",
-                    style = MaterialTheme.typography.labelMedium,
-                )
-                when (val status = state.lookupStatus) {
-                    is LookupStatus.Idle -> {
-                        val message =
-                            if (state.lastScannedEpc.isBlank()) {
-                                "Scan RFID or QR to look up a tag."
-                            } else {
-                                "Scan another tag to update the lookup."
-                            }
-                        Text(text = message, style = MaterialTheme.typography.labelMedium)
-                    }
-
-                    is LookupStatus.Loading -> {
-                        LoadingState(
-                            message = "Looking up EPC...",
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                    }
-
-                    is LookupStatus.NotFound -> {
-                        Text(text = "Not found. Sync may be needed.", style = MaterialTheme.typography.labelMedium)
-                    }
-
-                    is LookupStatus.Error -> {
-                        ErrorState(
-                            message = status.message,
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                    }
-
-                    is LookupStatus.Found -> {
-                        Text(text = "Status: Found", style = MaterialTheme.typography.labelMedium)
-                    }
+                if (selectedLabel != null) {
+                    Text(
+                        text = "Selected: $selectedLabel",
+                        style = MaterialTheme.typography.labelMedium,
+                    )
                 }
             }
         }
 
-        val foundItem = (state.lookupStatus as? LookupStatus.Found)?.item
-        if (foundItem != null) {
+        state.searchError?.let { message ->
             item {
-                AppCard(title = "Card") {
-                    Text(text = "EPC: ${foundItem.epcNormalized}")
-                    Text(text = "Name: ${foundItem.name ?: "(none)"}")
-                    Text(text = "Content: ${foundItem.content ?: "(none)"}")
-                    Text(text = "Status: ${foundItem.status ?: "(none)"}")
-                    Text(text = "Category: ${foundItem.category ?: "(none)"}")
-                    Text(text = "Location: ${foundItem.locationPath ?: "(none)"}")
-                    Text(text = "Comment: ${foundItem.comment ?: "(none)"}")
-                    Text(text = "Label rev: ${foundItem.labelRev ?: "(none)"}")
-                    Text(text = "To print: ${foundItem.toPrint?.toString() ?: "(none)"}")
-                    Text(text = "UM: ${foundItem.um ?: "(none)"}")
-                    Text(text = "QR: ${foundItem.qrRaw ?: "(none)"}")
-                }
+                ErrorState(
+                    message = message,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        }
+
+        if (state.query.isBlank()) {
+            item {
+                Text(
+                    text = "Type to search the library.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+        } else if (state.isSearching) {
+            item {
+                LoadingState(
+                    message = "Searching...",
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        } else if (state.results.isEmpty()) {
+            item {
+                Text(
+                    text = "No results. Sync may be needed.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+        } else {
+            items(state.results, key = { it.entryId }) { item ->
+                LookupResultRow(
+                    item = item,
+                    isSelected = item.epcNormalized == state.selectedEpc,
+                    onClick = { viewModel.selectItem(item) },
+                )
             }
         }
 
@@ -177,6 +190,53 @@ fun LookupScreen(
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun LookupResultRow(
+    item: InventoryItem,
+    isSelected: Boolean,
+    onClick: () -> Unit,
+) {
+    val containerColor =
+        if (isSelected) {
+            MaterialTheme.colorScheme.primaryContainer
+        } else {
+            MaterialTheme.colorScheme.surface
+        }
+    val name = item.name?.takeIf { it.isNotBlank() } ?: "(no name)"
+    val status = item.status?.takeIf { it.isNotBlank() } ?: "(none)"
+    val location = item.locationPath?.takeIf { it.isNotBlank() } ?: "(none)"
+    Card(
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .clickable(onClick = onClick),
+        colors = CardDefaults.cardColors(containerColor = containerColor),
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Text(
+                text = "Name: $name",
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            Text(
+                text = "EPC: ${item.epcNormalized}",
+                style = MaterialTheme.typography.bodySmall,
+                fontFamily = FontFamily.Monospace,
+            )
+            Text(
+                text = "Status: $status",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            Text(
+                text = "Location: $location",
+                style = MaterialTheme.typography.bodySmall,
+            )
         }
     }
 }

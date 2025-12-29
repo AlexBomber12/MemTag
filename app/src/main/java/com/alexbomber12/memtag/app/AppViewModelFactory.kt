@@ -33,7 +33,6 @@ class AppViewModelFactory(
             @Suppress("UNCHECKED_CAST")
             return LookupViewModel(
                 settingsStore = appContainer.settingsStore,
-                lookupUseCase = appContainer.lookupByEpcUseCase,
                 repository = appContainer.mementoRepository,
                 scan2dScanner = appContainer.scan2dScanner,
                 uhfReader = appContainer.uhfReader,
