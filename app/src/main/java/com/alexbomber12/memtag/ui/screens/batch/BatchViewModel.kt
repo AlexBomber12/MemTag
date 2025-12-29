@@ -38,12 +38,6 @@ enum class BatchMode {
     MANUAL_SCAN,
 }
 
-enum class BatchFilter {
-    ALL,
-    NOT_FOUND,
-    UNKNOWN,
-}
-
 private const val SCAN_TIMEOUT_MS = 1_500L
 private const val TRIGGER_DEBOUNCE_MS = 300L
 private const val MAX_INVALID_ROWS = 50
@@ -76,7 +70,12 @@ data class BatchUiState(
     val isImporting: Boolean = false,
     val isExporting: Boolean = false,
     val isScanning: Boolean = false,
-    val manualFilter: BatchFilter = BatchFilter.ALL,
+    val manualSessionActive: Boolean = false,
+    val manualSessionFinishing: Boolean = false,
+    val manualScanCount: Int = 0,
+    val manualFoundCount: Int = 0,
+    val manualUnknownCount: Int = 0,
+    val lastScanMatched: Boolean? = null,
     val lastImportReport: BatchImportReport? = null,
     val lastErrorMessage: String? = null,
     val lastInfoMessage: String? = null,
@@ -96,6 +95,7 @@ class BatchViewModel(
     private var exportJob: Job? = null
     private var sweepJob: Job? = null
     private var scanJob: Job? = null
+    private var scanInProgress: Boolean = false
     private val undoStack = ArrayDeque<BatchUndoAction>()
     private val sweepEntries = mutableMapOf<String, BatchUhfUseCase.SweepEntry>()
     private val sweepExtras = mutableMapOf<String, BatchUhfUseCase.SweepEntry>()
@@ -129,6 +129,8 @@ class BatchViewModel(
                             sessionMap = sessionMap,
                             summary = nextSummary,
                             currentRowEpc = resolvedCurrent,
+                            manualFoundCount = nextSummary.found,
+                            manualUnknownCount = nextSummary.unknown,
                         )
                     }
                 }
@@ -136,21 +138,18 @@ class BatchViewModel(
         viewModelScope.launch {
             uiState.collect { state ->
                 sessionFlagsStore.setBatchRunning(
-                    state.sweepRunning || state.isScanning || isManualSessionActive(state),
+                    state.sweepRunning || state.isScanning || state.manualSessionActive,
                 )
             }
         }
     }
 
     fun setMode(mode: BatchMode) {
-        if (uiState.value.sweepRunning) {
+        val state = uiState.value
+        if (state.sweepRunning || state.manualSessionActive) {
             return
         }
         mutableState.update { it.copy(mode = mode, lastErrorMessage = null, lastInfoMessage = null) }
-    }
-
-    fun setManualFilter(filter: BatchFilter) {
-        mutableState.update { it.copy(manualFilter = filter) }
     }
 
     fun selectItem(epcNormalized: String) {
@@ -172,6 +171,12 @@ class BatchViewModel(
                     lastInfoMessage = null,
                     lastScanEpc = null,
                     lastScanRssi = null,
+                    lastScanMatched = null,
+                    manualSessionActive = false,
+                    manualSessionFinishing = false,
+                    manualScanCount = 0,
+                    manualFoundCount = 0,
+                    manualUnknownCount = 0,
                     canUndo = false,
                 )
             }
@@ -220,6 +225,12 @@ class BatchViewModel(
                         extras = if (report.isSuccess) emptyMap() else state.extras,
                         lastScanEpc = if (report.isSuccess) null else state.lastScanEpc,
                         lastScanRssi = if (report.isSuccess) null else state.lastScanRssi,
+                        lastScanMatched = if (report.isSuccess) null else state.lastScanMatched,
+                        manualSessionActive = if (report.isSuccess) false else state.manualSessionActive,
+                        manualSessionFinishing = if (report.isSuccess) false else state.manualSessionFinishing,
+                        manualScanCount = if (report.isSuccess) 0 else state.manualScanCount,
+                        manualFoundCount = if (report.isSuccess) 0 else state.manualFoundCount,
+                        manualUnknownCount = if (report.isSuccess) 0 else state.manualUnknownCount,
                         canUndo = if (report.isSuccess) false else state.canUndo,
                     )
                 }
@@ -236,6 +247,10 @@ class BatchViewModel(
         contentResolver: ContentResolver,
     ) {
         if (exportJob != null) {
+            return
+        }
+        if (uiState.value.manualSessionActive || uiState.value.manualSessionFinishing) {
+            mutableState.update { it.copy(lastErrorMessage = "Finish the session before exporting.") }
             return
         }
         mutableState.update { it.copy(isExporting = true, lastErrorMessage = null) }
@@ -323,61 +338,93 @@ class BatchViewModel(
 
     fun scanOnce() {
         val state = uiState.value
-        if (scanJob != null || state.sweepRunning) {
+        if (state.mode != BatchMode.MANUAL_SCAN) {
             return
         }
-        mutableState.update { it.copy(isScanning = true, lastErrorMessage = null, lastInfoMessage = null) }
+        if (!state.manualSessionActive) {
+            mutableState.update { it.copy(lastInfoMessage = "Start session first.", lastErrorMessage = null) }
+            return
+        }
+        if (state.manualSessionFinishing) {
+            mutableState.update { it.copy(lastInfoMessage = "Finishing session...", lastErrorMessage = null) }
+            return
+        }
+        if (scanInProgress || state.sweepRunning) {
+            return
+        }
+        scanInProgress = true
+        mutableState.update {
+            it.copy(
+                isScanning = true,
+                manualScanCount = it.manualScanCount + 1,
+                lastErrorMessage = null,
+                lastInfoMessage = null,
+            )
+        }
         val job =
             viewModelScope.launch {
-                val scanResult = runCatching { uhfUseCase.scanOnce(SCAN_TIMEOUT_MS) }
-                if (scanResult.isFailure) {
-                    mutableState.update {
-                        it.copy(
-                            isScanning = false,
-                            lastErrorMessage = mapUhfError(scanResult.exceptionOrNull()),
-                        )
+                try {
+                    val scanResult = runCatching { uhfUseCase.scanOnce(SCAN_TIMEOUT_MS) }
+                    if (scanResult.isFailure) {
+                        mutableState.update {
+                            it.copy(
+                                lastErrorMessage = mapUhfError(scanResult.exceptionOrNull()),
+                            )
+                        }
+                        return@launch
                     }
-                    return@launch
-                }
-                val reading = scanResult.getOrNull()
-                if (reading == null) {
-                    mutableState.update {
-                        it.copy(isScanning = false, lastErrorMessage = "No tag found.")
+                    val reading = scanResult.getOrNull()
+                    if (reading == null) {
+                        mutableState.update {
+                            it.copy(lastErrorMessage = "No tag found.")
+                        }
+                        return@launch
                     }
-                    return@launch
-                }
-                val normalized = runCatching { EpcNormalizer.normalize(reading.epcHex) }.getOrNull()
-                if (normalized == null) {
-                    mutableState.update {
-                        it.copy(isScanning = false, lastErrorMessage = "Invalid tag read.")
+                    val normalized = runCatching { EpcNormalizer.normalize(reading.epcHex) }.getOrNull()
+                    if (normalized == null) {
+                        mutableState.update {
+                            it.copy(lastErrorMessage = "Invalid tag read.")
+                        }
+                        return@launch
                     }
-                    return@launch
+                    handleManualScan(normalized, reading.rssi, reading.timestampMs)
+                } finally {
+                    scanInProgress = false
+                    mutableState.update { it.copy(isScanning = false) }
                 }
-                handleManualScan(normalized, reading.rssi, reading.timestampMs)
-                mutableState.update { it.copy(isScanning = false) }
             }
         scanJob = job
-        job.invokeOnCompletion {
-            scanJob = null
-            mutableState.update { it.copy(isScanning = false) }
+        job.invokeOnCompletion { scanJob = null }
+    }
+
+    fun toggleManualSession() {
+        val state = uiState.value
+        if (state.sweepRunning || state.isScanning || state.manualSessionFinishing) {
+            return
+        }
+        if (state.manualSessionActive) {
+            finishManualSession()
+        } else {
+            startManualSession()
         }
     }
 
-    fun markNotFoundCurrent() {
-        val current = uiState.value.currentRowEpc ?: return
-        val previous = uiState.value.sessionMap[current] ?: return
-        pushUndo(UpdateEntry(current, previous))
-        viewModelScope.launch {
-            repository.updateSession(
-                epcNormalized = current,
-                status = BatchStatus.NOT_FOUND,
-                updatedAt = 0L,
-                lastSeenAt = previous.lastSeenAt,
-                lastRssi = previous.lastRssi,
-                source = BatchSource.MANUAL,
+    private fun startManualSession() {
+        val summary = uiState.value.summary
+        mutableState.update {
+            it.copy(
+                manualSessionActive = true,
+                manualSessionFinishing = false,
+                manualScanCount = 0,
+                manualFoundCount = summary.found,
+                manualUnknownCount = summary.unknown,
+                lastScanEpc = null,
+                lastScanRssi = null,
+                lastScanMatched = null,
+                lastErrorMessage = null,
+                lastInfoMessage = null,
             )
         }
-        advanceAfterManual(current)
     }
 
     fun undoLast() {
@@ -561,6 +608,7 @@ class BatchViewModel(
                 it.copy(
                     lastScanEpc = epcNormalized,
                     lastScanRssi = rssi,
+                    lastScanMatched = true,
                     lastInfoMessage = null,
                 )
             }
@@ -584,6 +632,7 @@ class BatchViewModel(
                 it.copy(
                     lastScanEpc = epcNormalized,
                     lastScanRssi = rssi,
+                    lastScanMatched = false,
                     lastInfoMessage = "Extra scanned: $epcNormalized",
                     extras = updatedExtras,
                     summary = summaryFor(it.inputItems, it.sessionMap, updatedExtras),
@@ -592,13 +641,24 @@ class BatchViewModel(
         }
     }
 
-    fun finishManualSession() {
+    private fun finishManualSession() {
         if (uiState.value.sweepRunning) {
             return
+        }
+        if (uiState.value.manualSessionFinishing) {
+            return
+        }
+        mutableState.update {
+            it.copy(
+                manualSessionFinishing = true,
+                lastInfoMessage = null,
+                lastErrorMessage = null,
+            )
         }
         viewModelScope.launch {
             val inputItems = uiState.value.inputItems
             val sessionMap = uiState.value.sessionMap
+            val now = clock()
             withContext(Dispatchers.IO) {
                 inputItems.forEach { item ->
                     val session = sessionMap[item.epcNormalized] ?: return@forEach
@@ -606,13 +666,19 @@ class BatchViewModel(
                         repository.updateSession(
                             epcNormalized = item.epcNormalized,
                             status = BatchStatus.NOT_FOUND,
-                            updatedAt = 0L,
+                            updatedAt = now,
                             lastSeenAt = session.lastSeenAt,
                             lastRssi = session.lastRssi,
                             source = BatchSource.MANUAL,
                         )
                     }
                 }
+            }
+            mutableState.update {
+                it.copy(
+                    manualSessionActive = false,
+                    manualSessionFinishing = false,
+                )
             }
         }
     }
@@ -742,10 +808,6 @@ class BatchViewModel(
     override fun onCleared() {
         sessionFlagsStore.setBatchRunning(false)
         super.onCleared()
-    }
-
-    private fun isManualSessionActive(state: BatchUiState): Boolean {
-        return state.mode == BatchMode.MANUAL_SCAN && state.summary.unknown > 0
     }
 
     private sealed class BatchUndoAction
