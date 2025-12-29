@@ -13,7 +13,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -74,18 +73,11 @@ fun RepairScreen(
 
     val isBusy = state.isReading || state.isScanningQr || state.isWriting || state.isVerifying
     val expectedBlank = state.expectedEpc.isBlank()
-    val scannedBlank = state.scannedEpc.isNullOrBlank()
-    val canWrite =
-        !isBusy &&
-            state.confirmation == null &&
-            !expectedBlank &&
-            !scannedBlank &&
-            state.status is VerifyWriteStatus.Mismatch
+    val canWrite = canWriteExpectedEpc(state.expectedEpc, state.scannedEpc, state.isWriting)
     val selectedLabel =
         state.selectedLookup?.name?.takeIf { it.isNotBlank() }
             ?: state.selectedLookup?.epc?.takeIf { it.isNotBlank() }
     val selectedLine = selectedLabel ?: "none"
-    val hasSelection = !state.selectedLookup?.epc.isNullOrBlank()
 
     LazyColumn(
         modifier =
@@ -177,22 +169,10 @@ fun RepairScreen(
                         }
                     },
                 )
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        text = "Selected card: $selectedLine",
-                        style = MaterialTheme.typography.labelMedium,
-                        modifier = Modifier.weight(1f),
-                    )
-                    AssistChip(
-                        onClick = viewModel::useSelectedLookup,
-                        label = { Text(text = "Use selected card") },
-                        enabled = hasSelection && !isBusy,
-                    )
-                }
+                Text(
+                    text = "Selected card: $selectedLine",
+                    style = MaterialTheme.typography.labelMedium,
+                )
                 EpcLine(
                     label = "Scanned EPC",
                     epc = state.scannedEpc?.ifBlank { "--" } ?: "--",

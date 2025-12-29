@@ -29,7 +29,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-private const val EXPECTED_MISSING_MESSAGE = "Expected EPC required."
+private const val EXPECTED_MISSING_MESSAGE = "Select a card in Lookup or paste an EPC."
 
 sealed class VerifyWriteStatus {
     data class NotScanned(
@@ -57,7 +57,6 @@ data class WriteConfirmation(
 
 data class RepairUiState(
     val expectedEpc: String = "",
-    val expectedEdited: Boolean = false,
     val scannedEpc: String? = null,
     val selectedLookup: SelectedLookupCard? = null,
     val status: VerifyWriteStatus = VerifyWriteStatus.Invalid(EXPECTED_MISSING_MESSAGE),
@@ -116,7 +115,6 @@ class RepairViewModel(
         updateStateWithStatus { state ->
             state.copy(
                 expectedEpc = value,
-                expectedEdited = true,
                 confirmation = null,
                 message = null,
                 errorMessage = null,
@@ -133,23 +131,6 @@ class RepairViewModel(
         updateStateWithStatus { state ->
             state.copy(
                 expectedEpc = normalized,
-                expectedEdited = true,
-                confirmation = null,
-                message = null,
-                errorMessage = null,
-            )
-        }
-    }
-
-    fun useSelectedLookup() {
-        val selected = uiState.value.selectedLookup ?: return
-        if (selected.epc.isBlank()) {
-            return
-        }
-        updateStateWithStatus { state ->
-            state.copy(
-                expectedEpc = selected.epc,
-                expectedEdited = false,
                 confirmation = null,
                 message = null,
                 errorMessage = null,
@@ -264,18 +245,24 @@ class RepairViewModel(
         }
         val status = evaluateStatus(state.expectedEpc, state.scannedEpc)
         mutableState.update { it.copy(status = status) }
-        if (status is VerifyWriteStatus.Mismatch) {
-            mutableState.update {
-                it.copy(
-                    confirmation =
-                        WriteConfirmation(
-                            expectedEpc = status.expectedEpc,
-                            scannedEpc = status.scannedEpc,
-                        ),
-                    message = null,
-                    errorMessage = null,
-                )
+        when (status) {
+            is VerifyWriteStatus.Mismatch -> {
+                mutableState.update {
+                    it.copy(
+                        confirmation =
+                            WriteConfirmation(
+                                expectedEpc = status.expectedEpc,
+                                scannedEpc = status.scannedEpc,
+                            ),
+                        message = null,
+                        errorMessage = null,
+                    )
+                }
             }
+            is VerifyWriteStatus.NotScanned -> {
+                performWrite(status.expectedEpc)
+            }
+            else -> Unit
         }
     }
 
@@ -570,11 +557,11 @@ class RepairViewModel(
         selectedLookup: SelectedLookupCard?,
     ): RepairUiState {
         val selectedEpc = selectedLookup?.epc?.takeIf { it.isNotBlank() }
-        val shouldPrefill = selectedEpc != null && (state.expectedEpc.isBlank() || !state.expectedEdited)
-        return if (shouldPrefill) {
+        val previousEpc = state.selectedLookup?.epc?.takeIf { it.isNotBlank() }
+        val selectionChanged = selectedEpc != null && selectedEpc != previousEpc
+        return if (selectionChanged) {
             state.copy(
                 expectedEpc = selectedEpc,
-                expectedEdited = false,
                 selectedLookup = selectedLookup,
             )
         } else {
@@ -591,4 +578,15 @@ class RepairViewModel(
         const val WRITE_TIMEOUT_MS = 7_000L
         const val VERIFY_TIMEOUT_MS = 7_000L
     }
+}
+
+internal fun canWriteExpectedEpc(
+    expectedEpc: String,
+    scannedEpc: String?,
+    isWriting: Boolean,
+): Boolean {
+    if (isWriting || expectedEpc.isBlank()) {
+        return false
+    }
+    return scannedEpc.isNullOrBlank() || scannedEpc != expectedEpc
 }
