@@ -71,4 +71,5 @@ class AppContainer(context: Context) {
     val scan2dScanner: Scan2dScanner = Scan2dScannerProvider.create(applicationContext, settingsStore)
     val findFeedbackController: FindFeedbackController = DeviceFindFeedbackController(applicationContext)
     val hardwareKeyDispatcher = HardwareKeyDispatcher()
+    val sessionFlagsStore = SessionFlagsStore()
 }

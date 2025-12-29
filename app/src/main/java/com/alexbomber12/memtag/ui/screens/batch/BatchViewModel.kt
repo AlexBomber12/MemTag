@@ -4,6 +4,7 @@ import android.content.ContentResolver
 import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.alexbomber12.memtag.app.SessionFlagsStore
 import com.alexbomber12.memtag.data.batch.BatchCsvExporter
 import com.alexbomber12.memtag.data.batch.BatchCsvParser
 import com.alexbomber12.memtag.data.batch.BatchRepository
@@ -85,6 +86,7 @@ data class BatchUiState(
 class BatchViewModel(
     private val repository: BatchRepository,
     private val uhfUseCase: BatchUhfUseCase,
+    private val sessionFlagsStore: SessionFlagsStore,
     private val clock: () -> Long = { System.currentTimeMillis() },
 ) : ViewModel() {
     private val mutableState = MutableStateFlow(BatchUiState())
@@ -130,6 +132,13 @@ class BatchViewModel(
                         )
                     }
                 }
+        }
+        viewModelScope.launch {
+            uiState.collect { state ->
+                sessionFlagsStore.setBatchRunning(
+                    state.sweepRunning || state.isScanning || isManualSessionActive(state),
+                )
+            }
         }
     }
 
@@ -728,6 +737,15 @@ class BatchViewModel(
     private fun pushUndo(action: BatchUndoAction) {
         undoStack.add(action)
         mutableState.update { it.copy(canUndo = true) }
+    }
+
+    override fun onCleared() {
+        sessionFlagsStore.setBatchRunning(false)
+        super.onCleared()
+    }
+
+    private fun isManualSessionActive(state: BatchUiState): Boolean {
+        return state.mode == BatchMode.MANUAL_SCAN && state.summary.unknown > 0
     }
 
     private sealed class BatchUndoAction

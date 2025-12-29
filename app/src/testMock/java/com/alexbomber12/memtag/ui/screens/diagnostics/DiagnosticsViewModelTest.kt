@@ -1,5 +1,6 @@
 package com.alexbomber12.memtag.ui.screens.diagnostics
 
+import com.alexbomber12.memtag.app.SessionFlagsStore
 import com.alexbomber12.memtag.data.settings.AppSettings
 import com.alexbomber12.memtag.data.settings.SettingsStore
 import com.alexbomber12.memtag.integrations.uhf.FakeUhfReader
@@ -117,6 +118,7 @@ class DiagnosticsViewModelTest {
         return DiagnosticsViewModel(
             settingsStore = settingsStore,
             uhfReader = reader,
+            sessionFlagsStore = SessionFlagsStore(),
         )
     }
 }

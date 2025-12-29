@@ -27,6 +27,7 @@ class AppViewModelFactory(
             return DiagnosticsViewModel(
                 settingsStore = appContainer.settingsStore,
                 uhfReader = appContainer.uhfReader,
+                sessionFlagsStore = appContainer.sessionFlagsStore,
             ) as T
         }
         if (modelClass.isAssignableFrom(LookupViewModel::class.java)) {
@@ -44,6 +45,7 @@ class AppViewModelFactory(
                 settingsStore = appContainer.settingsStore,
                 uhfReader = appContainer.uhfReader,
                 feedbackController = appContainer.findFeedbackController,
+                sessionFlagsStore = appContainer.sessionFlagsStore,
             ) as T
         }
         if (modelClass.isAssignableFrom(RepairViewModel::class.java)) {
@@ -53,6 +55,7 @@ class AppViewModelFactory(
                 scan2dScanner = appContainer.scan2dScanner,
                 actionsLogDao = appContainer.actionsLogDao,
                 settingsStore = appContainer.settingsStore,
+                sessionFlagsStore = appContainer.sessionFlagsStore,
             ) as T
         }
         if (modelClass.isAssignableFrom(BatchViewModel::class.java)) {
@@ -60,6 +63,7 @@ class AppViewModelFactory(
             return BatchViewModel(
                 repository = appContainer.batchRepository,
                 uhfUseCase = BatchUhfUseCase(appContainer.uhfReader),
+                sessionFlagsStore = appContainer.sessionFlagsStore,
             ) as T
         }
         throw IllegalArgumentException("Unknown ViewModel class: ${modelClass.name}")
