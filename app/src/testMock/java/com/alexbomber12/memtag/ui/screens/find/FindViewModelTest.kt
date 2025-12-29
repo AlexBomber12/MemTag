@@ -141,6 +141,7 @@ private class FailingUhfReader : UhfReader {
 
     override suspend fun writeEpc(
         epcHex: String,
+        targetEpcHex: String?,
         timeoutMs: Long,
     ): Result<Unit> = Result.failure(UhfError.NotInitialized.asException())
 

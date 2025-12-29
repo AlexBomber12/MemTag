@@ -17,6 +17,7 @@ interface UhfReader {
      */
     suspend fun writeEpc(
         epcHex: String,
+        targetEpcHex: String? = null,
         timeoutMs: Long = 5_000,
     ): Result<Unit>
 

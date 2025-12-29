@@ -111,6 +111,7 @@ class FakeUhfReader(
 
     override suspend fun writeEpc(
         epcHex: String,
+        targetEpcHex: String?,
         timeoutMs: Long,
     ): Result<Unit> =
         mutex.withLock {

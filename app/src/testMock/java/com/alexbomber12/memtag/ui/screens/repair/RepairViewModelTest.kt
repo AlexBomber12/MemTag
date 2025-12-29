@@ -22,6 +22,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -165,6 +166,47 @@ class RepairViewModelTest {
             val state = viewModel.uiState.value
             assertEquals("E2000017221101441890ABCE", state.expectedEpc)
         }
+
+    @Test
+    fun writeEnablementAllowsWriteWhenExpectedSetAndScannedBlank() {
+        assertTrue(canWriteExpectedEpc("E2000017221101441890ABCD", null, false))
+        assertTrue(canWriteExpectedEpc("E2000017221101441890ABCD", "", false))
+    }
+
+    @Test
+    fun writeEnablementAllowsWriteWhenScannedDiffers() {
+        assertTrue(
+            canWriteExpectedEpc(
+                expectedEpc = "E2000017221101441890ABCD",
+                scannedEpc = "E2000017221101441890ABCE",
+                isWriting = false,
+            ),
+        )
+    }
+
+    @Test
+    fun writeEnablementBlocksWriteWhenScannedMatches() {
+        assertFalse(
+            canWriteExpectedEpc(
+                expectedEpc = "E2000017221101441890ABCD",
+                scannedEpc = "E2000017221101441890ABCD",
+                isWriting = false,
+            ),
+        )
+    }
+
+    @Test
+    fun writeEnablementBlocksWriteWhenExpectedBlank() {
+        assertFalse(canWriteExpectedEpc("", null, false))
+        assertFalse(canWriteExpectedEpc("   ", "E2000017221101441890ABCD", false))
+    }
+
+    @Test
+    fun writeEnablementBlocksWriteWhileWriting() {
+        assertFalse(canWriteExpectedEpc("E2000017221101441890ABCD", null, true))
+        assertFalse(canWriteExpectedEpc("E2000017221101441890ABCD", "E2000017221101441890ABCE", true))
+        assertFalse(canWriteExpectedEpc("E2000017221101441890ABCD", "E2000017221101441890ABCD", true))
+    }
 
     private fun createViewModel(
         reader: FakeUhfReader,
