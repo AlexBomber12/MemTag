@@ -174,5 +174,12 @@ private class FailingUhfReader : UhfReader {
     override suspend fun applyDesiredConfigWithReadback(reason: String): Result<UhfApplyResult> =
         Result.failure(UhfError.NotInitialized.asException())
 
+    override suspend fun applyFindProfile(
+        targetEpcHex: String?,
+        useHardwareFilter: Boolean,
+    ): Result<Unit> = Result.failure(UhfError.NotInitialized.asException())
+
+    override suspend fun clearFindProfile(): Result<Unit> = Result.failure(UhfError.NotInitialized.asException())
+
     override suspend fun runMatrixProbe(): List<MatrixProbeResult> = emptyList()
 }

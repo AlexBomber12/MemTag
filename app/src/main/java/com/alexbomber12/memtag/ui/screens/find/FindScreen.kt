@@ -377,6 +377,10 @@ private fun DebugPanel(
             MatchStatus.Matched -> "Matched"
             MatchStatus.NotMatchedYet -> "Not matched yet"
         }
+    val filterTarget = uiState.targetEpcNormalized
+    val filterEnabled = uiState.isRunning && filterTarget != null && !uiState.debugDisableFilter
+    val filterPtrBits = if (filterTarget != null) FIND_FILTER_PTR_BITS else null
+    val filterCntBits = filterTarget?.length?.times(4)
     Column(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(4.dp),
@@ -389,6 +393,12 @@ private fun DebugPanel(
         Text(text = "Matched RSSI: ${uiState.lastSeenMatchedRssi ?: "n/a"}")
         Text(text = "Matched tags seen: ${uiState.tagsSeenMatched}")
         Text(text = "Match status: $matchStatusLabel")
+        Text(text = "HW filter enabled: $filterEnabled")
+        Text(
+            text =
+                "HW filter ptrBits: ${filterPtrBits ?: "n/a"} " +
+                    "cntBits: ${filterCntBits ?: "n/a"}",
+        )
         ToggleRow(
             title = "Debug: disable filter",
             description = "Use any tag for Geiger updates",
@@ -407,5 +417,9 @@ private fun DebugPanel(
         Text(text = "Raw proximity: $formattedRaw")
         Text(text = "Smoothed proximity: $formattedSmoothed")
         Text(text = "Seen recently: ${uiState.seenRecently}")
+        Text(text = "Wake-up idle ms: ${uiState.lastWakeUpIdleMs ?: "n/a"}")
+        Text(text = "Wake-up at: ${uiState.lastWakeUpAt ?: "n/a"}")
     }
 }
+
+private const val FIND_FILTER_PTR_BITS = 32

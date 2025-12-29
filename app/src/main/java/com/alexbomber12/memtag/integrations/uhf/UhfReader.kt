@@ -50,5 +50,12 @@ interface UhfReader {
 
     suspend fun applyDesiredConfigWithReadback(reason: String): Result<UhfApplyResult>
 
+    suspend fun applyFindProfile(
+        targetEpcHex: String?,
+        useHardwareFilter: Boolean,
+    ): Result<Unit>
+
+    suspend fun clearFindProfile(): Result<Unit>
+
     suspend fun runMatrixProbe(): List<MatrixProbeResult>
 }

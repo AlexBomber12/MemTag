@@ -54,6 +54,8 @@ data class FindUiState(
     val hitsPerWindow: Int = 0,
     val lastRssi: Int? = null,
     val seenRecently: Boolean = false,
+    val lastWakeUpAt: Long? = null,
+    val lastWakeUpIdleMs: Long? = null,
     val lastSeenAnyEpc: String? = null,
     val lastSeenAnyRssi: Int? = null,
     val lastSeenAnyAt: Long? = null,
@@ -122,6 +124,7 @@ class FindViewModel(
                 }
                 if (wasRunning && wasDebugDisableFilter && !settings.showFindDebugOverlay) {
                     refreshCalculator()
+                    reapplyFindProfile()
                 }
             }
         }
@@ -211,6 +214,7 @@ class FindViewModel(
         }
         if (uiState.value.isRunning) {
             refreshCalculator()
+            reapplyFindProfile()
         }
     }
 
@@ -235,6 +239,7 @@ class FindViewModel(
         persistFindTarget(normalized)
         if (uiState.value.isRunning) {
             refreshCalculator()
+            reapplyFindProfile()
         }
     }
 
@@ -271,6 +276,8 @@ class FindViewModel(
                     hitsPerWindow = 0,
                     lastRssi = null,
                     seenRecently = false,
+                    lastWakeUpAt = null,
+                    lastWakeUpIdleMs = null,
                     lastSeenAnyEpc = null,
                     lastSeenAnyRssi = null,
                     lastSeenAnyAt = null,
@@ -288,72 +295,80 @@ class FindViewModel(
         startFeedback()
         val job =
             viewModelScope.launch {
-                val initResult = uhfReader.initialize()
-                if (initResult.isFailure) {
-                    handleInventoryError(initResult.exceptionOrNull())
-                    return@launch
-                }
-                uhfReader.stopInventory()
-                val applyResult = uhfReader.applyDesiredConfigBestEffort("find-inventory")
-                if (applyResult.isFailure) {
-                    handleInventoryError(applyResult.exceptionOrNull())
-                    return@launch
-                }
-                val applied = applyResult.getOrNull()
-                if (applied != null && !applied.success) {
-                    handleInventoryError(UhfError.VendorError(applied.toErrorMessage()).asException())
-                    return@launch
-                }
-                uhfReader
-                    .startInventory(filterEpcHex = null)
-                    .catch { error -> handleInventoryError(error) }
-                    .collect { reading ->
-                        val rawEpc = reading.rawEpc ?: reading.epcHex
-                        val normalizedEpc = canonicalizeEpc(rawEpc) ?: canonicalizeEpc(reading.epcHex)
-                        val rssi = reading.rssi
-                        val timestampMs = reading.timestampMs
-                        val stateSnapshot = uiState.value
-                        val target = stateSnapshot.targetEpcNormalized
-                        val matched = normalizedEpc != null && target != null && normalizedEpc == target
-                        if (normalizedEpc != null) {
-                            mutableState.update { state ->
-                                val updated =
-                                    state.copy(
-                                        lastSeenAnyEpc = normalizedEpc,
-                                        lastSeenAnyRssi = rssi,
-                                        lastSeenAnyAt = timestampMs,
-                                        tagsSeenAny = state.tagsSeenAny + 1,
-                                        lastSeenMatchedEpc =
-                                            if (matched) normalizedEpc else state.lastSeenMatchedEpc,
-                                        lastSeenMatchedRssi =
-                                            if (matched) rssi else state.lastSeenMatchedRssi,
-                                        tagsSeenMatched =
-                                            if (matched) state.tagsSeenMatched + 1 else state.tagsSeenMatched,
-                                    )
-                                updated.copy(matchStatus = computeMatchStatus(updated))
+                try {
+                    val initResult = uhfReader.initialize()
+                    if (initResult.isFailure) {
+                        handleInventoryError(initResult.exceptionOrNull())
+                        return@launch
+                    }
+                    uhfReader.stopInventory()
+                    val applyResult = uhfReader.applyDesiredConfigBestEffort("find-inventory")
+                    if (applyResult.isFailure) {
+                        handleInventoryError(applyResult.exceptionOrNull())
+                        return@launch
+                    }
+                    val applied = applyResult.getOrNull()
+                    if (applied != null && !applied.success) {
+                        handleInventoryError(UhfError.VendorError(applied.toErrorMessage()).asException())
+                        return@launch
+                    }
+                    val targetEpc = targetNormalized
+                    val useHardwareFilter = targetEpc != null && !uiState.value.debugDisableFilter
+                    uhfReader.applyFindProfile(targetEpc, useHardwareFilter)
+                    uhfReader
+                        .startInventory(filterEpcHex = null)
+                        .catch { error -> handleInventoryError(error) }
+                        .collect { reading ->
+                            val rawEpc = reading.rawEpc ?: reading.epcHex
+                            val normalizedEpc = canonicalizeEpc(rawEpc) ?: canonicalizeEpc(reading.epcHex)
+                            val rssi = reading.rssi
+                            val timestampMs = reading.timestampMs
+                            val stateSnapshot = uiState.value
+                            val target = stateSnapshot.targetEpcNormalized
+                            val matched = normalizedEpc != null && target != null && normalizedEpc == target
+                            if (normalizedEpc != null) {
+                                mutableState.update { state ->
+                                    val updated =
+                                        state.copy(
+                                            lastSeenAnyEpc = normalizedEpc,
+                                            lastSeenAnyRssi = rssi,
+                                            lastSeenAnyAt = timestampMs,
+                                            tagsSeenAny = state.tagsSeenAny + 1,
+                                            lastSeenMatchedEpc =
+                                                if (matched) normalizedEpc else state.lastSeenMatchedEpc,
+                                            lastSeenMatchedRssi =
+                                                if (matched) rssi else state.lastSeenMatchedRssi,
+                                            tagsSeenMatched =
+                                                if (matched) state.tagsSeenMatched + 1 else state.tagsSeenMatched,
+                                        )
+                                    updated.copy(matchStatus = computeMatchStatus(updated))
+                                }
+                            }
+                            val matchAllNow = stateSnapshot.debugDisableFilter || target == null
+                            if (normalizedEpc != null && (matchAllNow || matched)) {
+                                calculator?.onReading(
+                                    TagReading(
+                                        epcHex = normalizedEpc,
+                                        rssi = rssi,
+                                        timestampMs = timestampMs,
+                                        rawEpc = rawEpc,
+                                    ),
+                                )
+                            }
+                            if (geigerLogCount < GEIGER_LOG_LIMIT) {
+                                val normalizedLabel = normalizedEpc ?: "--"
+                                val rssiLabel = rssi?.toString() ?: "--"
+                                UhfLogger.i(
+                                    "geiger tag raw=${rawEpc.ifBlank { "--" }} normalized=$normalizedLabel " +
+                                        "rssi=$rssiLabel matched=$matched",
+                                )
+                                geigerLogCount += 1
                             }
                         }
-                        val matchAllNow = stateSnapshot.debugDisableFilter || target == null
-                        if (normalizedEpc != null && (matchAllNow || matched)) {
-                            calculator?.onReading(
-                                TagReading(
-                                    epcHex = normalizedEpc,
-                                    rssi = rssi,
-                                    timestampMs = timestampMs,
-                                    rawEpc = rawEpc,
-                                ),
-                            )
-                        }
-                        if (geigerLogCount < GEIGER_LOG_LIMIT) {
-                            val normalizedLabel = normalizedEpc ?: "--"
-                            val rssiLabel = rssi?.toString() ?: "--"
-                            UhfLogger.i(
-                                "geiger tag raw=${rawEpc.ifBlank { "--" }} normalized=$normalizedLabel " +
-                                    "rssi=$rssiLabel matched=$matched",
-                            )
-                            geigerLogCount += 1
-                        }
-                    }
+                } finally {
+                    uhfReader.stopInventory()
+                    uhfReader.clearFindProfile()
+                }
             }
         inventoryJob = job
         job.invokeOnCompletion {
@@ -375,6 +390,7 @@ class FindViewModel(
         stopTickerAndFeedback()
         viewModelScope.launch {
             uhfReader.stopInventory()
+            uhfReader.clearFindProfile()
         }
         calculator?.reset()
         mutableState.update { state ->
@@ -389,6 +405,8 @@ class FindViewModel(
                     hitsPerWindow = 0,
                     lastRssi = null,
                     seenRecently = false,
+                    lastWakeUpAt = null,
+                    lastWakeUpIdleMs = null,
                     lastSeenAnyEpc = null,
                     lastSeenAnyRssi = null,
                     lastSeenAnyAt = null,
@@ -466,6 +484,8 @@ class FindViewModel(
                 hitsPerWindow = snapshot.hitsPerWindow,
                 lastRssi = snapshot.rssi,
                 seenRecently = snapshot.seenRecently,
+                lastWakeUpAt = snapshot.lastWakeUpAt,
+                lastWakeUpIdleMs = snapshot.lastWakeUpIdleMs,
                 status = status,
             )
         }
@@ -516,6 +536,17 @@ class FindViewModel(
         val target = uiState.value.targetEpcNormalized
         val matchAll = target == null || uiState.value.debugDisableFilter
         calculator = ProximityCalculator(target.orEmpty(), matchAll = matchAll)
+    }
+
+    private fun reapplyFindProfile() {
+        if (!uiState.value.isRunning) {
+            return
+        }
+        val target = uiState.value.targetEpcNormalized
+        val useHardwareFilter = target != null && !uiState.value.debugDisableFilter
+        viewModelScope.launch {
+            uhfReader.applyFindProfile(target, useHardwareFilter)
+        }
     }
 
     private fun computeStatus(state: FindUiState): FindStatus {
