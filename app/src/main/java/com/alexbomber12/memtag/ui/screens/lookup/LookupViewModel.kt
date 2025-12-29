@@ -275,6 +275,10 @@ class LookupViewModel(
     }
 
     private fun persistSelection(epc: String) {
+        persistLastScannedEpc(epc)
+    }
+
+    private fun persistLastScannedEpc(epc: String) {
         viewModelScope.launch {
             val timestamp = System.currentTimeMillis()
             settingsStore.update { settings ->
@@ -341,6 +345,7 @@ class LookupViewModel(
                 searchError = null,
             )
         }
+        persistLastScannedEpc(normalized)
         updateQuery(normalized)
     }
 
