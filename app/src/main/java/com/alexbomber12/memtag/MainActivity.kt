@@ -33,7 +33,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         val appContainer = (application as MemTagApplication).container
-        deepLinkIntent = intent
+        handleIncomingIntent(intent)
         lifecycleScope.launch {
             appContainer.settingsStore.settingsFlow.collect { settings ->
                 rfidKeyCodes = settings.rfidKeyCodeSet()
@@ -63,7 +63,7 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        deepLinkIntent = intent
+        handleIncomingIntent(intent)
     }
 
     override fun onStart() {
@@ -110,5 +110,9 @@ class MainActivity : ComponentActivity() {
         val network = connectivity.activeNetwork ?: return false
         val capabilities = connectivity.getNetworkCapabilities(network) ?: return false
         return capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+    }
+
+    private fun handleIncomingIntent(intent: Intent?) {
+        deepLinkIntent = intent
     }
 }

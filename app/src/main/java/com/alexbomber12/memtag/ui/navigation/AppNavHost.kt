@@ -30,6 +30,7 @@ import com.alexbomber12.memtag.ui.screens.settings.SettingsViewModel
 fun AppNavHost(
     navController: NavHostController,
     viewModelFactory: ViewModelProvider.Factory,
+    findViewModel: FindViewModel,
     appContainer: AppContainer,
     modifier: Modifier = Modifier,
 ) {
@@ -68,12 +69,11 @@ fun AppNavHost(
                     navDeepLink { uriPattern = "memtag://find?epc={epc}&autoStart={autoStart}" },
                 ),
         ) { backStackEntry ->
-            val viewModel: FindViewModel = viewModel(factory = viewModelFactory)
             val epc = backStackEntry.arguments?.getString("epc").orEmpty()
             val autoStart = backStackEntry.arguments?.getBoolean("autoStart") ?: false
             val fromBatch = backStackEntry.arguments?.getBoolean("fromBatch") ?: false
             FindScreen(
-                viewModel = viewModel,
+                viewModel = findViewModel,
                 initialEpc = epc,
                 autoStart = autoStart,
                 showBackToBatch = fromBatch,
