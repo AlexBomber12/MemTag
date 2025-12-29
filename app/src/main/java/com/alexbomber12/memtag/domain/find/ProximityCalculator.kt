@@ -24,7 +24,8 @@ class ProximityCalculator(
         val hitsMax: Int = 10,
         val rssiMin: Int = -80,
         val rssiMax: Int = -35,
-        val alpha: Float = 0.2f,
+        val rssiGamma: Float = 0.6f,
+        val alpha: Float = 0.3f,
         val noSignalMs: Long = 700L,
         val decayPerSecond: Float = 0.6f,
     )
@@ -95,8 +96,10 @@ class ProximityCalculator(
 
     private fun mapRssiToScore(rssi: Int): Float {
         val clamped = rssi.coerceIn(config.rssiMin, config.rssiMax)
-        return ((clamped - config.rssiMin).toFloat() / (config.rssiMax - config.rssiMin).toFloat())
-            .coerceIn(0f, 1f)
+        val normalized =
+            ((clamped - config.rssiMin).toFloat() / (config.rssiMax - config.rssiMin).toFloat())
+                .coerceIn(0f, 1f)
+        return normalized.pow(config.rssiGamma)
     }
 
     private fun applyDecay(

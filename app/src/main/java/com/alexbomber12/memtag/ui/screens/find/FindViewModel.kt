@@ -15,7 +15,6 @@ import com.alexbomber12.memtag.integrations.uhf.UhfReader
 import com.alexbomber12.memtag.integrations.uhf.asException
 import com.alexbomber12.memtag.integrations.uhf.toErrorMessage
 import com.alexbomber12.memtag.util.epc.EpcNormalizer
-import com.alexbomber12.memtag.util.epc.normalizeUhfEpc
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -155,7 +154,7 @@ class FindViewModel(
         if (epcRaw.isBlank()) {
             return
         }
-        val normalized = runCatching { EpcNormalizer.normalize(epcRaw) }.getOrNull() ?: return
+        val normalized = canonicalizeEpc(epcRaw) ?: return
         val shouldUpdate = uiState.value.epcInput != normalized
         if (shouldUpdate) {
             mutableState.update { state ->
@@ -186,11 +185,12 @@ class FindViewModel(
         if (last.isBlank()) {
             return
         }
+        val normalized = normalizeTargetEpc(last) ?: return
         mutableState.update { state ->
             val updated =
                 state.copy(
-                    epcInput = last,
-                    targetEpcNormalized = last,
+                    epcInput = normalized,
+                    targetEpcNormalized = normalized,
                     lastErrorMessage = null,
                     lastSeenMatchedEpc = null,
                     lastSeenMatchedRssi = null,
@@ -201,7 +201,7 @@ class FindViewModel(
                 matchStatus = computeMatchStatus(updated),
             )
         }
-        persistFindTarget(last)
+        persistFindTarget(normalized)
     }
 
     fun setSoundEnabled(enabled: Boolean) {
@@ -230,11 +230,12 @@ class FindViewModel(
 
     fun setTargetFromLastSeenAny() {
         val candidate = uiState.value.lastSeenAnyEpc ?: return
+        val normalized = normalizeTargetEpc(candidate) ?: return
         mutableState.update { state ->
             val updated =
                 state.copy(
-                    epcInput = candidate,
-                    targetEpcNormalized = candidate,
+                    epcInput = normalized,
+                    targetEpcNormalized = normalized,
                     lastErrorMessage = null,
                     lastSeenMatchedEpc = null,
                     lastSeenMatchedRssi = null,
@@ -245,7 +246,7 @@ class FindViewModel(
                 matchStatus = computeMatchStatus(updated),
             )
         }
-        persistFindTarget(candidate)
+        persistFindTarget(normalized)
         if (uiState.value.isRunning) {
             refreshCalculator()
         }
@@ -322,7 +323,7 @@ class FindViewModel(
                     .catch { error -> handleInventoryError(error) }
                     .collect { reading ->
                         val rawEpc = reading.rawEpc ?: reading.epcHex
-                        val normalizedEpc = normalizeUhfEpc(rawEpc)
+                        val normalizedEpc = canonicalizeEpc(rawEpc) ?: canonicalizeEpc(reading.epcHex)
                         val rssi = reading.rssi
                         val timestampMs = reading.timestampMs
                         val stateSnapshot = uiState.value
@@ -509,10 +510,12 @@ class FindViewModel(
     }
 
     private fun normalizeTargetEpc(value: String): String? {
-        if (value.isBlank()) {
-            return null
-        }
-        return runCatching { EpcNormalizer.normalize(value) }.getOrNull()
+        return canonicalizeEpc(value)
+    }
+
+    private fun canonicalizeEpc(value: String?): String? {
+        val candidate = value?.takeIf { it.isNotBlank() } ?: return null
+        return runCatching { EpcNormalizer.normalize(candidate) }.getOrNull()
     }
 
     private fun computeMatchStatus(state: FindUiState): MatchStatus {

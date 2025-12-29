@@ -393,11 +393,11 @@ private fun DebugPanel(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        Text(text = "Target (normalized): ${uiState.targetEpcNormalized ?: "n/a"}")
-        Text(text = "Any EPC: ${uiState.lastSeenAnyEpc ?: "n/a"}")
+        Text(text = "Target (canonical): ${uiState.targetEpcNormalized ?: "n/a"}")
+        Text(text = "Any EPC (canonical): ${uiState.lastSeenAnyEpc ?: "n/a"}")
         Text(text = "Any RSSI: ${uiState.lastSeenAnyRssi ?: "n/a"}")
         Text(text = "Any tags seen: ${uiState.tagsSeenAny}")
-        Text(text = "Matched EPC: ${uiState.lastSeenMatchedEpc ?: "n/a"}")
+        Text(text = "Matched EPC (canonical): ${uiState.lastSeenMatchedEpc ?: "n/a"}")
         Text(text = "Matched RSSI: ${uiState.lastSeenMatchedRssi ?: "n/a"}")
         Text(text = "Matched tags seen: ${uiState.tagsSeenMatched}")
         Text(text = "Match status: $matchStatusLabel")
