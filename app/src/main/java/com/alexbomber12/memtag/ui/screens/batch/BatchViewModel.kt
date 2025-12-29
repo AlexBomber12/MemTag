@@ -71,6 +71,7 @@ data class BatchUiState(
     val isExporting: Boolean = false,
     val isScanning: Boolean = false,
     val manualSessionActive: Boolean = false,
+    val manualSessionFinishing: Boolean = false,
     val manualScanCount: Int = 0,
     val manualFoundCount: Int = 0,
     val manualUnknownCount: Int = 0,
@@ -172,6 +173,7 @@ class BatchViewModel(
                     lastScanRssi = null,
                     lastScanMatched = null,
                     manualSessionActive = false,
+                    manualSessionFinishing = false,
                     manualScanCount = 0,
                     manualFoundCount = 0,
                     manualUnknownCount = 0,
@@ -225,6 +227,7 @@ class BatchViewModel(
                         lastScanRssi = if (report.isSuccess) null else state.lastScanRssi,
                         lastScanMatched = if (report.isSuccess) null else state.lastScanMatched,
                         manualSessionActive = if (report.isSuccess) false else state.manualSessionActive,
+                        manualSessionFinishing = if (report.isSuccess) false else state.manualSessionFinishing,
                         manualScanCount = if (report.isSuccess) 0 else state.manualScanCount,
                         manualFoundCount = if (report.isSuccess) 0 else state.manualFoundCount,
                         manualUnknownCount = if (report.isSuccess) 0 else state.manualUnknownCount,
@@ -246,7 +249,7 @@ class BatchViewModel(
         if (exportJob != null) {
             return
         }
-        if (uiState.value.manualSessionActive) {
+        if (uiState.value.manualSessionActive || uiState.value.manualSessionFinishing) {
             mutableState.update { it.copy(lastErrorMessage = "Finish the session before exporting.") }
             return
         }
@@ -342,6 +345,10 @@ class BatchViewModel(
             mutableState.update { it.copy(lastInfoMessage = "Start session first.", lastErrorMessage = null) }
             return
         }
+        if (state.manualSessionFinishing) {
+            mutableState.update { it.copy(lastInfoMessage = "Finishing session...", lastErrorMessage = null) }
+            return
+        }
         if (scanInProgress || state.sweepRunning) {
             return
         }
@@ -392,7 +399,7 @@ class BatchViewModel(
 
     fun toggleManualSession() {
         val state = uiState.value
-        if (state.sweepRunning || state.isScanning) {
+        if (state.sweepRunning || state.isScanning || state.manualSessionFinishing) {
             return
         }
         if (state.manualSessionActive) {
@@ -407,6 +414,7 @@ class BatchViewModel(
         mutableState.update {
             it.copy(
                 manualSessionActive = true,
+                manualSessionFinishing = false,
                 manualScanCount = 0,
                 manualFoundCount = summary.found,
                 manualUnknownCount = summary.unknown,
@@ -637,7 +645,16 @@ class BatchViewModel(
         if (uiState.value.sweepRunning) {
             return
         }
-        mutableState.update { it.copy(manualSessionActive = false, lastInfoMessage = null, lastErrorMessage = null) }
+        if (uiState.value.manualSessionFinishing) {
+            return
+        }
+        mutableState.update {
+            it.copy(
+                manualSessionFinishing = true,
+                lastInfoMessage = null,
+                lastErrorMessage = null,
+            )
+        }
         viewModelScope.launch {
             val inputItems = uiState.value.inputItems
             val sessionMap = uiState.value.sessionMap
@@ -656,6 +673,12 @@ class BatchViewModel(
                         )
                     }
                 }
+            }
+            mutableState.update {
+                it.copy(
+                    manualSessionActive = false,
+                    manualSessionFinishing = false,
+                )
             }
         }
     }

@@ -118,7 +118,10 @@ fun BatchScreen(
         )
     }
 
-    val canExport = state.inputItems.isNotEmpty() && !state.manualSessionActive
+    val canExport =
+        state.inputItems.isNotEmpty() &&
+            !state.manualSessionActive &&
+            !state.manualSessionFinishing
 
     LazyColumn(
         modifier =
@@ -305,7 +308,12 @@ private fun ManualPanel(
     onUndo: () -> Unit,
 ) {
     AppCard(title = "Manual Scan") {
-        val sessionLabel = if (state.manualSessionActive) "Running" else "Stopped"
+        val sessionLabel =
+            when {
+                state.manualSessionFinishing -> "Finishing"
+                state.manualSessionActive -> "Running"
+                else -> "Stopped"
+            }
         Text(
             text = "Session: $sessionLabel",
             style = MaterialTheme.typography.bodyMedium,
@@ -316,11 +324,16 @@ private fun ManualPanel(
         ) {
             SummaryChip(label = "Scans", count = state.manualScanCount)
             SummaryChip(label = "Found", count = state.manualFoundCount)
-            if (state.manualSessionActive) {
+            if (state.manualSessionActive && !state.manualSessionFinishing) {
                 SummaryChip(label = "Remaining", count = state.manualUnknownCount)
             }
         }
-        if (!state.manualSessionActive && state.summary.total > 0 && state.summary.unknown == 0) {
+        if (
+            !state.manualSessionActive &&
+            !state.manualSessionFinishing &&
+            state.summary.total > 0 &&
+            state.summary.unknown == 0
+        ) {
             Row(
                 modifier = Modifier.horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -370,16 +383,25 @@ private fun ManualPanel(
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             PrimaryButton(
-                text = if (state.manualSessionActive) "Finish session" else "Start session",
+                text =
+                    when {
+                        state.manualSessionFinishing -> "Finishing..."
+                        state.manualSessionActive -> "Finish session"
+                        else -> "Start session"
+                    },
                 onClick = onToggleSession,
                 modifier = Modifier.weight(1f),
-                enabled = !state.isScanning && !state.sweepRunning,
+                enabled = !state.isScanning && !state.sweepRunning && !state.manualSessionFinishing,
             )
             SecondaryButton(
                 text = "Scan",
                 onClick = onScan,
                 modifier = Modifier.weight(1f),
-                enabled = state.manualSessionActive && !state.isScanning && !state.sweepRunning,
+                enabled =
+                    state.manualSessionActive &&
+                        !state.manualSessionFinishing &&
+                        !state.isScanning &&
+                        !state.sweepRunning,
             )
         }
         SecondaryButton(
