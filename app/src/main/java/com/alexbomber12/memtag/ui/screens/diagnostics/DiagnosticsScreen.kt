@@ -2,6 +2,7 @@
 
 package com.alexbomber12.memtag.ui.screens.diagnostics
 
+import android.util.Log
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -29,6 +30,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -38,8 +40,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.alexbomber12.memtag.data.AppDefaults
-import com.alexbomber12.memtag.integrations.feedback.VibrationHelper
-import com.alexbomber12.memtag.integrations.feedback.VibrationResult
+import com.alexbomber12.memtag.integrations.feedback.SystemHapticEngine
 import com.alexbomber12.memtag.integrations.uhf.ProtocolSupport
 import com.alexbomber12.memtag.integrations.uhf.UHF_CONFIG_BUSY
 import com.alexbomber12.memtag.integrations.uhf.UHF_PROTOCOL_UNSUPPORTED
@@ -49,6 +50,10 @@ import com.alexbomber12.memtag.ui.components.ErrorState
 import com.alexbomber12.memtag.ui.components.PrimaryButton
 import com.alexbomber12.memtag.ui.components.SecondaryButton
 import kotlinx.coroutines.delay
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 
 @Composable
 fun DiagnosticsScreen(viewModel: DiagnosticsViewModel) {
@@ -61,9 +66,11 @@ fun DiagnosticsScreen(viewModel: DiagnosticsViewModel) {
     }
 
     val context = LocalContext.current
+    val hapticEngine = remember(context) { SystemHapticEngine(context) }
     var regionExpanded by rememberSaveable { mutableStateOf(false) }
     var pendingPower by rememberSaveable { mutableStateOf(state.currentPower.toFloat()) }
-    var vibrationStatus by rememberSaveable { mutableStateOf<String?>(null) }
+    var hapticStatus by rememberSaveable { mutableStateOf<String?>(null) }
+    var lastHapticTestAtMs by rememberSaveable { mutableStateOf<Long?>(null) }
 
     LaunchedEffect(state.currentPower) {
         pendingPower = state.currentPower.toFloat()
@@ -372,7 +379,15 @@ fun DiagnosticsScreen(viewModel: DiagnosticsViewModel) {
         }
 
         item {
-            AppCard(title = "Feedback") {
+            AppCard(title = "Haptics") {
+                val hasVibrator = hapticEngine.hasVibrator()
+                val hasAmplitudeControl = hapticEngine.hasAmplitudeControl()
+                val apiPath = hapticEngine.apiPath.name
+                val lastTestLabel = lastHapticTestAtMs?.let { formatTimestamp(it) } ?: "never"
+                Text(text = "Has vibrator: $hasVibrator")
+                Text(text = "Amplitude control: $hasAmplitudeControl")
+                Text(text = "API path: $apiPath")
+                Text(text = "Last test: $lastTestLabel")
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -381,15 +396,28 @@ fun DiagnosticsScreen(viewModel: DiagnosticsViewModel) {
                     PrimaryButton(
                         text = "Test vibration",
                         onClick = {
-                            vibrationStatus =
-                                when (VibrationHelper.shortPulse(context)) {
-                                    VibrationResult.Triggered -> "Vibration triggered"
-                                    VibrationResult.NoVibrator -> "No vibrator available"
+                            val durationMs = SystemHapticEngine.TEST_PULSE_MS
+                            val hasVibratorNow = hapticEngine.hasVibrator()
+                            val hasAmplitudeControlNow = hapticEngine.hasAmplitudeControl()
+                            val apiPathLabel = hapticEngine.apiPath.name
+                            Log.i(
+                                HAPTIC_LOG_TAG,
+                                "Test vibration durationMs=$durationMs amplitude=default " +
+                                    "hasVibrator=$hasVibratorNow hasAmplitudeControl=$hasAmplitudeControlNow " +
+                                    "apiPath=$apiPathLabel",
+                            )
+                            hapticEngine.testPulse()
+                            lastHapticTestAtMs = System.currentTimeMillis()
+                            hapticStatus =
+                                if (hasVibratorNow) {
+                                    "Vibration triggered"
+                                } else {
+                                    "No vibrator available"
                                 }
                         },
                         modifier = Modifier.weight(1f),
                     )
-                    vibrationStatus?.let { status ->
+                    hapticStatus?.let { status ->
                         Text(
                             text = status,
                             style = MaterialTheme.typography.bodySmall,
@@ -529,3 +557,13 @@ private fun formatConfigValue(value: Int?): String {
         else -> value.toString()
     }
 }
+
+private fun formatTimestamp(timestampMs: Long): String {
+    val instant = Instant.ofEpochMilli(timestampMs)
+    return TIMESTAMP_FORMATTER.withZone(ZoneId.systemDefault()).format(instant)
+}
+
+private const val HAPTIC_LOG_TAG = "memtag-haptics"
+
+private val TIMESTAMP_FORMATTER =
+    DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss", Locale.US)
