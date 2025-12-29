@@ -40,4 +40,17 @@ class FindIntentParserTest {
 
         assertNull(result)
     }
+
+    @Test
+    fun ignoresUriWhenNotAllowed() {
+        val intent =
+            Intent(
+                Intent.ACTION_VIEW,
+                Uri.parse("http://example.com/?epc=E2000017221101441890ABCD"),
+            )
+
+        val result = extractFindEpc(intent, allowUri = false)
+
+        assertNull(result)
+    }
 }

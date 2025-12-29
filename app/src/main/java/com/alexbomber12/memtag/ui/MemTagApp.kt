@@ -109,12 +109,17 @@ private fun parseFindIntent(
     }
     val uri = intent.data
     val isFindUri = uri?.let { isFindDeepLink(it, logger) } ?: false
-    val epc = extractFindEpc(intent).orEmpty()
+    val epc = extractFindEpc(intent, allowUri = isFindUri).orEmpty()
     val hasEpc = epc.isNotBlank()
     if (!isFindUri && !hasEpc) {
         return null
     }
-    val autoStart = uri?.let { parseAutoStartParam(it) } ?: hasEpc
+    val autoStart =
+        if (isFindUri) {
+            uri?.let { parseAutoStartParam(it) } ?: hasEpc
+        } else {
+            hasEpc
+        }
     return FindIntentParams(
         epc = epc,
         autoStart = autoStart,

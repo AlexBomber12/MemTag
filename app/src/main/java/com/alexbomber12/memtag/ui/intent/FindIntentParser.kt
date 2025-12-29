@@ -7,13 +7,18 @@ private val EPC_QUERY_KEYS = setOf("epc", "expectedepc")
 private val EPC_EXTRA_KEYS = setOf("epc", "expectedepc", "expected_epc")
 private val WHITESPACE_REGEX = Regex("\\s+")
 
-internal fun extractFindEpc(intent: Intent?): String? {
+internal fun extractFindEpc(
+    intent: Intent?,
+    allowUri: Boolean = true,
+): String? {
     if (intent == null) {
         return null
     }
-    val fromUri = intent.data?.let { extractFromUri(it) }
-    if (fromUri != null) {
-        return fromUri
+    if (allowUri) {
+        val fromUri = intent.data?.let { extractFromUri(it) }
+        if (fromUri != null) {
+            return fromUri
+        }
     }
     return extractFromExtras(intent)
 }
