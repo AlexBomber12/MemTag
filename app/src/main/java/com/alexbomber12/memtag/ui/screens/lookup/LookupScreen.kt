@@ -178,7 +178,10 @@ fun LookupScreen(
         }
 
         item {
-            AppCard(title = "Sync") {
+            AppCard(
+                title = "Sync",
+                modifier = Modifier.fillMaxWidth(),
+            ) {
                 val lastSync = state.lastSyncState
                 if (lastSync == null) {
                     Text(text = "Last sync: --")
