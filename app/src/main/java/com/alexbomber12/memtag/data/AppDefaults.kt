@@ -15,7 +15,6 @@ object AppDefaults {
     const val SCAN2D_EXTRA_KEY = "data"
 
     const val FIND_SOUND_ENABLED = false
-    const val FIND_HAPTIC_ENABLED = false
     const val FIND_DEBUG_OVERLAY_ENABLED = false
     const val LAST_SCANNED_EPC = ""
     const val LAST_FIND_TARGET_EPC = ""
