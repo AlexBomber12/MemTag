@@ -127,8 +127,6 @@ private class FakeSettingsStore(
 private class FakeFeedbackController : FindFeedbackController {
     override fun playSound() = Unit
 
-    override fun vibrate(durationMs: Long) = Unit
-
     override fun release() = Unit
 }
 

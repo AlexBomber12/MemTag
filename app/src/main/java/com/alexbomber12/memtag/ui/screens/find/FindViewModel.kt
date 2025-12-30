@@ -66,7 +66,6 @@ data class FindUiState(
     val tagsSeenMatched: Int = 0,
     val matchStatus: MatchStatus = MatchStatus.NoTarget,
     val soundEnabled: Boolean = AppDefaults.FIND_SOUND_ENABLED,
-    val hapticEnabled: Boolean = AppDefaults.FIND_HAPTIC_ENABLED,
     val debugOverlayEnabled: Boolean = AppDefaults.FIND_DEBUG_OVERLAY_ENABLED,
     val debugDisableFilter: Boolean = false,
     val lastErrorMessage: String? = null,
@@ -116,7 +115,6 @@ class FindViewModel(
                             targetEpcNormalized = targetNormalized,
                             lastScannedEpc = settings.lastScannedEpc,
                             soundEnabled = settings.findSoundEnabled,
-                            hapticEnabled = settings.findHapticEnabled,
                             debugOverlayEnabled = settings.showFindDebugOverlay,
                             debugDisableFilter = nextDebugDisableFilter,
                         )
@@ -469,15 +467,12 @@ class FindViewModel(
                         break
                     }
                     val interval = feedbackIntervalMs(state.proximity)
-                    if (interval == null || (!state.soundEnabled && !state.hapticEnabled)) {
+                    if (interval == null || !state.soundEnabled) {
                         delay(FEEDBACK_IDLE_POLL_MS)
                         continue
                     }
                     if (state.soundEnabled) {
                         feedbackController.playSound()
-                    }
-                    if (state.hapticEnabled) {
-                        feedbackController.vibrate(hapticDurationMs(state.proximity))
                     }
                     delay(interval)
                 }
@@ -609,14 +604,6 @@ class FindViewModel(
             proximity < 40 -> 800L
             proximity < 70 -> 350L
             else -> 150L
-        }
-    }
-
-    private fun hapticDurationMs(proximity: Int): Long {
-        return when {
-            proximity < 40 -> 60L
-            proximity < 70 -> 70L
-            else -> 80L
         }
     }
 

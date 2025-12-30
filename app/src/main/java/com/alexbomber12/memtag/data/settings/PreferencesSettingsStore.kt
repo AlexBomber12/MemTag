@@ -48,7 +48,6 @@ class PreferencesSettingsStore(
             preferences[Keys.SCAN2D_ACTION] = updated.scan2dAction
             preferences[Keys.SCAN2D_EXTRA_KEY] = updated.scan2dExtraKey
             preferences[Keys.FIND_SOUND_ENABLED] = updated.findSoundEnabled
-            preferences[Keys.FIND_HAPTIC_ENABLED] = updated.findHapticEnabled
             preferences[Keys.SHOW_FIND_DEBUG_OVERLAY] = updated.showFindDebugOverlay
             preferences[Keys.LAST_SCANNED_EPC] = updated.lastScannedEpc
             preferences[Keys.LAST_FIND_TARGET_EPC] = updated.lastFindTargetEpc
@@ -117,7 +116,6 @@ class PreferencesSettingsStore(
             scan2dAction = this[Keys.SCAN2D_ACTION] ?: AppDefaults.SCAN2D_ACTION,
             scan2dExtraKey = this[Keys.SCAN2D_EXTRA_KEY] ?: AppDefaults.SCAN2D_EXTRA_KEY,
             findSoundEnabled = this[Keys.FIND_SOUND_ENABLED] ?: AppDefaults.FIND_SOUND_ENABLED,
-            findHapticEnabled = this[Keys.FIND_HAPTIC_ENABLED] ?: AppDefaults.FIND_HAPTIC_ENABLED,
             showFindDebugOverlay =
                 this[Keys.SHOW_FIND_DEBUG_OVERLAY] ?: AppDefaults.FIND_DEBUG_OVERLAY_ENABLED,
             lastScannedEpc =
@@ -151,7 +149,6 @@ class PreferencesSettingsStore(
         val SCAN2D_ACTION = stringPreferencesKey("scan2d_action")
         val SCAN2D_EXTRA_KEY = stringPreferencesKey("scan2d_extra_key")
         val FIND_SOUND_ENABLED = booleanPreferencesKey("find_sound_enabled")
-        val FIND_HAPTIC_ENABLED = booleanPreferencesKey("find_haptic_enabled")
         val SHOW_FIND_DEBUG_OVERLAY = booleanPreferencesKey("find_debug_overlay")
         val LAST_SCANNED_EPC = stringPreferencesKey("last_scanned_epc")
         val LEGACY_LAST_LOOKUP_EPC = stringPreferencesKey("last_lookup_epc")

@@ -126,12 +126,6 @@ class SettingsViewModel(
         }
     }
 
-    fun toggleFindHaptic(enabled: Boolean) {
-        viewModelScope.launch {
-            settingsStore.update { current -> current.copy(findHapticEnabled = enabled) }
-        }
-    }
-
     fun toggleFindDebugOverlay(enabled: Boolean) {
         viewModelScope.launch {
             settingsStore.update { current -> current.copy(showFindDebugOverlay = enabled) }
