@@ -49,7 +49,7 @@ fun ErrorState(
         )
         Text(text = message, style = MaterialTheme.typography.bodyMedium)
         if (actionLabel != null && onAction != null) {
-            SecondaryButton(text = actionLabel, onClick = onAction)
+            SecondaryButton(text = actionLabel, onClick = onAction, fullWidth = false)
         }
     }
 }
