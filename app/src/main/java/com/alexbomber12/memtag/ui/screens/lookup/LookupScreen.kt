@@ -32,8 +32,6 @@ import com.alexbomber12.memtag.ui.components.LoadingState
 import com.alexbomber12.memtag.ui.components.SecondaryButton
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.collect
-import java.text.DateFormat
-import java.util.Date
 
 @Composable
 fun LookupScreen(
@@ -163,7 +161,7 @@ fun LookupScreen(
         } else if (state.results.isEmpty()) {
             item {
                 Text(
-                    text = "No results. Sync may be needed.",
+                    text = "Not found. Sync in Settings may be required.",
                     style = MaterialTheme.typography.bodySmall,
                 )
             }
@@ -174,24 +172,6 @@ fun LookupScreen(
                     isSelected = item.epcNormalized == state.selectedEpc,
                     onClick = { viewModel.selectItem(item) },
                 )
-            }
-        }
-
-        item {
-            AppCard(
-                title = "Sync",
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                val lastSync = state.lastSyncState
-                if (lastSync == null) {
-                    Text(text = "Last sync: --")
-                } else {
-                    Text(text = "Last sync: ${formatTimestamp(lastSync.lastSyncAt)}")
-                    Text(text = "Last status: ${lastSync.lastSyncStatus.name.lowercase()}")
-                    if (!lastSync.lastErrorMessage.isNullOrBlank()) {
-                        Text(text = "Last error: ${lastSync.lastErrorMessage}")
-                    }
-                }
             }
         }
     }
@@ -242,9 +222,4 @@ private fun LookupResultRow(
             )
         }
     }
-}
-
-private fun formatTimestamp(epochMs: Long): String {
-    val formatter = DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT)
-    return formatter.format(Date(epochMs))
 }
