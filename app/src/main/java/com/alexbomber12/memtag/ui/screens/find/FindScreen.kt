@@ -2,48 +2,52 @@
 
 package com.alexbomber12.memtag.ui.screens.find
 
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.ContentPaste
+import androidx.compose.material.icons.filled.History
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Switch
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalClipboardManager
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
 import com.alexbomber12.memtag.app.HardwareAction
-import com.alexbomber12.memtag.ui.components.AppCard
+import com.alexbomber12.memtag.ui.components.AppScaffold
 import com.alexbomber12.memtag.ui.components.PrimaryButton
 import com.alexbomber12.memtag.ui.components.SecondaryButton
+import com.alexbomber12.memtag.ui.components.SectionCard
+import com.alexbomber12.memtag.ui.components.StatChip
 import com.alexbomber12.memtag.util.epc.EpcValidator
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.collect
-import java.util.Locale
+import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
 @Composable
@@ -56,7 +60,9 @@ fun FindScreen(
     hardwareActions: Flow<HardwareAction>,
 ) {
     val uiState by viewModel.uiState.collectAsState()
-    var debugExpanded by rememberSaveable { mutableStateOf(false) }
+    val clipboardManager = LocalClipboardManager.current
+    val snackbarHostState = remember { SnackbarHostState() }
+    val coroutineScope = rememberCoroutineScope()
 
     DisposableEffect(Unit) {
         onDispose { viewModel.stopFind() }
@@ -75,159 +81,180 @@ fun FindScreen(
     }
     val isValid = uiState.epcInput.isBlank() || EpcValidator.isValidEpcHex(uiState.epcInput)
     val showInputError = uiState.epcInput.isNotBlank() && !isValid
-    val targetValue = uiState.targetEpcNormalized ?: uiState.epcInput.takeIf { it.isNotBlank() }
-    val targetLabel = formatTargetLabel(targetValue)
     val errorMessage = uiState.lastErrorMessage?.takeIf { it.isNotBlank() }
-    val statusLine =
-        when {
-            !uiState.isRunning -> "Idle. Press trigger or tap Start."
-            uiState.targetEpcNormalized.isNullOrBlank() -> "Running. Set a target EPC to use proximity."
-            uiState.proximity <= 0 -> "Running. No signal yet, move closer to the tag."
-            else -> "Running. Signal detected."
+    val isNearbyMode = uiState.targetEpcNormalized.isNullOrBlank()
+    val canSetTargetFromLastSeen =
+        uiState.lastSeenAnyEpc != null &&
+            (isNearbyMode || uiState.matchStatus == MatchStatus.NotMatchedYet)
+    val statusLabel =
+        when (uiState.status) {
+            FindStatus.Idle -> "Idle"
+            FindStatus.NoSignal -> "Running"
+            FindStatus.Running -> "Signal detected"
+            is FindStatus.Error -> "Idle"
         }
+    val canEditTarget = !uiState.isRunning
 
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
-    ) {
-        item {
-            AppCard(
-                title = "RFID",
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                OutlinedTextField(
-                    value = uiState.epcInput,
-                    onValueChange = viewModel::onEpcInputChange,
+    val showTargetUpdated: () -> Unit = {
+        coroutineScope.launch {
+            snackbarHostState.showSnackbar("Target EPC updated")
+        }
+    }
+    val pasteFromClipboard: () -> Unit = {
+        val clipboardText = clipboardManager.getText()?.text?.trim().orEmpty()
+        if (clipboardText.isNotBlank()) {
+            viewModel.onEpcInputChange(clipboardText)
+            showTargetUpdated()
+        }
+    }
+
+    AppScaffold(
+        snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
+    ) { contentPadding ->
+        LazyColumn(
+            modifier =
+                Modifier
+                    .fillMaxSize()
+                    .imePadding(),
+            contentPadding = contentPadding,
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            item {
+                SectionCard(
+                    title = "Target",
                     modifier = Modifier.fillMaxWidth(),
-                    label = { Text(text = "RFID") },
-                    placeholder = { Text(text = "RFID (hex)") },
-                    singleLine = true,
-                    enabled = !uiState.isRunning,
-                    isError = showInputError,
-                    supportingText = {
-                        val message =
+                ) {
+                    OutlinedTextField(
+                        value = uiState.epcInput,
+                        onValueChange = viewModel::onEpcInputChange,
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text(text = "Target EPC") },
+                        placeholder = { Text(text = "Paste or scan EPC") },
+                        singleLine = true,
+                        enabled = canEditTarget,
+                        isError = showInputError,
+                        supportingText =
                             if (showInputError) {
-                                "Invalid EPC. Use 8-64 hex characters."
+                                { Text(text = "Invalid EPC. Use 8-64 hex characters.") }
                             } else {
-                                "Paste or type the tag EPC."
+                                null
+                            },
+                        trailingIcon = {
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                if (uiState.lastScannedEpc.isNotBlank()) {
+                                    IconButton(
+                                        onClick = {
+                                            viewModel.useLastScannedEpc()
+                                            showTargetUpdated()
+                                        },
+                                        enabled = canEditTarget,
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Filled.History,
+                                            contentDescription = "Use last scanned EPC",
+                                        )
+                                    }
+                                }
+                                IconButton(
+                                    onClick = pasteFromClipboard,
+                                    enabled = canEditTarget,
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Filled.ContentPaste,
+                                        contentDescription = "Paste EPC from clipboard",
+                                    )
+                                }
+                                if (uiState.epcInput.isNotBlank()) {
+                                    IconButton(
+                                        onClick = { viewModel.onEpcInputChange("") },
+                                        enabled = canEditTarget,
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Filled.Clear,
+                                            contentDescription = "Clear target EPC",
+                                        )
+                                    }
+                                }
                             }
-                        Text(text = message)
-                    },
-                )
-                if (uiState.lastScannedEpc.isNotBlank()) {
-                    TextButton(onClick = viewModel::useLastScannedEpc, enabled = !uiState.isRunning) {
-                        Text(text = "Use last scanned RFID")
-                    }
-                    Text(
-                        text = uiState.lastScannedEpc,
-                        style = MaterialTheme.typography.bodySmall,
+                        },
                     )
                 }
             }
-        }
 
-        item {
-            AppCard(
-                title = "Proximity",
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                val isNearbyMode = uiState.targetEpcNormalized.isNullOrBlank()
-                val canSetTargetFromLastSeen =
-                    uiState.lastSeenAnyEpc != null &&
-                        (isNearbyMode || uiState.matchStatus == MatchStatus.NotMatchedYet)
-
-                Text(
-                    text = statusLine,
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-                Text(
-                    text = "Target: $targetLabel",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                if (errorMessage != null) {
-                    ErrorBanner(
-                        message = errorMessage,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                }
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    PrimaryButton(
-                        text = if (uiState.isRunning) "Stop" else "Start",
-                        onClick = viewModel::toggleFind,
-                        modifier = Modifier.weight(1f),
-                        enabled = uiState.isRunning || isValid,
-                    )
-                    if (errorMessage != null) {
-                        SecondaryButton(
-                            text = "Clear error",
-                            onClick = viewModel::clearError,
-                            modifier = Modifier.weight(1f),
-                        )
-                    }
-                }
-                ProximityMeter(
-                    proximity = uiState.proximity,
-                    isRunning = uiState.isRunning,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                if (uiState.isRunning &&
-                    !isNearbyMode &&
-                    uiState.tagsSeenMatched == 0 &&
-                    uiState.tagsSeenAny > 0
-                ) {
-                    Text(
-                        text = "Target not seen yet, but tags nearby: ${uiState.lastSeenAnyEpc.orEmpty()}",
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                }
-                if (canSetTargetFromLastSeen) {
-                    SecondaryButton(
-                        text = "Set target from last seen tag",
-                        onClick = viewModel::setTargetFromLastSeenAny,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                }
-            }
-        }
-
-        if (uiState.debugOverlayEnabled) {
             item {
-                AppCard(
-                    title = "Find Debug",
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    TextButton(
-                        onClick = { debugExpanded = !debugExpanded },
-                        modifier = Modifier.align(Alignment.End),
+                SectionCard(modifier = Modifier.fillMaxWidth()) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Text(text = if (debugExpanded) "Hide details" else "Show details")
+                        Text(text = "Proximity", style = MaterialTheme.typography.titleMedium)
+                        StatChip(label = statusLabel)
                     }
-                    AnimatedVisibility(visible = debugExpanded) {
-                        DebugPanel(
-                            uiState = uiState,
-                            onDisableFilterChange = viewModel::setDebugDisableFilter,
+                    if (errorMessage != null) {
+                        ErrorBanner(
+                            message = errorMessage,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        PrimaryButton(
+                            text = if (uiState.isRunning) "Stop" else "Start",
+                            onClick = viewModel::toggleFind,
+                            modifier = Modifier.weight(1f),
+                            enabled = uiState.isRunning || isValid,
+                        )
+                        if (errorMessage != null) {
+                            SecondaryButton(
+                                text = "Clear error",
+                                onClick = viewModel::clearError,
+                                modifier = Modifier.weight(1f),
+                            )
+                        }
+                    }
+                    ProximityMeter(
+                        proximity = uiState.proximity,
+                        isRunning = uiState.isRunning,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    if (uiState.isRunning &&
+                        !isNearbyMode &&
+                        uiState.tagsSeenMatched == 0 &&
+                        uiState.tagsSeenAny > 0
+                    ) {
+                        Text(
+                            text = "Target not seen yet, but tags nearby: ${uiState.lastSeenAnyEpc.orEmpty()}",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                    if (canSetTargetFromLastSeen) {
+                        SecondaryButton(
+                            text = "Set target from last seen tag",
+                            onClick = viewModel::setTargetFromLastSeenAny,
+                            modifier = Modifier.fillMaxWidth(),
                         )
                     }
                 }
             }
-        }
 
-        if (showBackToBatch) {
-            item {
-                AppCard(
-                    title = "Actions",
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    SecondaryButton(
-                        text = "Back to Batch",
-                        onClick = onBackToBatch,
+            if (showBackToBatch) {
+                item {
+                    SectionCard(
+                        title = "Actions",
                         modifier = Modifier.fillMaxWidth(),
-                    )
+                    ) {
+                        SecondaryButton(
+                            text = "Back to Batch",
+                            onClick = onBackToBatch,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
                 }
             }
         }
@@ -263,48 +290,25 @@ private fun ProximityMeter(
         } else {
             barColor
         }
-    Column(
+    Row(
         modifier = modifier,
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Text(
             text = displayValue.toString(),
-            style = MaterialTheme.typography.displaySmall,
+            style = MaterialTheme.typography.headlineMedium,
             color = labelColor,
         )
-        EqualizerBar(
-            progress = animatedProgress,
+        LinearProgressIndicator(
+            progress = { animatedProgress.coerceIn(0f, 1f) },
             color = barColor,
+            trackColor = MaterialTheme.colorScheme.surfaceVariant,
             modifier =
                 Modifier
-                    .fillMaxWidth()
-                    .height(160.dp),
-        )
-    }
-}
-
-@Composable
-private fun EqualizerBar(
-    progress: Float,
-    color: androidx.compose.ui.graphics.Color,
-    modifier: Modifier = Modifier,
-) {
-    Box(
-        modifier =
-            modifier
-                .clip(MaterialTheme.shapes.small)
-                .background(MaterialTheme.colorScheme.surfaceVariant)
-                .padding(4.dp),
-        contentAlignment = Alignment.BottomCenter,
-    ) {
-        Box(
-            modifier =
-                Modifier
-                    .fillMaxWidth()
-                    .fillMaxHeight(progress.coerceIn(0f, 1f))
-                    .clip(MaterialTheme.shapes.small)
-                    .background(color),
+                    .weight(1f)
+                    .height(8.dp)
+                    .clip(MaterialTheme.shapes.small),
         )
     }
 }
@@ -328,98 +332,3 @@ private fun ErrorBanner(
         )
     }
 }
-
-private fun formatTargetLabel(value: String?): String {
-    val epc = value?.trim().orEmpty()
-    if (epc.isBlank()) {
-        return "not set"
-    }
-    if (epc.length <= 12) {
-        return epc
-    }
-    return "${epc.take(6)}...${epc.takeLast(4)}"
-}
-
-@Composable
-private fun ToggleRow(
-    title: String,
-    description: String,
-    checked: Boolean,
-    onCheckedChange: (Boolean) -> Unit,
-) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(text = title, style = MaterialTheme.typography.bodyMedium)
-            Text(text = description, style = MaterialTheme.typography.bodySmall)
-        }
-        Switch(
-            checked = checked,
-            onCheckedChange = onCheckedChange,
-        )
-    }
-}
-
-@Composable
-private fun DebugPanel(
-    uiState: FindUiState,
-    onDisableFilterChange: (Boolean) -> Unit,
-) {
-    val clipboard = LocalClipboardManager.current
-    val formattedRaw = String.format(Locale.US, "%.2f", uiState.rawProximity)
-    val formattedSmoothed = String.format(Locale.US, "%.2f", uiState.smoothedProximity)
-    val matchStatusLabel =
-        when (uiState.matchStatus) {
-            MatchStatus.NoTarget -> "No target"
-            MatchStatus.Matched -> "Matched"
-            MatchStatus.NotMatchedYet -> "Not matched yet"
-        }
-    val filterTarget = uiState.targetEpcNormalized
-    val filterEnabled = uiState.isRunning && filterTarget != null && !uiState.debugDisableFilter
-    val filterPtrBits = if (filterTarget != null) FIND_FILTER_PTR_BITS else null
-    val filterCntBits = filterTarget?.length?.times(4)
-    Column(
-        modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
-    ) {
-        Text(text = "Target (canonical): ${uiState.targetEpcNormalized ?: "n/a"}")
-        Text(text = "Any EPC (canonical): ${uiState.lastSeenAnyEpc ?: "n/a"}")
-        Text(text = "Any RSSI: ${uiState.lastSeenAnyRssi ?: "n/a"}")
-        Text(text = "Any tags seen: ${uiState.tagsSeenAny}")
-        Text(text = "Matched EPC (canonical): ${uiState.lastSeenMatchedEpc ?: "n/a"}")
-        Text(text = "Matched RSSI: ${uiState.lastSeenMatchedRssi ?: "n/a"}")
-        Text(text = "Matched tags seen: ${uiState.tagsSeenMatched}")
-        Text(text = "Match status: $matchStatusLabel")
-        Text(text = "HW filter enabled: $filterEnabled")
-        Text(
-            text =
-                "HW filter ptrBits: ${filterPtrBits ?: "n/a"} " +
-                    "cntBits: ${filterCntBits ?: "n/a"}",
-        )
-        ToggleRow(
-            title = "Debug: disable filter",
-            description = "Use any tag for Geiger updates",
-            checked = uiState.debugDisableFilter,
-            onCheckedChange = onDisableFilterChange,
-        )
-        if (uiState.lastSeenAnyEpc != null) {
-            TextButton(
-                onClick = { clipboard.setText(AnnotatedString(uiState.lastSeenAnyEpc)) },
-            ) {
-                Text(text = "Copy last seen EPC")
-            }
-        }
-        Text(text = "Last RSSI: ${uiState.lastRssi ?: "n/a"}")
-        Text(text = "Hits / window: ${uiState.hitsPerWindow}")
-        Text(text = "Raw proximity: $formattedRaw")
-        Text(text = "Smoothed proximity: $formattedSmoothed")
-        Text(text = "Seen recently: ${uiState.seenRecently}")
-        Text(text = "Wake-up idle ms: ${uiState.lastWakeUpIdleMs ?: "n/a"}")
-        Text(text = "Wake-up at: ${uiState.lastWakeUpAt ?: "n/a"}")
-    }
-}
-
-private const val FIND_FILTER_PTR_BITS = 32
