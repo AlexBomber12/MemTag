@@ -15,31 +15,36 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.unit.dp
 
-private val DefaultContentPadding = PaddingValues(horizontal = 16.dp, vertical = 16.dp)
+private val DefaultContentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AppScaffold(
-    title: String,
+    title: String? = null,
     navigationIcon: (@Composable () -> Unit)? = null,
     actions: @Composable RowScope.() -> Unit = {},
+    snackbarHost: @Composable () -> Unit = {},
     modifier: Modifier = Modifier,
     content: @Composable (PaddingValues) -> Unit,
 ) {
     val layoutDirection = LocalLayoutDirection.current
+    val resolvedTitle = title?.takeIf { it.isNotBlank() }
     Scaffold(
         modifier = modifier,
         topBar = {
-            TopAppBar(
-                title = { Text(text = title) },
-                navigationIcon = {
-                    if (navigationIcon != null) {
-                        navigationIcon()
-                    }
-                },
-                actions = actions,
-            )
+            if (resolvedTitle != null) {
+                TopAppBar(
+                    title = { Text(text = resolvedTitle) },
+                    navigationIcon = {
+                        if (navigationIcon != null) {
+                            navigationIcon()
+                        }
+                    },
+                    actions = actions,
+                )
+            }
         },
+        snackbarHost = snackbarHost,
     ) { innerPadding ->
         val mergedPadding =
             PaddingValues(
