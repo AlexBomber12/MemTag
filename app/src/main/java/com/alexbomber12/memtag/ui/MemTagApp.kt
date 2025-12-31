@@ -53,6 +53,7 @@ fun MemTagApp(
     val currentDestination =
         AppDestinations.topLevelDestinationForRoute(currentRoot)
             ?: destinations.first()
+    val showTopBar = currentDestination != AppDestinations.Batch
 
     LaunchedEffect(showDiagnosticsTab, currentRoot, settingsLoaded) {
         if (settingsLoaded && !showDiagnosticsTab && currentRoot == AppDestinations.Diagnostics.route) {
@@ -82,7 +83,11 @@ fun MemTagApp(
     }
 
     Scaffold(
-        topBar = { AppTopBar(title = currentDestination.title) },
+        topBar = {
+            if (showTopBar) {
+                AppTopBar(title = currentDestination.title)
+            }
+        },
         bottomBar = { AppBottomBar(navController = navController, destinations = destinations) },
     ) { innerPadding ->
         AppNavHost(
