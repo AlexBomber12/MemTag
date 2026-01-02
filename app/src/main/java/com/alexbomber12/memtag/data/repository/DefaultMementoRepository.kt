@@ -516,6 +516,8 @@ class DefaultMementoRepository(
                 "displayValue",
                 "fullPath",
                 "full_path",
+                "locationPath",
+                "location_path",
                 "path",
                 "value",
                 "val",
