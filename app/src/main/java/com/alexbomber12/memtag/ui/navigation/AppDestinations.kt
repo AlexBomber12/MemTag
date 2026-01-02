@@ -35,7 +35,7 @@ object AppDestinations {
     val RepairWrite =
         AppDestination(
             route = "repair_write",
-            label = "Verify Write",
+            label = "Verify",
             title = "Verify Write",
             icon = Icons.Filled.Build,
         )

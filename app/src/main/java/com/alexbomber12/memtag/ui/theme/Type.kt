@@ -15,12 +15,26 @@ val Typography =
                 fontSize = 32.sp,
                 lineHeight = 40.sp,
             ),
+        headlineMedium =
+            TextStyle(
+                fontFamily = FontFamily.SansSerif,
+                fontWeight = FontWeight.SemiBold,
+                fontSize = 28.sp,
+                lineHeight = 34.sp,
+            ),
+        headlineSmall =
+            TextStyle(
+                fontFamily = FontFamily.SansSerif,
+                fontWeight = FontWeight.SemiBold,
+                fontSize = 24.sp,
+                lineHeight = 30.sp,
+            ),
         titleLarge =
             TextStyle(
                 fontFamily = FontFamily.SansSerif,
                 fontWeight = FontWeight.SemiBold,
-                fontSize = 22.sp,
-                lineHeight = 28.sp,
+                fontSize = 20.sp,
+                lineHeight = 26.sp,
             ),
         titleMedium =
             TextStyle(
@@ -43,12 +57,19 @@ val Typography =
                 fontSize = 14.sp,
                 lineHeight = 20.sp,
             ),
+        bodySmall =
+            TextStyle(
+                fontFamily = FontFamily.SansSerif,
+                fontWeight = FontWeight.Normal,
+                fontSize = 12.sp,
+                lineHeight = 16.sp,
+            ),
         labelLarge =
             TextStyle(
                 fontFamily = FontFamily.SansSerif,
                 fontWeight = FontWeight.Medium,
-                fontSize = 14.sp,
-                lineHeight = 20.sp,
+                fontSize = 13.sp,
+                lineHeight = 18.sp,
             ),
         labelMedium =
             TextStyle(
@@ -56,5 +77,12 @@ val Typography =
                 fontWeight = FontWeight.Medium,
                 fontSize = 12.sp,
                 lineHeight = 16.sp,
+            ),
+        labelSmall =
+            TextStyle(
+                fontFamily = FontFamily.SansSerif,
+                fontWeight = FontWeight.Medium,
+                fontSize = 11.sp,
+                lineHeight = 14.sp,
             ),
     )
