@@ -174,9 +174,8 @@ class MementoCloudClient(
                         ?: map["field_id"]
                         ?: map["id"],
                 )
-            val value = map["value"] ?: map["val"]
             if (!fieldId.isNullOrBlank()) {
-                result[fieldId] = value
+                result[fieldId] = toStringKeyMap(map)
             }
         }
         return result

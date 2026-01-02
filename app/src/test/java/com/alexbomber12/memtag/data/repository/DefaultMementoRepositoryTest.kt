@@ -98,9 +98,64 @@ class DefaultMementoRepositoryTest {
             val result = repository.syncLibrary("lib-01") { }
 
             assertEquals(SyncStatus.SUCCESS, result.status)
-            val stored = database.inventoryItemDao().getByEpc("ABC12345")
+            val stored = database.inventoryItemDao().getByEpc("lib-01", "ABC12345")
             assertNotNull(stored)
             assertEquals("Aisle 3", stored?.locationPath)
+        }
+
+    @Test
+    fun syncLibraryStoresLocationFromDisplayValue() =
+        runBlocking {
+            val settings =
+                AppSettings(
+                    mementoBaseUrl = "https://example.com",
+                    mementoToken = "token-123",
+                    mementoLibraryId = "lib-01",
+                )
+            val settingsStore = FakeSettingsStore(settings)
+            val schema =
+                MementoLibrarySchema(
+                    fields =
+                        listOf(
+                            MementoField(id = "f_epc", name = "EPC"),
+                            MementoField(id = "f_location", name = "Location"),
+                        ),
+                )
+            val entry =
+                MementoEntry(
+                    entryId = "entry-1",
+                    fieldValues =
+                        mapOf(
+                            "f_epc" to "ABC12346",
+                            "f_location" to mapOf("displayValue" to "Building A/Floor 2"),
+                        ),
+                    updatedAt = null,
+                )
+            val page =
+                MementoEntriesPage(
+                    entries = listOf(entry),
+                    nextPageToken = null,
+                    nextUrl = null,
+                    page = null,
+                    pageCount = null,
+                )
+            val repository =
+                DefaultMementoRepository(
+                    settingsStore = settingsStore,
+                    database = database,
+                    inventoryItemDao = database.inventoryItemDao(),
+                    syncStateDao = database.syncStateDao(),
+                    mementoClient = FakeMementoClient(schema, page),
+                    logger = NoopLogger(),
+                    ioDispatcher = Dispatchers.Unconfined,
+                )
+
+            val result = repository.syncLibrary("lib-01") { }
+
+            assertEquals(SyncStatus.SUCCESS, result.status)
+            val stored = database.inventoryItemDao().getByEpc("lib-01", "ABC12346")
+            assertNotNull(stored)
+            assertEquals("Building A/Floor 2", stored?.locationPath)
         }
 
     @Test
@@ -156,7 +211,7 @@ class DefaultMementoRepositoryTest {
             val result = repository.syncLibrary("lib-01") { }
 
             assertEquals(SyncStatus.SUCCESS, result.status)
-            val stored = database.inventoryItemDao().getByEpc("DEF67890")
+            val stored = database.inventoryItemDao().getByEpc("lib-01", "DEF67890")
             assertNotNull(stored)
             assertEquals("Apartment Novara/Living Room/livingroom", stored?.locationPath)
         }
@@ -234,7 +289,7 @@ class DefaultMementoRepositoryTest {
             assertEquals(3, result.downloadedCount)
             assertEquals(3, result.savedCount)
             assertEquals(0, result.ignoredCount)
-            val count = database.inventoryItemDao().observeCount().first()
+            val count = database.inventoryItemDao().observeCount("lib-01").first()
             assertEquals(3, count)
         }
 

@@ -14,6 +14,7 @@ import com.alexbomber12.memtag.data.settings.SettingsStore
 import com.alexbomber12.memtag.db.MIGRATION_1_2
 import com.alexbomber12.memtag.db.MIGRATION_2_3
 import com.alexbomber12.memtag.db.MIGRATION_3_4
+import com.alexbomber12.memtag.db.MIGRATION_4_5
 import com.alexbomber12.memtag.db.MemTagDatabase
 import com.alexbomber12.memtag.domain.SyncMementoLibraryUseCase
 import com.alexbomber12.memtag.integrations.feedback.DeviceFindFeedbackController
@@ -44,7 +45,7 @@ class AppContainer(context: Context) {
 
     val database: MemTagDatabase =
         Room.databaseBuilder(applicationContext, MemTagDatabase::class.java, "memtag.db")
-            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
             .fallbackToDestructiveMigration()
             .build()
     val actionsLogDao = database.actionsLogDao()

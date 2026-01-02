@@ -118,7 +118,7 @@ private class FakeMementoRepository : MementoRepository {
 
     override suspend fun getSyncState(libraryId: String): SyncState? = null
 
-    override fun observeLocalItemCount(): Flow<Int> = flowOf(0)
+    override fun observeLocalItemCount(libraryId: String): Flow<Int> = flowOf(0)
 
     override suspend fun syncLibrary(
         libraryId: String,

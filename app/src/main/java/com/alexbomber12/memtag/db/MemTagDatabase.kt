@@ -11,7 +11,7 @@ import androidx.room.RoomDatabase
         BatchItemEntity::class,
         BatchMetaEntity::class,
     ],
-    version = 4,
+    version = 5,
 )
 abstract class MemTagDatabase : RoomDatabase() {
     abstract fun inventoryItemDao(): InventoryItemDao
