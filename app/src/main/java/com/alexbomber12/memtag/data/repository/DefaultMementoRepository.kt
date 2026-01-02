@@ -546,7 +546,10 @@ class DefaultMementoRepository(
             list.mapNotNull { entry ->
                 when (entry) {
                     is String -> entry.trim().takeIf { it.isNotEmpty() }
-                    is Map<*, *> -> locationFromListMap(entry)
+                    is Map<*, *> ->
+                        locationFromMap(entry)
+                            ?: locationFromListMap(entry)
+                            ?: valueAsString(entry)?.trim()?.takeIf { it.isNotEmpty() }
                     else -> valueAsString(entry)?.trim()?.takeIf { it.isNotEmpty() }
                 }
             }
