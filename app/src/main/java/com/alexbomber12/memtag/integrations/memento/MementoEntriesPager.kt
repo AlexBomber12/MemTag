@@ -48,7 +48,9 @@ class MementoEntriesPager(
                     val total =
                         page.pageCount
                             ?: throw MementoPagingException("Missing pageCount in paging response.")
-                    if (current >= total) {
+                    // Some APIs return 0-based page indices; adjust the last page accordingly.
+                    val lastPageIndex = if (current == 0) total - 1 else total
+                    if (current >= lastPageIndex) {
                         break
                     }
                     nextPageIndex = current + 1

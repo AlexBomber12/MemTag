@@ -13,15 +13,18 @@ import com.alexbomber12.memtag.integrations.scan2d.Scan2dError
 import com.alexbomber12.memtag.integrations.scan2d.Scan2dException
 import com.alexbomber12.memtag.integrations.scan2d.Scan2dScanner
 import com.alexbomber12.memtag.integrations.scan2d.asException
+import com.alexbomber12.memtag.integrations.uhf.UhfApplyResult
 import com.alexbomber12.memtag.integrations.uhf.UhfError
 import com.alexbomber12.memtag.integrations.uhf.UhfException
 import com.alexbomber12.memtag.integrations.uhf.UhfLogger
 import com.alexbomber12.memtag.integrations.uhf.UhfReader
+import com.alexbomber12.memtag.integrations.uhf.asException
 import com.alexbomber12.memtag.integrations.uhf.toErrorMessage
 import com.alexbomber12.memtag.util.epc.EpcNormalizer
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.collect
@@ -151,26 +154,23 @@ class RepairViewModel(
         val job =
             viewModelScope.launch {
                 try {
-                    val initResult = uhfReader.initialize()
-                    if (initResult.isFailure) {
-                        handleScanFailure(mapUhfError(initResult.exceptionOrNull()))
+                    logDebug("scan start")
+                    val readyResult = ensureUhfReady("verify-write-scan")
+                    if (readyResult.isFailure) {
+                        logDebug(
+                            "scan init/config failed: " +
+                                (readyResult.exceptionOrNull()?.message ?: "unknown"),
+                        )
+                        handleScanFailure(mapUhfError(readyResult.exceptionOrNull()))
                         return@launch
                     }
-                    uhfReader.stopInventory()
-                    val applyResult = uhfReader.applyDesiredConfigBestEffort("verify-write-scan")
-                    if (applyResult.isFailure) {
-                        UhfLogger.w(
-                            "verifyWrite scan config apply failed: " +
-                                (applyResult.exceptionOrNull()?.message ?: "unknown"),
-                        )
-                    } else {
-                        val applied = applyResult.getOrNull()
-                        if (applied != null && !applied.success) {
-                            UhfLogger.w("verifyWrite scan config apply incomplete: ${applied.toErrorMessage()}")
-                        }
-                    }
-                    val readResult = uhfReader.readSingle(READ_TIMEOUT_MS)
+                    val readResult =
+                        readSingleWithRetries(READ_TIMEOUT_MS, READ_RETRY_ATTEMPTS, "verify-write-scan")
                     if (readResult.isFailure) {
+                        logDebug(
+                            "scan read failed: " +
+                                (readResult.exceptionOrNull()?.message ?: "unknown"),
+                        )
                         handleScanFailure(mapUhfError(readResult.exceptionOrNull()))
                         return@launch
                     }
@@ -179,6 +179,7 @@ class RepairViewModel(
                             handleScanFailure(error.message ?: "Invalid EPC read from tag.")
                             return@launch
                         }
+                    logDebug("scan success epc=$normalized")
                     applyScannedEpc(normalized)
                 } finally {
                     clearScanFlags()
@@ -320,28 +321,19 @@ class RepairViewModel(
                         result = RepairActionResult.SUCCESS,
                         message = null,
                     )
-                    val initResult = uhfReader.initialize()
-                    if (initResult.isFailure) {
-                        handleWriteFailure(initResult.exceptionOrNull())
+                    logDebug(
+                        "write start expected=$expectedEpc scanned=${uiState.value.scannedEpc ?: "--"}",
+                    )
+                    val readyResult = ensureUhfReady("verify-write")
+                    if (readyResult.isFailure) {
+                        handleWriteFailure(readyResult.exceptionOrNull())
                         return@launch
-                    }
-                    uhfReader.stopInventory()
-                    val applyResult = uhfReader.applyDesiredConfigBestEffort("verify-write")
-                    if (applyResult.isFailure) {
-                        UhfLogger.w(
-                            "verifyWrite config apply failed: " +
-                                (applyResult.exceptionOrNull()?.message ?: "unknown"),
-                        )
-                    } else {
-                        val applied = applyResult.getOrNull()
-                        if (applied != null && !applied.success) {
-                            UhfLogger.w("verifyWrite config apply incomplete: ${applied.toErrorMessage()}")
-                        }
                     }
                     val resolvedTarget =
                         uiState.value.scannedEpc?.takeIf { it.isNotBlank() }
                             ?: run {
-                                val readResult = uhfReader.readSingle(READ_TIMEOUT_MS)
+                                val readResult =
+                                    readSingleWithRetries(READ_TIMEOUT_MS, READ_RETRY_ATTEMPTS, "verify-write-read")
                                 if (readResult.isFailure) {
                                     handleWriteFailure(readResult.exceptionOrNull())
                                     return@launch
@@ -362,7 +354,8 @@ class RepairViewModel(
                         return@launch
                     }
                     mutableState.update { it.copy(isWriting = false, isVerifying = true) }
-                    val verifyResult = uhfReader.verifyEpc(expectedEpc, VERIFY_TIMEOUT_MS)
+                    val verifyResult =
+                        verifyEpcWithRetries(expectedEpc, VERIFY_TIMEOUT_MS, VERIFY_RETRY_ATTEMPTS, "verify-write-verify")
                     val verified = verifyResult.getOrNull()
                     if (verifyResult.isFailure || verified != true) {
                         val message =
@@ -374,6 +367,7 @@ class RepairViewModel(
                         handleWriteFailure(verifyResult.exceptionOrNull(), message)
                         return@launch
                     }
+                    logDebug("write verified expected=$expectedEpc")
                     updateStateWithStatus { state ->
                         state.copy(
                             isWriting = false,
@@ -533,6 +527,110 @@ class RepairViewModel(
         }
     }
 
+    private suspend fun ensureUhfReady(reason: String): Result<Unit> {
+        val initResult = uhfReader.initialize()
+        if (initResult.isFailure) {
+            logDebug("$reason init failed: ${initResult.exceptionOrNull()?.message ?: "unknown"}")
+            return Result.failure(initResult.exceptionOrNull() ?: IllegalStateException("UHF init failed."))
+        }
+        stopInventoryBestEffort("$reason-stop")
+        val applyResult = applyConfigWithRetry(reason)
+        if (applyResult.isFailure) {
+            logDebug("$reason apply failed: ${applyResult.exceptionOrNull()?.message ?: "unknown"}")
+            return Result.failure(
+                applyResult.exceptionOrNull() ?: IllegalStateException("UHF config apply failed."),
+            )
+        }
+        val applied = applyResult.getOrNull()
+        if (applied != null && !applied.success) {
+            UhfLogger.w("verifyWrite config apply incomplete: ${applied.toErrorMessage()}")
+        }
+        return Result.success(Unit)
+    }
+
+    private suspend fun applyConfigWithRetry(reason: String): Result<UhfApplyResult> {
+        var result = uhfReader.applyDesiredConfigBestEffort(reason)
+        if (result.isSuccess || !isUhfBusy(result.exceptionOrNull())) {
+            return result
+        }
+        logDebug("$reason apply retry after busy")
+        stopInventoryBestEffort("$reason-apply-retry")
+        delay(CONFIG_RETRY_DELAY_MS)
+        result = uhfReader.applyDesiredConfigBestEffort("$reason-retry")
+        return result
+    }
+
+    private suspend fun readSingleWithRetries(
+        timeoutMs: Long,
+        attempts: Int,
+        reason: String,
+    ): Result<String> {
+        var lastError: Throwable? = null
+        repeat(attempts) { attempt ->
+            logDebug("$reason read attempt=${attempt + 1} timeoutMs=$timeoutMs")
+            if (attempt > 0) {
+                stopInventoryBestEffort("$reason-read-retry")
+                delay(READ_RETRY_DELAY_MS)
+            }
+            val result = uhfReader.readSingle(timeoutMs)
+            if (result.isSuccess) {
+                return result
+            }
+            lastError = result.exceptionOrNull()
+            if (!isRetryableReadError(lastError)) {
+                return result
+            }
+            logDebug("$reason read retry failed: ${lastError?.message ?: "unknown"}")
+        }
+        return Result.failure(lastError ?: UhfError.Timeout.asException())
+    }
+
+    private suspend fun verifyEpcWithRetries(
+        expectedEpc: String,
+        timeoutMs: Long,
+        attempts: Int,
+        reason: String,
+    ): Result<Boolean> {
+        var lastError: Throwable? = null
+        repeat(attempts) { attempt ->
+            logDebug("$reason verify attempt=${attempt + 1} timeoutMs=$timeoutMs")
+            if (attempt > 0) {
+                stopInventoryBestEffort("$reason-verify-retry")
+                delay(VERIFY_RETRY_DELAY_MS)
+            }
+            val result = uhfReader.verifyEpc(expectedEpc, timeoutMs)
+            if (result.isSuccess) {
+                return result
+            }
+            lastError = result.exceptionOrNull()
+            if (!isRetryableReadError(lastError)) {
+                return result
+            }
+            logDebug("$reason verify retry failed: ${lastError?.message ?: "unknown"}")
+        }
+        return Result.failure(lastError ?: UhfError.Timeout.asException())
+    }
+
+    private suspend fun stopInventoryBestEffort(reason: String) {
+        val stopResult = uhfReader.stopInventory()
+        if (stopResult.isFailure) {
+            logDebug("$reason stopInventory failed: ${stopResult.exceptionOrNull()?.message ?: "unknown"}")
+        }
+    }
+
+    private fun isRetryableReadError(error: Throwable?): Boolean {
+        val uhfError = (error as? UhfException)?.error
+        return uhfError == UhfError.Timeout || uhfError == UhfError.OperationInProgress
+    }
+
+    private fun isUhfBusy(error: Throwable?): Boolean {
+        return (error as? UhfException)?.error == UhfError.OperationInProgress
+    }
+
+    private fun logDebug(message: String) {
+        UhfLogger.debugInfo("verifyWrite $message")
+    }
+
     private fun mapUhfError(error: Throwable?): String {
         val uhfError = (error as? UhfException)?.error
         return when (uhfError) {
@@ -595,6 +693,11 @@ class RepairViewModel(
         const val READ_TIMEOUT_MS = 4_000L
         const val WRITE_TIMEOUT_MS = 7_000L
         const val VERIFY_TIMEOUT_MS = 7_000L
+        const val READ_RETRY_ATTEMPTS = 2
+        const val VERIFY_RETRY_ATTEMPTS = 2
+        const val READ_RETRY_DELAY_MS = 150L
+        const val VERIFY_RETRY_DELAY_MS = 150L
+        const val CONFIG_RETRY_DELAY_MS = 150L
     }
 }
 

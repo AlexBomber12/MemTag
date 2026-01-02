@@ -91,13 +91,15 @@ fun RepairScreen(
             is VerifyWriteStatus.NotScanned -> "Not scanned"
             is VerifyWriteStatus.Invalid -> "Idle"
         }
+    val filteredErrorMessage =
+        state.errorMessage?.takeIf { !isQrTimeoutMessage(it) && !isUhfTimeoutMessage(it) }
     val statusMessage =
-        state.errorMessage
+        filteredErrorMessage
             ?: state.message
             ?: (state.status as? VerifyWriteStatus.Invalid)?.message
     val statusMessageColor =
         when {
-            state.errorMessage != null -> MaterialTheme.colorScheme.error
+            filteredErrorMessage != null -> MaterialTheme.colorScheme.error
             state.message != null -> MaterialTheme.colorScheme.primary
             else -> MaterialTheme.colorScheme.onSurfaceVariant
         }
@@ -130,6 +132,7 @@ fun RepairScreen(
                             onClick = viewModel::scanRfid,
                             enabled = !isBusy,
                             modifier = Modifier.weight(1f),
+                            loading = state.isReading,
                             leadingIcon = {
                                 Icon(
                                     imageVector = Icons.Filled.CenterFocusStrong,
@@ -142,6 +145,7 @@ fun RepairScreen(
                             onClick = viewModel::scanQr,
                             enabled = !isBusy,
                             modifier = Modifier.weight(1f),
+                            loading = state.isScanningQr,
                             leadingIcon = {
                                 Icon(
                                     imageVector = Icons.Filled.QrCodeScanner,
@@ -149,11 +153,6 @@ fun RepairScreen(
                                 )
                             },
                         )
-                    }
-                    if (state.isReading) {
-                        LoadingState(message = "Scanning RFID...")
-                    } else if (state.isScanningQr) {
-                        LoadingState(message = "Scanning QR...")
                     }
                 }
             }
@@ -329,4 +328,15 @@ private fun EpcLine(
             modifier = Modifier.widthIn(min = 180.dp),
         )
     }
+}
+
+private const val QR_TIMEOUT_MESSAGE = "QR scan timed out."
+private const val UHF_TIMEOUT_MESSAGE = "UHF operation timed out."
+
+private fun isQrTimeoutMessage(message: String): Boolean {
+    return message.trim() == QR_TIMEOUT_MESSAGE
+}
+
+private fun isUhfTimeoutMessage(message: String): Boolean {
+    return message.trim() == UHF_TIMEOUT_MESSAGE
 }

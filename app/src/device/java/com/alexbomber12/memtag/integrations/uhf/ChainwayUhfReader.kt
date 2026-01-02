@@ -2,6 +2,7 @@ package com.alexbomber12.memtag.integrations.uhf
 
 import android.content.Context
 import android.util.Log
+import com.alexbomber12.memtag.BuildConfig
 import com.alexbomber12.memtag.data.settings.SettingsStore
 import com.alexbomber12.memtag.util.epc.EpcNormalizer
 import com.rscja.deviceapi.RFIDWithUHFUART
@@ -803,13 +804,33 @@ class ChainwayUhfReader(
                                 .asException(cause = error),
                         )
                     }
+            if (BuildConfig.DEBUG) {
+                Log.d(
+                    LOG_TAG,
+                    "applyBestEffort power desiredDbm=${desired.powerDbm} setPowerOk=$setPowerOk",
+                )
+            }
             val afterMode = safeGetFrequencyModeLocked(instance)
             val afterRfLink = safeGetRFLinkLocked(instance)
-            val afterPower = safeGetPowerLocked(instance)
+            val powerReadback = readPowerWithRetriesLocked(instance, desired.powerDbm)
+            val afterPower = powerReadback.value
             val modeApplied = afterMode?.let { it == desired.frequencyMode }
             val rfLinkApplied = afterRfLink?.let { it == desired.rfLink }
             val powerApplied =
-                afterPower?.let { it == desired.powerDbm || it == desired.powerDbm * 10 }
+                resolvePowerAppliedOrUnverified(
+                    desiredDbm = desired.powerDbm,
+                    readback = afterPower,
+                    setPowerOk = setPowerOk,
+                    scaleFactor = POWER_SCALE_FACTOR,
+                    toleranceDbm = POWER_VERIFY_TOLERANCE_DBM,
+                )
+            if (BuildConfig.DEBUG) {
+                Log.d(
+                    LOG_TAG,
+                    "applyBestEffort power readbacks=${powerReadback.readbacks} " +
+                        "final=${afterPower ?: "--"} applied=${formatAppliedForLog(powerApplied)}",
+                )
+            }
             val modeSetForResult = if (modeApplied == null) null else setModeOk
             val rfLinkSetForResult = if (rfLinkApplied == null) null else setRfLinkOk
             val powerSetForResult = if (powerApplied == null) null else setPowerOk
@@ -880,6 +901,37 @@ class ChainwayUhfReader(
     private suspend fun safeGetPowerLocked(instance: IUHF): Int? {
         return safeGetConfigValueLocked { instance.getPower() }
     }
+
+    private suspend fun readPowerWithRetriesLocked(
+        instance: IUHF,
+        desiredDbm: Int,
+    ): PowerReadback {
+        val readbacks = mutableListOf<Int?>()
+        var value: Int? = null
+        repeat(POWER_READBACK_RETRY_ATTEMPTS) { attempt ->
+            value = safeGetPowerLocked(instance)
+            readbacks.add(value)
+            val applied =
+                resolvePowerApplied(
+                    desiredDbm = desiredDbm,
+                    readback = value,
+                    scaleFactor = POWER_SCALE_FACTOR,
+                    toleranceDbm = POWER_VERIFY_TOLERANCE_DBM,
+                )
+            if (applied == true) {
+                return PowerReadback(value = value, readbacks = readbacks)
+            }
+            if (attempt < POWER_READBACK_RETRY_ATTEMPTS - 1) {
+                delay(POWER_READBACK_RETRY_DELAY_MS)
+            }
+        }
+        return PowerReadback(value = value, readbacks = readbacks)
+    }
+
+    private data class PowerReadback(
+        val value: Int?,
+        val readbacks: List<Int?>,
+    )
 
     private suspend fun safeGetConfigValueLocked(getter: () -> Int): Int? {
         val value =
@@ -1015,6 +1067,12 @@ class ChainwayUhfReader(
                                 .asException(cause = error),
                         )
                     }
+            if (BuildConfig.DEBUG) {
+                Log.d(
+                    LOG_TAG,
+                    "applyWithReadback power desiredDbm=${desired.powerDbm} setPowerOk=$setPowerOk",
+                )
+            }
             val afterMode =
                 uhfMutex.withLock { runCatching { instance.getFrequencyMode() } }
                     .getOrElse { error ->
@@ -1031,14 +1089,8 @@ class ChainwayUhfReader(
                                 .asException(cause = error),
                         )
                     }
-            val afterPower =
-                uhfMutex.withLock { runCatching { instance.getPower() } }
-                    .getOrElse { error ->
-                        return@withContext Result.failure(
-                            UhfError.VendorError(error.message ?: "UHF get power error")
-                                .asException(cause = error),
-                        )
-                    }
+            val powerReadback = readPowerWithRetriesLocked(instance, desired.powerDbm)
+            val afterPower = powerReadback.value
             val afterProtocol =
                 if (protocolSupport != ProtocolSupport.Unsupported) {
                     val value =
@@ -1056,7 +1108,14 @@ class ChainwayUhfReader(
                 }
             val modeApplied = afterMode == desired.frequencyMode
             val rfLinkApplied = afterRfLink == desired.rfLink
-            val powerApplied = afterPower == desired.powerDbm
+            val powerApplied =
+                resolvePowerAppliedOrUnverified(
+                    desiredDbm = desired.powerDbm,
+                    readback = afterPower,
+                    setPowerOk = setPowerOk,
+                    scaleFactor = POWER_SCALE_FACTOR,
+                    toleranceDbm = POWER_VERIFY_TOLERANCE_DBM,
+                )
             val protocolApplied =
                 if (protocolSupport == ProtocolSupport.Supported) {
                     afterProtocol == desired.protocol
@@ -1124,6 +1183,13 @@ class ChainwayUhfReader(
                     "powerApplied=$powerApplied" +
                     ")",
             )
+            if (BuildConfig.DEBUG) {
+                Log.d(
+                    LOG_TAG,
+                    "applyWithReadback power readbacks=${powerReadback.readbacks} " +
+                        "final=${afterPower ?: "--"} applied=${formatAppliedForLog(powerApplied)}",
+                )
+            }
             Result.success(result)
         }
     }
@@ -1827,6 +1893,9 @@ class ChainwayUhfReader(
         const val EPC_MAX_WORDS = 31
         const val DEFAULT_ACCESS_PASSWORD = "00000000"
         const val POWER_SCALE_FACTOR = 100
+        const val POWER_VERIFY_TOLERANCE_DBM = UHF_POWER_TOLERANCE_DBM
+        const val POWER_READBACK_RETRY_ATTEMPTS = 5
+        const val POWER_READBACK_RETRY_DELAY_MS = 75L
         const val SINGLE_READ_RETRY_DELAY_MS = 75L
         const val INVENTORY_POLL_DELAY_MS = 50L
         const val INVENTORY_LOG_LIMIT = 5

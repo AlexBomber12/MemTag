@@ -44,6 +44,7 @@ class AppViewModelFactory(
             return FindViewModel(
                 settingsStore = appContainer.settingsStore,
                 uhfReader = appContainer.uhfReader,
+                scan2dScanner = appContainer.scan2dScanner,
                 feedbackController = appContainer.findFeedbackController,
                 sessionFlagsStore = appContainer.sessionFlagsStore,
             ) as T

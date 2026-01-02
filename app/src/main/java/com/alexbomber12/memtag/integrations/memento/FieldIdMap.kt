@@ -49,12 +49,19 @@ class FieldIdMap private constructor(
             schema.fields.forEach { field ->
                 val normalized = normalizeFieldName(field.name)
                 val canonical =
-                    when (normalized) {
-                        "description" -> FIELD_CONTENT
-                        else -> normalized
+                    when {
+                        normalized == "description" -> FIELD_CONTENT
+                        normalized in supported -> normalized
+                        normalized.contains(FIELD_LOCATION) -> FIELD_LOCATION
+                        else -> null
                     }
-                if (canonical in supported) {
-                    ids[canonical] = field.id
+                if (canonical != null && canonical in supported) {
+                    if (canonical == FIELD_LOCATION && normalized != FIELD_LOCATION && ids.containsKey(FIELD_LOCATION)) {
+                        return@forEach
+                    }
+                    if (!ids.containsKey(canonical)) {
+                        ids[canonical] = field.id
+                    }
                 }
             }
             return FieldIdMap(ids)
