@@ -36,10 +36,11 @@ class InventoryItemDaoTest {
     }
 
     @Test
-    fun upsertAndLookupByEpc() =
+    fun upsertAndLookupByEpcIsLibraryScoped() =
         runBlocking {
             val item =
                 InventoryItemEntity(
+                    libraryId = "lib-01",
                     entryId = "entry-1",
                     epcNormalized = "ABC123",
                     name = "Widget",
@@ -54,12 +55,35 @@ class InventoryItemDaoTest {
                     qrRaw = null,
                     photoThumbUrlOrRef = null,
                     updatedAt = null,
+                    syncRunId = 10L,
                 )
-            dao.upsertAll(listOf(item))
+            val otherLibraryItem =
+                InventoryItemEntity(
+                    libraryId = "lib-02",
+                    entryId = "entry-2",
+                    epcNormalized = "ABC123",
+                    name = "Other",
+                    content = null,
+                    locationPath = null,
+                    status = null,
+                    category = null,
+                    comment = null,
+                    labelRev = null,
+                    toPrint = null,
+                    um = null,
+                    qrRaw = null,
+                    photoThumbUrlOrRef = null,
+                    updatedAt = null,
+                    syncRunId = 11L,
+                )
+            dao.upsertAll(listOf(item, otherLibraryItem))
 
-            val loaded = dao.getByEpc("ABC123")
+            val loaded = dao.getByEpc("lib-01", "ABC123")
             assertNotNull(loaded)
             assertEquals("entry-1", loaded?.entryId)
+            val loadedOther = dao.getByEpc("lib-02", "ABC123")
+            assertNotNull(loadedOther)
+            assertEquals("entry-2", loadedOther?.entryId)
         }
 
     @Test
@@ -67,6 +91,7 @@ class InventoryItemDaoTest {
         runBlocking {
             val first =
                 InventoryItemEntity(
+                    libraryId = "lib-01",
                     entryId = "entry-1",
                     epcNormalized = "ABC123",
                     name = "First",
@@ -81,9 +106,11 @@ class InventoryItemDaoTest {
                     qrRaw = null,
                     photoThumbUrlOrRef = null,
                     updatedAt = null,
+                    syncRunId = 100L,
                 )
             val second =
                 InventoryItemEntity(
+                    libraryId = "lib-01",
                     entryId = "entry-2",
                     epcNormalized = "ABC123",
                     name = "Second",
@@ -98,12 +125,13 @@ class InventoryItemDaoTest {
                     qrRaw = null,
                     photoThumbUrlOrRef = null,
                     updatedAt = null,
+                    syncRunId = 101L,
                 )
 
             dao.upsertAll(listOf(first))
             dao.upsertAll(listOf(second))
 
-            val loaded = dao.getByEpc("ABC123")
+            val loaded = dao.getByEpc("lib-01", "ABC123")
             assertEquals("entry-2", loaded?.entryId)
             assertEquals("Second", loaded?.name)
         }

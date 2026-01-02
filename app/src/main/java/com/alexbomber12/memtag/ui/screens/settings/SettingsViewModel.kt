@@ -63,9 +63,16 @@ class SettingsViewModel(
             )
 
     val localItemCount: StateFlow<Int?> =
-        repository.observeLocalItemCount()
+        settingsStore.settingsFlow
+            .map { it.mementoLibraryId }
             .distinctUntilChanged()
-            .map<Int, Int?> { count -> count }
+            .flatMapLatest { libraryId ->
+                if (libraryId.isBlank()) {
+                    flowOf(null)
+                } else {
+                    repository.observeLocalItemCount(libraryId).map<Int, Int?> { count -> count }
+                }
+            }
             .stateIn(
                 scope = viewModelScope,
                 started = SharingStarted.WhileSubscribed(5_000),

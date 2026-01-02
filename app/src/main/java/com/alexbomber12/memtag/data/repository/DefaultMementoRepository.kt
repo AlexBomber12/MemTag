@@ -67,8 +67,11 @@ class DefaultMementoRepository(
         }
     }
 
-    override fun observeLocalItemCount(): Flow<Int> {
-        return inventoryItemDao.observeCount()
+    override fun observeLocalItemCount(libraryId: String): Flow<Int> {
+        if (libraryId.isBlank()) {
+            return flowOf(0)
+        }
+        return inventoryItemDao.observeCount(libraryId)
     }
 
     override suspend fun syncLibrary(
@@ -98,7 +101,8 @@ class DefaultMementoRepository(
                 )
             }
             val config = (validation as MementoSettingsValidation.Valid).config
-            val startTime = System.currentTimeMillis()
+            val syncRunId = System.currentTimeMillis()
+            val startTime = syncRunId
             var fetchedRawCount = 0
             var fetchedCount = 0
             var storedCount = 0
@@ -175,7 +179,7 @@ class DefaultMementoRepository(
                                 fetchedCount += 1
                             }
                             entryStatuses[key] = EntryStatus.SAVED
-                            items.add(outcome.item.toEntity())
+                            items.add(outcome.item.toEntity(config.libraryId, syncRunId))
                         }
                         if (items.isNotEmpty()) {
                             items.chunked(BATCH_SIZE).forEach { batch ->
@@ -210,6 +214,9 @@ class DefaultMementoRepository(
                     "Sync completed. fetched=$fetchedCount stored=$storedCount skipped=$skippedCount " +
                         "duplicates=$duplicateCount raw=$fetchedRawCount durationMs=$durationMs",
                 )
+                database.withTransaction {
+                    inventoryItemDao.deleteStale(config.libraryId, syncRunId)
+                }
                 val result =
                     SyncResult(
                         status = SyncStatus.SUCCESS,
@@ -290,7 +297,7 @@ class DefaultMementoRepository(
                 runCatching { EpcNormalizer.normalize(epcRaw) }.getOrElse {
                     return@withContext LookupResult.Error("EPC must be a non-empty hex value.")
                 }
-            val local = inventoryItemDao.getByEpc(normalized)
+            val local = inventoryItemDao.getByEpc(settings.mementoLibraryId, normalized)
             if (local != null) {
                 return@withContext LookupResult.Found(local.toDomain())
             }
@@ -303,6 +310,11 @@ class DefaultMementoRepository(
         limit: Int,
     ): List<InventoryItem> {
         return withContext(ioDispatcher) {
+            val settings = settingsStore.settingsFlow.first()
+            val libraryId = settings.mementoLibraryId
+            if (libraryId.isBlank()) {
+                return@withContext emptyList()
+            }
             val trimmed = query.trim()
             if (trimmed.isBlank()) {
                 return@withContext emptyList()
@@ -314,7 +326,7 @@ class DefaultMementoRepository(
                     trimmed
                 }
             val likeQuery = "%$normalizedQuery%"
-            inventoryItemDao.searchByText(likeQuery, limit).map { it.toDomain() }
+            inventoryItemDao.searchByText(libraryId, likeQuery, limit).map { it.toDomain() }
         }
     }
 
@@ -374,8 +386,12 @@ class DefaultMementoRepository(
         )
     }
 
-    private fun InventoryItem.toEntity(): InventoryItemEntity {
+    private fun InventoryItem.toEntity(
+        libraryId: String,
+        syncRunId: Long,
+    ): InventoryItemEntity {
         return InventoryItemEntity(
+            libraryId = libraryId,
             entryId = entryId,
             epcNormalized = epcNormalized,
             name = name,
@@ -390,6 +406,7 @@ class DefaultMementoRepository(
             qrRaw = qrRaw,
             photoThumbUrlOrRef = photoThumbUrlOrRef,
             updatedAt = updatedAt,
+            syncRunId = syncRunId,
         )
     }
 
@@ -433,7 +450,25 @@ class DefaultMementoRepository(
     }
 
     private fun extractStringFromMap(map: Map<*, *>): String? {
-        val candidates = listOf("url", "thumbUrl", "thumbnailUrl", "link", "value", "name", "path")
+        val candidates =
+            listOf(
+                "displayValue",
+                "display_value",
+                "display",
+                "displayName",
+                "display_name",
+                "full_path",
+                "fullPath",
+                "location_path",
+                "locationPath",
+                "url",
+                "thumbUrl",
+                "thumbnailUrl",
+                "link",
+                "value",
+                "name",
+                "path",
+            )
         candidates.forEach { key ->
             val candidate = map[key]
             val value = valueAsString(candidate)
@@ -448,7 +483,7 @@ class DefaultMementoRepository(
         return when (value) {
             is String -> value.trim().takeIf { it.isNotEmpty() }
             is List<*> -> locationFromList(value)
-            is Map<*, *> -> locationFromMap(value)
+            is Map<*, *> -> locationFromMap(value) ?: valueAsString(value)
             else -> valueAsString(value)
         }
     }
@@ -510,6 +545,12 @@ class DefaultMementoRepository(
                     -> false
                     else -> null
                 }
+            }
+
+            is Map<*, *> -> {
+                val candidate = value["value"] ?: value["val"]
+                val resolved = candidate ?: valueAsString(value)
+                valueAsBoolean(resolved)
             }
 
             else -> null

@@ -70,3 +70,66 @@ val MIGRATION_3_4 =
             db.execSQL("ALTER TABLE `queue_items` ADD COLUMN `source` TEXT")
         }
     }
+
+val MIGRATION_4_5 =
+    object : Migration(4, 5) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `inventory_items_new` (" +
+                    "`libraryId` TEXT NOT NULL, " +
+                    "`entryId` TEXT NOT NULL, " +
+                    "`epcNormalized` TEXT NOT NULL, " +
+                    "`name` TEXT, " +
+                    "`content` TEXT, " +
+                    "`locationPath` TEXT, " +
+                    "`status` TEXT, " +
+                    "`category` TEXT, " +
+                    "`comment` TEXT, " +
+                    "`labelRev` TEXT, " +
+                    "`toPrint` INTEGER, " +
+                    "`um` TEXT, " +
+                    "`qrRaw` TEXT, " +
+                    "`photoThumbUrlOrRef` TEXT, " +
+                    "`updatedAt` INTEGER, " +
+                    "`syncRunId` INTEGER NOT NULL, " +
+                    "PRIMARY KEY(`libraryId`, `entryId`)" +
+                    ")",
+            )
+            db.execSQL(
+                "INSERT INTO `inventory_items_new` (" +
+                    "`libraryId`, `entryId`, `epcNormalized`, `name`, `content`, `locationPath`, " +
+                    "`status`, `category`, `comment`, `labelRev`, `toPrint`, `um`, `qrRaw`, " +
+                    "`photoThumbUrlOrRef`, `updatedAt`, `syncRunId`" +
+                    ") " +
+                    "SELECT " +
+                    "COALESCE((SELECT `libraryId` FROM `sync_state` ORDER BY `lastSyncAt` DESC LIMIT 1), ''), " +
+                    "`entryId`, `epcNormalized`, `name`, `content`, `locationPath`, " +
+                    "`status`, `category`, `comment`, `labelRev`, `toPrint`, `um`, `qrRaw`, " +
+                    "`photoThumbUrlOrRef`, `updatedAt`, " +
+                    "COALESCE((SELECT `lastSyncAt` FROM `sync_state` ORDER BY `lastSyncAt` DESC LIMIT 1), 0) " +
+                    "FROM `inventory_items`",
+            )
+            db.execSQL("DROP TABLE `inventory_items`")
+            db.execSQL("ALTER TABLE `inventory_items_new` RENAME TO `inventory_items`")
+            db.execSQL(
+                "CREATE UNIQUE INDEX IF NOT EXISTS `index_inventory_items_libraryId_epcNormalized` " +
+                    "ON `inventory_items` (`libraryId`, `epcNormalized`)",
+            )
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS `index_inventory_items_libraryId_status` " +
+                    "ON `inventory_items` (`libraryId`, `status`)",
+            )
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS `index_inventory_items_libraryId_category` " +
+                    "ON `inventory_items` (`libraryId`, `category`)",
+            )
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS `index_inventory_items_libraryId_locationPath` " +
+                    "ON `inventory_items` (`libraryId`, `locationPath`)",
+            )
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS `index_inventory_items_libraryId_toPrint` " +
+                    "ON `inventory_items` (`libraryId`, `toPrint`)",
+            )
+        }
+    }

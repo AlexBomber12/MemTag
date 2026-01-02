@@ -2,20 +2,21 @@ package com.alexbomber12.memtag.db
 
 import androidx.room.Entity
 import androidx.room.Index
-import androidx.room.PrimaryKey
 
 @Entity(
     tableName = "inventory_items",
+    primaryKeys = ["libraryId", "entryId"],
     indices = [
-        Index(value = ["epcNormalized"], unique = true),
-        Index(value = ["status"]),
-        Index(value = ["category"]),
-        Index(value = ["locationPath"]),
-        Index(value = ["toPrint"]),
+        Index(value = ["libraryId", "epcNormalized"], unique = true),
+        Index(value = ["libraryId", "status"]),
+        Index(value = ["libraryId", "category"]),
+        Index(value = ["libraryId", "locationPath"]),
+        Index(value = ["libraryId", "toPrint"]),
     ],
 )
 data class InventoryItemEntity(
-    @PrimaryKey val entryId: String,
+    val libraryId: String,
+    val entryId: String,
     val epcNormalized: String,
     val name: String?,
     val content: String?,
@@ -29,4 +30,5 @@ data class InventoryItemEntity(
     val qrRaw: String?,
     val photoThumbUrlOrRef: String?,
     val updatedAt: Long?,
+    val syncRunId: Long,
 )
