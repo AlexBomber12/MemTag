@@ -11,18 +11,23 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CenterFocusStrong
 import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
@@ -34,7 +39,6 @@ import com.alexbomber12.memtag.ui.components.LoadingState
 import com.alexbomber12.memtag.ui.components.PrimaryButton
 import com.alexbomber12.memtag.ui.components.SecondaryButton
 import com.alexbomber12.memtag.ui.components.SectionCard
-import com.alexbomber12.memtag.ui.components.StatChip
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.collect
 
@@ -74,8 +78,12 @@ fun RepairScreen(
     val expectedBlank = state.expectedEpc.isBlank()
     val canWrite = canWriteExpectedEpc(state.expectedEpc, state.scannedEpc, state.isWriting)
     val selectedLabel =
-        state.selectedLookup?.name?.takeIf { it.isNotBlank() }
-            ?: state.selectedLookup?.epc?.takeIf { it.isNotBlank() }
+        if (state.expectedEpc.isBlank()) {
+            null
+        } else {
+            state.selectedLookup?.name?.takeIf { it.isNotBlank() }
+                ?: state.selectedLookup?.epc?.takeIf { it.isNotBlank() }
+        }
     val statusLabel =
         when (state.status) {
             is VerifyWriteStatus.Ok -> "Matched"
@@ -111,26 +119,35 @@ fun RepairScreen(
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         item {
-            SectionCard(
-                title = "Scan tag",
-                modifier = Modifier.fillMaxWidth(),
-            ) {
+            SectionCard(modifier = Modifier.fillMaxWidth()) {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        SecondaryButton(
+                        PrimaryButton(
                             text = "Scan RFID",
                             onClick = viewModel::scanRfid,
                             enabled = !isBusy,
                             modifier = Modifier.weight(1f),
+                            leadingIcon = {
+                                Icon(
+                                    imageVector = Icons.Filled.CenterFocusStrong,
+                                    contentDescription = "Scan RFID",
+                                )
+                            },
                         )
                         SecondaryButton(
                             text = "Scan QR",
                             onClick = viewModel::scanQr,
                             enabled = !isBusy,
                             modifier = Modifier.weight(1f),
+                            leadingIcon = {
+                                Icon(
+                                    imageVector = Icons.Filled.QrCodeScanner,
+                                    contentDescription = "Scan QR",
+                                )
+                            },
                         )
                     }
                     if (state.isReading) {
@@ -143,16 +160,24 @@ fun RepairScreen(
         }
 
         item {
-            SectionCard(modifier = Modifier.fillMaxWidth()) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(text = "Verification", style = MaterialTheme.typography.titleMedium)
-                    StatChip(label = statusLabel)
-                }
+            val topBorderColor = MaterialTheme.colorScheme.outline
+            SectionCard(
+                modifier =
+                    Modifier
+                        .fillMaxWidth()
+                        .drawWithContent {
+                            drawContent()
+                            val strokeWidth = 1.dp.toPx()
+                            drawLine(
+                                color = topBorderColor,
+                                start = Offset(0f, strokeWidth / 2),
+                                end = Offset(size.width, strokeWidth / 2),
+                                strokeWidth = strokeWidth,
+                            )
+                        },
+            ) {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(text = "Verification", style = MaterialTheme.typography.titleMedium)
                     if (statusMessage != null) {
                         Text(
                             text = statusMessage,
@@ -174,11 +199,19 @@ fun RepairScreen(
                         value = state.expectedEpc,
                         onValueChange = viewModel::onExpectedEpcChange,
                         label = { Text(text = "Expected EPC") },
-                        placeholder = { Text(text = "Expected EPC (hex)") },
+                        placeholder = { Text(text = "Expected EPC") },
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true,
                         enabled = !isBusy,
                         textStyle = epcTextStyle,
+                        colors =
+                            OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = MaterialTheme.colorScheme.outline,
+                                unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+                                focusedLabelColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                unfocusedLabelColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                cursorColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                            ),
                         trailingIcon = {
                             if (state.expectedEpc.isNotBlank()) {
                                 IconButton(
@@ -202,6 +235,14 @@ fun RepairScreen(
                         singleLine = true,
                         readOnly = true,
                         textStyle = epcTextStyle.copy(color = highlightColor),
+                        colors =
+                            OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = MaterialTheme.colorScheme.outline,
+                                unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+                                focusedLabelColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                unfocusedLabelColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                cursorColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                            ),
                     )
                     if (!expectedBlank) {
                         if (state.isWriting) {

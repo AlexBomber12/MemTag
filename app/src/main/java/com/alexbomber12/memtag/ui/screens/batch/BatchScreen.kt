@@ -5,32 +5,40 @@ package com.alexbomber12.memtag.ui.screens.batch
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.FileUpload
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.ListItem
-import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
@@ -47,12 +55,17 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.alexbomber12.memtag.app.HardwareAction
 import com.alexbomber12.memtag.domain.batch.BatchInputItem
@@ -65,6 +78,7 @@ import com.alexbomber12.memtag.ui.components.PrimaryButton
 import com.alexbomber12.memtag.ui.components.SecondaryButton
 import com.alexbomber12.memtag.ui.components.SectionCard
 import com.alexbomber12.memtag.ui.components.StatChip
+import com.alexbomber12.memtag.ui.theme.SuccessGreen
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.collect
 import java.text.DateFormat
@@ -80,17 +94,12 @@ fun BatchScreen(
     val state = viewModel.uiState.collectAsStateWithLifecycle().value
     val context = LocalContext.current
     var showClearConfirm by rememberSaveable { mutableStateOf(false) }
-    var showInvalidRows by rememberSaveable { mutableStateOf(false) }
     var showOverflowMenu by remember { mutableStateOf(false) }
     val dateFormatter = remember { DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT) }
     val exportFormatter = remember { SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US) }
 
     DisposableEffect(Unit) {
         onDispose { viewModel.stopSweep() }
-    }
-
-    LaunchedEffect(state.lastImportReport) {
-        showInvalidRows = false
     }
 
     LaunchedEffect(hardwareActions) {
@@ -143,11 +152,20 @@ fun BatchScreen(
             !state.manualSessionFinishing
     val canClear = state.inputItems.isNotEmpty() || state.extras.isNotEmpty()
     val importTypes = remember { arrayOf("text/csv", "text/plain") }
-    val report = state.lastImportReport
     val isEmpty = state.summary.total == 0
+    val menuItemPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+    val segmentedColors =
+        SegmentedButtonDefaults.colors(
+            activeContainerColor = MaterialTheme.colorScheme.surface,
+            activeContentColor = MaterialTheme.colorScheme.onSurface,
+            inactiveContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+            inactiveContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+            activeBorderColor = MaterialTheme.colorScheme.surfaceVariant,
+            inactiveBorderColor = MaterialTheme.colorScheme.surfaceVariant,
+        )
 
     AppScaffold(
-        title = "Batch",
+        title = "Batch Scan",
         actions = {
             IconButton(onClick = { importLauncher.launch(importTypes) }) {
                 Icon(
@@ -177,7 +195,40 @@ fun BatchScreen(
                 DropdownMenu(
                     expanded = showOverflowMenu,
                     onDismissRequest = { showOverflowMenu = false },
+                    modifier = Modifier.border(1.dp, MaterialTheme.colorScheme.outline),
+                    shape = RectangleShape,
+                    containerColor = MaterialTheme.colorScheme.surface,
                 ) {
+                    DropdownMenuItem(
+                        text = { Text(text = "Import CSV") },
+                        onClick = {
+                            showOverflowMenu = false
+                            importLauncher.launch(importTypes)
+                        },
+                        leadingIcon = {
+                            Icon(
+                                imageVector = Icons.Filled.FileUpload,
+                                contentDescription = null,
+                            )
+                        },
+                        contentPadding = menuItemPadding,
+                    )
+                    DropdownMenuItem(
+                        text = { Text(text = "Export CSV") },
+                        onClick = {
+                            showOverflowMenu = false
+                            val name = "batch_export_${exportFormatter.format(Date())}.csv"
+                            exportLauncher.launch(name)
+                        },
+                        enabled = !state.isExporting && canExport,
+                        leadingIcon = {
+                            Icon(
+                                imageVector = Icons.Filled.FileDownload,
+                                contentDescription = null,
+                            )
+                        },
+                        contentPadding = menuItemPadding,
+                    )
                     DropdownMenuItem(
                         text = { Text(text = "Clear batch") },
                         onClick = {
@@ -186,6 +237,7 @@ fun BatchScreen(
                         },
                         enabled = canClear,
                         modifier = Modifier.semantics { contentDescription = "Clear batch" },
+                        contentPadding = menuItemPadding,
                     )
                 }
             }
@@ -194,34 +246,71 @@ fun BatchScreen(
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
             contentPadding = contentPadding,
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             item {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Row(
-                        modifier = Modifier.horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
-                        SummaryChip(label = "Total", count = state.summary.total)
-                        SummaryChip(label = "Found", count = state.summary.found)
-                        SummaryChip(label = "Not found", count = state.summary.notFound)
-                        SummaryChip(label = "Unknown", count = state.summary.unknown)
+                        SummaryStatCard(
+                            label = "Total",
+                            count = state.summary.total,
+                            labelColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                            valueColor = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.weight(1f),
+                        )
+                        SummaryStatCard(
+                            label = "Found",
+                            count = state.summary.found,
+                            labelColor = SuccessGreen,
+                            valueColor = SuccessGreen,
+                            modifier = Modifier.weight(1f),
+                        )
+                        SummaryStatCard(
+                            label = "Extra",
+                            count = state.summary.extra,
+                            labelColor = MaterialTheme.colorScheme.tertiary,
+                            valueColor = MaterialTheme.colorScheme.tertiary,
+                            modifier = Modifier.weight(1f),
+                        )
+                        SummaryStatCard(
+                            label = "Unknown",
+                            count = state.summary.unknown,
+                            labelColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                            valueColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.weight(1f),
+                        )
                     }
-                    SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-                        SegmentedButton(
-                            selected = state.mode == BatchMode.INVENTORY_SWEEP,
-                            onClick = { viewModel.setMode(BatchMode.INVENTORY_SWEEP) },
-                            shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2),
-                            label = { Text(text = "Inventory sweep") },
-                            enabled = !state.sweepRunning && !state.manualSessionActive,
-                        )
-                        SegmentedButton(
-                            selected = state.mode == BatchMode.MANUAL_SCAN,
-                            onClick = { viewModel.setMode(BatchMode.MANUAL_SCAN) },
-                            shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2),
-                            label = { Text(text = "Manual scan") },
-                            enabled = !state.sweepRunning && !state.manualSessionActive,
-                        )
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        shape = MaterialTheme.shapes.large,
+                    ) {
+                        SingleChoiceSegmentedButtonRow(
+                            modifier =
+                                Modifier
+                                    .fillMaxWidth()
+                                    .padding(4.dp),
+                        ) {
+                            SegmentedButton(
+                                selected = state.mode == BatchMode.INVENTORY_SWEEP,
+                                onClick = { viewModel.setMode(BatchMode.INVENTORY_SWEEP) },
+                                shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2),
+                                label = { Text(text = "Inventory Sweep") },
+                                enabled = !state.sweepRunning && !state.manualSessionActive,
+                                colors = segmentedColors,
+                            )
+                            SegmentedButton(
+                                selected = state.mode == BatchMode.MANUAL_SCAN,
+                                onClick = { viewModel.setMode(BatchMode.MANUAL_SCAN) },
+                                shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2),
+                                label = { Text(text = "Manual Scan") },
+                                enabled = !state.sweepRunning && !state.manualSessionActive,
+                                colors = segmentedColors,
+                            )
+                        }
                     }
                 }
             }
@@ -251,38 +340,10 @@ fun BatchScreen(
                 } else {
                     ManualPanel(
                         state = state,
-                        dateFormatter = dateFormatter,
                         onScan = viewModel::scanOnce,
                         onToggleSession = viewModel::toggleManualSession,
                         onUndo = viewModel::undoLast,
                     )
-                }
-            }
-
-            if (report != null) {
-                item {
-                    SectionCard(
-                        title = "Last Import",
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text(text = "Imported: ${report.importedCount}")
-                        Text(text = "Duplicates skipped: ${report.duplicateCount}")
-                        Text(text = "Invalid rows: ${report.invalidCount}")
-                        if (report.invalidRows.isNotEmpty()) {
-                            TextButton(
-                                onClick = { showInvalidRows = !showInvalidRows },
-                                modifier = Modifier.align(Alignment.End),
-                            ) {
-                                Text(text = if (showInvalidRows) "Hide invalid rows" else "Show invalid rows")
-                            }
-                            AnimatedVisibility(visible = showInvalidRows) {
-                                Text(
-                                    text = "Rows: ${report.invalidRows.joinToString(", ")}",
-                                    style = MaterialTheme.typography.bodySmall,
-                                )
-                            }
-                        }
-                    }
                 }
             }
 
@@ -291,14 +352,24 @@ fun BatchScreen(
                     EmptyState(onImport = { importLauncher.launch(importTypes) })
                 }
             } else {
+                item {
+                    LiveResultsHeader(
+                        onClear = {
+                            showClearConfirm = true
+                        },
+                        canClear = canClear,
+                    )
+                }
                 items(state.inputItems, key = { it.epcNormalized }) { item ->
                     val session = state.sessionMap[item.epcNormalized]
+                    val lastUpdatedLabel =
+                        session?.updatedAt?.let { dateFormatter.format(Date(it)) }
                     BatchItemRow(
                         item = item,
                         session = session,
                         isSelected = item.epcNormalized == state.currentRowEpc,
                         isLastScanned = item.epcNormalized == state.lastScanEpc,
-                        dateFormatter = dateFormatter,
+                        lastUpdatedLabel = lastUpdatedLabel,
                         onClick = { viewModel.selectItem(item.epcNormalized) },
                     )
                 }
@@ -312,27 +383,32 @@ private fun SweepPanel(
     state: BatchUiState,
     onToggle: () -> Unit,
 ) {
-    SectionCard(title = "Inventory sweep") {
+    val statusLabel = if (state.sweepRunning) "Running" else "Idle"
+    val subTitle = if (state.sweepRunning) "Sweeping tags..." else null
+    val buttonIcon = if (state.sweepRunning) Icons.Filled.Stop else Icons.Filled.PlayArrow
+    SectionCard {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(text = "Session", style = MaterialTheme.typography.labelMedium)
-            StatChip(label = if (state.sweepRunning) "Running" else "Stopped")
-        }
-        Row(
-            modifier = Modifier.horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            SummaryChip(label = "Found", count = state.summary.found)
-            SummaryChip(label = "Unknown", count = state.summary.unknown)
-            SummaryChip(label = "Extra", count = state.summary.extra)
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(text = "Session", style = MaterialTheme.typography.titleMedium)
+                if (!subTitle.isNullOrBlank()) {
+                    Text(
+                        text = subTitle,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            StatChip(label = statusLabel)
         }
         PrimaryButton(
-            text = if (state.sweepRunning) "Stop sweep" else "Start sweep",
+            text = if (state.sweepRunning) "Stop Sweep" else "Start Sweep",
             onClick = onToggle,
             modifier = Modifier.fillMaxWidth(),
+            leadingIcon = { Icon(imageVector = buttonIcon, contentDescription = null) },
         )
         if (state.sweepRunning) {
             LoadingState(message = "Sweeping tags...", modifier = Modifier.fillMaxWidth())
@@ -343,64 +419,34 @@ private fun SweepPanel(
 @Composable
 private fun ManualPanel(
     state: BatchUiState,
-    dateFormatter: DateFormat,
     onScan: () -> Unit,
     onToggleSession: () -> Unit,
     onUndo: () -> Unit,
 ) {
-    SectionCard(title = "Manual scan") {
+    SectionCard {
         val sessionLabel =
             when {
                 state.manualSessionFinishing -> "Finishing"
                 state.manualSessionActive -> "Running"
-                else -> "Stopped"
+                else -> "Idle"
             }
+        val subTitle = if (state.manualSessionFinishing) "Finishing session..." else null
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(text = "Session", style = MaterialTheme.typography.labelMedium)
-            StatChip(label = sessionLabel)
-        }
-        Row(
-            modifier = Modifier.horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            SummaryChip(label = "Scans", count = state.manualScanCount)
-            SummaryChip(label = "Found", count = state.manualFoundCount)
-        }
-        val current = state.currentRowEpc
-        if (current != null) {
-            Text(
-                text = "Current: $current",
-                style = MaterialTheme.typography.labelSmall,
-                fontFamily = FontFamily.Monospace,
-            )
-            val session = state.sessionMap[current]
-            val updatedAt = session?.updatedAt
-            if (updatedAt != null) {
-                Text(
-                    text = "Updated: ${dateFormatter.format(Date(updatedAt))}",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
-        if (state.lastScanEpc != null) {
-            val rssiLabel = state.lastScanRssi?.let { " RSSI $it" }.orEmpty()
-            val matchLabel =
-                when (state.lastScanMatched) {
-                    true -> "Matched"
-                    false -> "Extra"
-                    null -> null
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(text = "Session", style = MaterialTheme.typography.titleMedium)
+                if (!subTitle.isNullOrBlank()) {
+                    Text(
+                        text = subTitle,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
-            val matchSuffix = matchLabel?.let { " ($it)" }.orEmpty()
-            Text(
-                text = "Last scan: ${state.lastScanEpc}$rssiLabel$matchSuffix",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            }
+            StatChip(label = sessionLabel)
         }
         state.lastInfoMessage?.let { message ->
             Text(
@@ -417,8 +463,8 @@ private fun ManualPanel(
                 text =
                     when {
                         state.manualSessionFinishing -> "Finishing..."
-                        state.manualSessionActive -> "Finish session"
-                        else -> "Start session"
+                        state.manualSessionActive -> "Finish Session"
+                        else -> "Start Session"
                     },
                 onClick = onToggleSession,
                 modifier = Modifier.weight(1f),
@@ -458,7 +504,7 @@ private fun BatchItemRow(
     session: BatchSessionEntry?,
     isSelected: Boolean,
     isLastScanned: Boolean,
-    dateFormatter: DateFormat,
+    lastUpdatedLabel: String?,
     onClick: () -> Unit,
 ) {
     val containerColor =
@@ -468,40 +514,77 @@ private fun BatchItemRow(
             else -> MaterialTheme.colorScheme.surface
         }
     val status = session?.status ?: BatchStatus.UNKNOWN
-    val updatedAt = session?.updatedAt?.let { dateFormatter.format(Date(it)) } ?: "--"
-    val nameText = item.name.ifBlank { "--" }
-    ListItem(
-        headlineContent = {
-            Text(
-                text = nameText,
-                style = MaterialTheme.typography.bodyLarge,
-            )
-        },
-        supportingContent = {
-            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(
-                    text = item.epcNormalized,
-                    style = MaterialTheme.typography.labelSmall,
-                    fontFamily = FontFamily.Monospace,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    text = "Status: ${statusLabel(status)} | Updated: $updatedAt",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-        },
-        trailingContent = { StatusBadge(status = status) },
-        colors = ListItemDefaults.colors(containerColor = containerColor),
+    val accentColor = statusAccentColor(status)
+    val nameText = item.name.ifBlank { "Unidentified item" }
+    val isPlaceholderName = item.name.isBlank()
+    OutlinedCard(
         modifier =
             Modifier
                 .fillMaxWidth()
                 .clickable(onClick = onClick),
-    )
+        colors = CardDefaults.outlinedCardColors(containerColor = containerColor),
+        border = CardDefaults.outlinedCardBorder(),
+        shape = MaterialTheme.shapes.large,
+    ) {
+        Row(
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .height(IntrinsicSize.Min),
+        ) {
+            Box(
+                modifier =
+                    Modifier
+                        .width(4.dp)
+                        .fillMaxHeight()
+                        .background(accentColor),
+            )
+            Column(
+                modifier =
+                    Modifier
+                        .weight(1f)
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = nameText,
+                        style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.SemiBold),
+                        color =
+                            if (isPlaceholderName) {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            } else {
+                                MaterialTheme.colorScheme.onSurface
+                            },
+                        fontStyle = if (isPlaceholderName) FontStyle.Italic else FontStyle.Normal,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                    StatusBadge(status = status)
+                }
+                Text(
+                    text = "EPC: ${formatEpcForDisplay(item.epcNormalized)}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    fontFamily = FontFamily.Monospace,
+                )
+                if (!lastUpdatedLabel.isNullOrBlank()) {
+                    Text(
+                        text = "Last updated: $lastUpdatedLabel",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+    }
 }
 
 @Composable
@@ -526,13 +609,67 @@ private fun EmptyState(onImport: () -> Unit) {
 }
 
 @Composable
-private fun SummaryChip(
-    label: String,
-    count: Int,
+private fun LiveResultsHeader(
+    onClear: () -> Unit,
+    canClear: Boolean,
 ) {
-    StatChip(label = "$label $count")
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = "LIVE RESULTS",
+            style = MaterialTheme.typography.labelLarge.copy(letterSpacing = 1.sp),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        TextButton(
+            onClick = onClear,
+            enabled = canClear,
+            colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error),
+        ) {
+            Text(text = "Clear All")
+        }
+    }
 }
 
+@Composable
+private fun SummaryStatCard(
+    label: String,
+    count: Int,
+    labelColor: Color,
+    valueColor: Color,
+    modifier: Modifier = Modifier,
+) {
+    OutlinedCard(
+        modifier = modifier.heightIn(min = 76.dp),
+        colors = CardDefaults.outlinedCardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = CardDefaults.outlinedCardBorder(),
+        shape = MaterialTheme.shapes.medium,
+    ) {
+        Column(
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text(
+                text = label.uppercase(),
+                style = MaterialTheme.typography.labelSmall,
+                color = labelColor,
+            )
+            Text(
+                text = count.toString(),
+                style = MaterialTheme.typography.headlineSmall,
+                color = valueColor,
+            )
+        }
+    }
+}
+
+@Composable
 private fun statusLabel(status: BatchStatus): String {
     return when (status) {
         BatchStatus.UNKNOWN -> "Unknown"
@@ -544,30 +681,8 @@ private fun statusLabel(status: BatchStatus): String {
 
 @Composable
 private fun StatusBadge(status: BatchStatus) {
-    val label = statusLabel(status)
-    val (containerColor, contentColor) =
-        when (status) {
-            BatchStatus.UNKNOWN ->
-                Pair(
-                    MaterialTheme.colorScheme.tertiaryContainer,
-                    MaterialTheme.colorScheme.onTertiaryContainer,
-                )
-            BatchStatus.FOUND ->
-                Pair(
-                    MaterialTheme.colorScheme.primaryContainer,
-                    MaterialTheme.colorScheme.onPrimaryContainer,
-                )
-            BatchStatus.NOT_FOUND ->
-                Pair(
-                    MaterialTheme.colorScheme.errorContainer,
-                    MaterialTheme.colorScheme.onErrorContainer,
-                )
-            BatchStatus.EXTRA ->
-                Pair(
-                    MaterialTheme.colorScheme.secondaryContainer,
-                    MaterialTheme.colorScheme.onSecondaryContainer,
-                )
-        }
+    val label = statusLabel(status).uppercase()
+    val (containerColor, contentColor) = statusBadgeColors(status)
     Surface(
         color = containerColor,
         shape = MaterialTheme.shapes.small,
@@ -579,4 +694,44 @@ private fun StatusBadge(status: BatchStatus) {
             color = contentColor,
         )
     }
+}
+
+@Composable
+private fun statusBadgeColors(status: BatchStatus): Pair<Color, Color> {
+    return when (status) {
+        BatchStatus.UNKNOWN ->
+            Pair(
+                MaterialTheme.colorScheme.surfaceVariant,
+                MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        BatchStatus.FOUND ->
+            Pair(
+                SuccessGreen.copy(alpha = 0.16f),
+                SuccessGreen,
+            )
+        BatchStatus.NOT_FOUND ->
+            Pair(
+                MaterialTheme.colorScheme.error.copy(alpha = 0.16f),
+                MaterialTheme.colorScheme.error,
+            )
+        BatchStatus.EXTRA ->
+            Pair(
+                MaterialTheme.colorScheme.tertiaryContainer,
+                MaterialTheme.colorScheme.onTertiaryContainer,
+            )
+    }
+}
+
+@Composable
+private fun statusAccentColor(status: BatchStatus): Color {
+    return when (status) {
+        BatchStatus.UNKNOWN -> MaterialTheme.colorScheme.outline
+        BatchStatus.FOUND -> SuccessGreen
+        BatchStatus.NOT_FOUND -> MaterialTheme.colorScheme.error
+        BatchStatus.EXTRA -> MaterialTheme.colorScheme.tertiary
+    }
+}
+
+private fun formatEpcForDisplay(epcNormalized: String): String {
+    return epcNormalized.chunked(4).joinToString(" ")
 }

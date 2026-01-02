@@ -67,6 +67,7 @@ data class FindUiState(
     val matchStatus: MatchStatus = MatchStatus.NoTarget,
     val soundEnabled: Boolean = AppDefaults.FIND_SOUND_ENABLED,
     val debugOverlayEnabled: Boolean = AppDefaults.FIND_DEBUG_OVERLAY_ENABLED,
+    val uhfPower: Int = AppDefaults.UHF_POWER,
     val debugDisableFilter: Boolean = false,
     val lastErrorMessage: String? = null,
 )
@@ -116,6 +117,7 @@ class FindViewModel(
                             lastScannedEpc = settings.lastScannedEpc,
                             soundEnabled = settings.findSoundEnabled,
                             debugOverlayEnabled = settings.showFindDebugOverlay,
+                            uhfPower = settings.uhfPower,
                             debugDisableFilter = nextDebugDisableFilter,
                         )
                     updated.copy(

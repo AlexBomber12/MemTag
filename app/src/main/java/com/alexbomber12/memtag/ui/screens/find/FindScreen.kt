@@ -7,7 +7,9 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -15,14 +17,16 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CenterFocusStrong
 import androidx.compose.material.icons.filled.Clear
-import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.QrCodeScanner
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
@@ -36,7 +40,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.alexbomber12.memtag.app.HardwareAction
 import com.alexbomber12.memtag.ui.components.AppScaffold
@@ -44,6 +48,10 @@ import com.alexbomber12.memtag.ui.components.PrimaryButton
 import com.alexbomber12.memtag.ui.components.SecondaryButton
 import com.alexbomber12.memtag.ui.components.SectionCard
 import com.alexbomber12.memtag.ui.components.StatChip
+import com.alexbomber12.memtag.ui.theme.MemTagTheme
+import com.alexbomber12.memtag.ui.theme.SignalOrange
+import com.alexbomber12.memtag.ui.theme.SignalYellow
+import com.alexbomber12.memtag.ui.theme.SuccessGreen
 import com.alexbomber12.memtag.util.epc.EpcValidator
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.collect
@@ -60,7 +68,6 @@ fun FindScreen(
     hardwareActions: Flow<HardwareAction>,
 ) {
     val uiState by viewModel.uiState.collectAsState()
-    val clipboardManager = LocalClipboardManager.current
     val snackbarHostState = remember { SnackbarHostState() }
     val coroutineScope = rememberCoroutineScope()
 
@@ -83,9 +90,6 @@ fun FindScreen(
     val showInputError = uiState.epcInput.isNotBlank() && !isValid
     val errorMessage = uiState.lastErrorMessage?.takeIf { it.isNotBlank() }
     val isNearbyMode = uiState.targetEpcNormalized.isNullOrBlank()
-    val canSetTargetFromLastSeen =
-        uiState.lastSeenAnyEpc != null &&
-            (isNearbyMode || uiState.matchStatus == MatchStatus.NotMatchedYet)
     val statusLabel =
         when (uiState.status) {
             FindStatus.Idle -> "Idle"
@@ -100,13 +104,17 @@ fun FindScreen(
             snackbarHostState.showSnackbar("Target EPC updated")
         }
     }
-    val pasteFromClipboard: () -> Unit = {
-        val clipboardText = clipboardManager.getText()?.text?.trim().orEmpty()
-        if (clipboardText.isNotBlank()) {
-            viewModel.onEpcInputChange(clipboardText)
-            showTargetUpdated()
+    val targetNotSeenMessage =
+        if (
+            uiState.isRunning &&
+            !isNearbyMode &&
+            uiState.tagsSeenMatched == 0 &&
+            uiState.tagsSeenAny > 0
+        ) {
+            "Target not seen yet, but tags nearby: ${uiState.lastSeenAnyEpc.orEmpty()}"
+        } else {
+            null
         }
-    }
 
     AppScaffold(
         snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
@@ -120,127 +128,34 @@ fun FindScreen(
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             item {
-                SectionCard(
-                    title = "Target",
+                TargetSection(
+                    value = uiState.epcInput,
+                    enabled = canEditTarget,
+                    showInputError = showInputError,
+                    onValueChange = viewModel::onEpcInputChange,
+                    onHistoryClick = {
+                        viewModel.useLastScannedEpc()
+                        showTargetUpdated()
+                    },
+                    onClearClick = { viewModel.onEpcInputChange("") },
+                    onScanEpc = viewModel::startFind,
+                    onScanQr = {},
                     modifier = Modifier.fillMaxWidth(),
-                ) {
-                    OutlinedTextField(
-                        value = uiState.epcInput,
-                        onValueChange = viewModel::onEpcInputChange,
-                        modifier = Modifier.fillMaxWidth(),
-                        label = { Text(text = "Target EPC") },
-                        placeholder = { Text(text = "Paste or scan EPC") },
-                        singleLine = true,
-                        enabled = canEditTarget,
-                        isError = showInputError,
-                        supportingText =
-                            if (showInputError) {
-                                { Text(text = "Invalid EPC. Use 8-64 hex characters.") }
-                            } else {
-                                null
-                            },
-                        trailingIcon = {
-                            Row(
-                                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                if (uiState.lastScannedEpc.isNotBlank()) {
-                                    IconButton(
-                                        onClick = {
-                                            viewModel.useLastScannedEpc()
-                                            showTargetUpdated()
-                                        },
-                                        enabled = canEditTarget,
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Filled.History,
-                                            contentDescription = "Use last scanned EPC",
-                                        )
-                                    }
-                                }
-                                IconButton(
-                                    onClick = pasteFromClipboard,
-                                    enabled = canEditTarget,
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Filled.ContentPaste,
-                                        contentDescription = "Paste EPC from clipboard",
-                                    )
-                                }
-                                if (uiState.epcInput.isNotBlank()) {
-                                    IconButton(
-                                        onClick = { viewModel.onEpcInputChange("") },
-                                        enabled = canEditTarget,
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Filled.Clear,
-                                            contentDescription = "Clear target EPC",
-                                        )
-                                    }
-                                }
-                            }
-                        },
-                    )
-                }
+                )
             }
 
             item {
-                SectionCard(modifier = Modifier.fillMaxWidth()) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(text = "Proximity", style = MaterialTheme.typography.titleMedium)
-                        StatChip(label = statusLabel)
-                    }
-                    if (errorMessage != null) {
-                        ErrorBanner(
-                            message = errorMessage,
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                    }
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                        PrimaryButton(
-                            text = if (uiState.isRunning) "Stop" else "Start",
-                            onClick = viewModel::toggleFind,
-                            modifier = Modifier.weight(1f),
-                            enabled = uiState.isRunning || isValid,
-                        )
-                        if (errorMessage != null) {
-                            SecondaryButton(
-                                text = "Clear error",
-                                onClick = viewModel::clearError,
-                                modifier = Modifier.weight(1f),
-                            )
-                        }
-                    }
-                    ProximityMeter(
-                        proximity = uiState.proximity,
-                        isRunning = uiState.isRunning,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    if (uiState.isRunning &&
-                        !isNearbyMode &&
-                        uiState.tagsSeenMatched == 0 &&
-                        uiState.tagsSeenAny > 0
-                    ) {
-                        Text(
-                            text = "Target not seen yet, but tags nearby: ${uiState.lastSeenAnyEpc.orEmpty()}",
-                            style = MaterialTheme.typography.bodySmall,
-                        )
-                    }
-                    if (canSetTargetFromLastSeen) {
-                        SecondaryButton(
-                            text = "Set target from last seen tag",
-                            onClick = viewModel::setTargetFromLastSeenAny,
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                    }
-                }
+                ProximitySection(
+                    statusLabel = statusLabel,
+                    errorMessage = errorMessage,
+                    isRunning = uiState.isRunning,
+                    isValid = isValid,
+                    proximity = uiState.proximity,
+                    targetNotSeenMessage = targetNotSeenMessage,
+                    onToggle = viewModel::toggleFind,
+                    onClearError = viewModel::clearError,
+                    modifier = Modifier.fillMaxWidth(),
+                )
             }
 
             if (showBackToBatch) {
@@ -257,6 +172,189 @@ fun FindScreen(
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun TargetSection(
+    value: String,
+    enabled: Boolean,
+    showInputError: Boolean,
+    onValueChange: (String) -> Unit,
+    onHistoryClick: () -> Unit,
+    onClearClick: () -> Unit,
+    onScanEpc: () -> Unit,
+    onScanQr: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    SectionCard(modifier = modifier) {
+        TargetEpcField(
+            value = value,
+            enabled = enabled,
+            showInputError = showInputError,
+            onValueChange = onValueChange,
+            onHistoryClick = onHistoryClick,
+            onClearClick = onClearClick,
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            PrimaryButton(
+                text = "Scan RFID",
+                onClick = onScanEpc,
+                modifier = Modifier.weight(1f),
+                enabled = enabled,
+                leadingIcon = {
+                    Icon(
+                        imageVector = Icons.Filled.CenterFocusStrong,
+                        contentDescription = "Scan RFID",
+                    )
+                },
+            )
+            SecondaryButton(
+                text = "Scan QR",
+                onClick = onScanQr,
+                modifier = Modifier.weight(1f),
+                enabled = enabled,
+                leadingIcon = {
+                    Icon(
+                        imageVector = Icons.Filled.QrCodeScanner,
+                        contentDescription = "Scan QR",
+                    )
+                },
+            )
+        }
+    }
+}
+
+@Composable
+private fun TargetEpcField(
+    value: String,
+    enabled: Boolean,
+    showInputError: Boolean,
+    onValueChange: (String) -> Unit,
+    onHistoryClick: () -> Unit,
+    onClearClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val isEmpty = value.isBlank()
+    val trailingIcon = if (isEmpty) Icons.Filled.History else Icons.Filled.Clear
+    val trailingDescription =
+        if (isEmpty) {
+            "Use last scanned EPC"
+        } else {
+            "Clear target EPC"
+        }
+    OutlinedTextField(
+        value = value,
+        onValueChange = onValueChange,
+        modifier = modifier.fillMaxWidth(),
+        label = { Text(text = "Target EPC") },
+        placeholder = { Text(text = "Paste or scan EPC") },
+        singleLine = true,
+        enabled = enabled,
+        isError = showInputError,
+        colors =
+            OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = MaterialTheme.colorScheme.outline,
+                unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+                focusedLabelColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                unfocusedLabelColor = MaterialTheme.colorScheme.onSurfaceVariant,
+            ),
+        supportingText =
+            if (showInputError) {
+                { Text(text = "Invalid EPC. Use 8-64 hex characters.") }
+            } else {
+                null
+            },
+        trailingIcon = {
+            IconButton(
+                onClick = {
+                    if (isEmpty) {
+                        onHistoryClick()
+                    } else {
+                        onClearClick()
+                    }
+                },
+                enabled = enabled,
+            ) {
+                Icon(
+                    imageVector = trailingIcon,
+                    contentDescription = trailingDescription,
+                )
+            }
+        },
+    )
+}
+
+@Composable
+private fun ProximitySection(
+    statusLabel: String,
+    errorMessage: String?,
+    isRunning: Boolean,
+    isValid: Boolean,
+    proximity: Int,
+    targetNotSeenMessage: String?,
+    onToggle: () -> Unit,
+    onClearError: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val stopColors =
+        if (isRunning) {
+            ButtonDefaults.buttonColors(
+                containerColor = MaterialTheme.colorScheme.error,
+                contentColor = MaterialTheme.colorScheme.onError,
+            )
+        } else {
+            null
+        }
+    SectionCard(modifier = modifier) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(text = "Proximity", style = MaterialTheme.typography.titleMedium)
+            StatChip(label = statusLabel)
+        }
+        if (errorMessage != null) {
+            ErrorBanner(
+                message = errorMessage,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            PrimaryButton(
+                text = if (isRunning) "Stop" else "Start",
+                onClick = onToggle,
+                modifier = Modifier.weight(1f),
+                enabled = isRunning || isValid,
+                colors = stopColors,
+                textStyle = MaterialTheme.typography.titleMedium,
+            )
+            if (errorMessage != null) {
+                SecondaryButton(
+                    text = "Clear error",
+                    onClick = onClearError,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+        }
+        ProximityMeter(
+            proximity = proximity,
+            isRunning = isRunning,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        if (targetNotSeenMessage != null) {
+            Text(
+                text = targetNotSeenMessage,
+                style = MaterialTheme.typography.bodySmall,
+            )
         }
     }
 }
@@ -279,9 +377,10 @@ private fun ProximityMeter(
             MaterialTheme.colorScheme.outline
         } else {
             when {
-                displayValue < 35 -> MaterialTheme.colorScheme.error
-                displayValue < 70 -> MaterialTheme.colorScheme.tertiary
-                else -> MaterialTheme.colorScheme.primary
+                displayValue >= 75 -> SuccessGreen
+                displayValue >= 50 -> SignalYellow
+                displayValue >= 25 -> SignalOrange
+                else -> MaterialTheme.colorScheme.error
             }
         }
     val labelColor =
@@ -290,6 +389,7 @@ private fun ProximityMeter(
         } else {
             barColor
         }
+    val guideColor = MaterialTheme.colorScheme.onSurfaceVariant
     Row(
         modifier = modifier,
         verticalAlignment = Alignment.CenterVertically,
@@ -300,16 +400,53 @@ private fun ProximityMeter(
             style = MaterialTheme.typography.headlineMedium,
             color = labelColor,
         )
-        LinearProgressIndicator(
-            progress = { animatedProgress.coerceIn(0f, 1f) },
-            color = barColor,
-            trackColor = MaterialTheme.colorScheme.surfaceVariant,
-            modifier =
-                Modifier
-                    .weight(1f)
-                    .height(8.dp)
-                    .clip(MaterialTheme.shapes.small),
-        )
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+            ) {
+                Text(
+                    text = "SIGNAL STRENGTH",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = guideColor,
+                )
+            }
+            Box(
+                modifier =
+                    Modifier
+                        .fillMaxWidth()
+                        .height(8.dp)
+                        .clip(MaterialTheme.shapes.small)
+                        .background(MaterialTheme.colorScheme.surfaceVariant),
+            ) {
+                Box(
+                    modifier =
+                        Modifier
+                            .fillMaxHeight()
+                            .fillMaxWidth(animatedProgress.coerceIn(0f, 1f))
+                            .clip(MaterialTheme.shapes.small)
+                            .background(barColor),
+                )
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Text(
+                    text = "Low",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = guideColor,
+                )
+                Text(
+                    text = "High",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = guideColor,
+                )
+            }
+        }
     }
 }
 
@@ -329,6 +466,90 @@ private fun ErrorBanner(
             text = message,
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onErrorContainer,
+        )
+    }
+}
+
+@Preview(showBackground = true, widthDp = 360)
+@Composable
+private fun TargetFieldEmptyPreview() {
+    MemTagTheme {
+        TargetSection(
+            value = "",
+            enabled = true,
+            showInputError = false,
+            onValueChange = {},
+            onHistoryClick = {},
+            onClearClick = {},
+            onScanEpc = {},
+            onScanQr = {},
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+        )
+    }
+}
+
+@Preview(showBackground = true, widthDp = 360)
+@Composable
+private fun TargetFieldFilledPreview() {
+    MemTagTheme {
+        TargetSection(
+            value = "E2000017221101441890ABCD",
+            enabled = true,
+            showInputError = false,
+            onValueChange = {},
+            onHistoryClick = {},
+            onClearClick = {},
+            onScanEpc = {},
+            onScanQr = {},
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+        )
+    }
+}
+
+@Preview(showBackground = true, widthDp = 360)
+@Composable
+private fun ProximityIdlePreview() {
+    MemTagTheme {
+        ProximitySection(
+            statusLabel = "Idle",
+            errorMessage = null,
+            isRunning = false,
+            isValid = true,
+            proximity = 0,
+            targetNotSeenMessage = null,
+            onToggle = {},
+            onClearError = {},
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+        )
+    }
+}
+
+@Preview(showBackground = true, widthDp = 360)
+@Composable
+private fun ProximityRunningMaxPowerPreview() {
+    MemTagTheme {
+        ProximitySection(
+            statusLabel = "Signal detected",
+            errorMessage = null,
+            isRunning = true,
+            isValid = true,
+            proximity = 91,
+            targetNotSeenMessage = null,
+            onToggle = {},
+            onClearError = {},
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
         )
     }
 }

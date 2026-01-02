@@ -35,6 +35,7 @@ private val DarkColorScheme =
         outline = DarkOutline,
         error = DarkError,
         onError = DarkOnError,
+        surfaceTint = DarkPrimary,
     )
 
 private val LightColorScheme =
@@ -60,6 +61,7 @@ private val LightColorScheme =
         outline = LightOutline,
         error = LightError,
         onError = LightOnError,
+        surfaceTint = LightSurface,
     )
 
 @Composable

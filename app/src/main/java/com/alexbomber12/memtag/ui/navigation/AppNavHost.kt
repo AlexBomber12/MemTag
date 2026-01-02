@@ -44,6 +44,7 @@ fun AppNavHost(
             LookupScreen(
                 viewModel = viewModel,
                 hardwareActions = appContainer.hardwareKeyDispatcher.actions,
+                onNavigateToVerify = { navController.navigateToTopLevel(AppDestinations.RepairWrite) },
             )
         }
         composable(
