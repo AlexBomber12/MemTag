@@ -25,6 +25,7 @@ class SettingsViewModel(
     private val repository: MementoRepository,
     private val syncCoordinator: SyncCoordinator,
 ) : ViewModel() {
+    private val pendingLock = Any()
     private var pendingSaveJob: Job? = null
     private var pendingSettings: AppSettings? = null
 
@@ -72,14 +73,22 @@ class SettingsViewModel(
             )
 
     fun queueSettingsUpdate(settings: AppSettings) {
-        pendingSettings = settings
-        pendingSaveJob?.cancel()
-        pendingSaveJob =
+        val job =
             viewModelScope.launch {
                 delay(SETTINGS_AUTO_SAVE_DEBOUNCE_MS)
-                val latest = pendingSettings ?: return@launch
-                persistSettings(latest)
+                val latest =
+                    synchronized(pendingLock) {
+                        pendingSettings
+                    }
+                if (latest != null) {
+                    persistSettings(latest)
+                }
             }
+        synchronized(pendingLock) {
+            pendingSettings = settings
+            pendingSaveJob?.cancel()
+            pendingSaveJob = job
+        }
     }
 
     fun setMemento(
@@ -129,7 +138,10 @@ class SettingsViewModel(
     }
 
     fun syncNow() {
-        syncCoordinator.requestManualSync()
+        viewModelScope.launch {
+            flushPendingSettings()
+            syncCoordinator.requestManualSync()
+        }
     }
 
     private suspend fun persistSettings(settings: AppSettings) {
@@ -149,6 +161,21 @@ class SettingsViewModel(
                     scanKeyCodes = settings.scanKeyCodes,
                 )
             if (updated == current) current else updated
+        }
+    }
+
+    private suspend fun flushPendingSettings() {
+        val latest: AppSettings?
+        val jobToCancel: Job?
+        synchronized(pendingLock) {
+            latest = pendingSettings
+            pendingSettings = null
+            jobToCancel = pendingSaveJob
+            pendingSaveJob = null
+        }
+        jobToCancel?.cancel()
+        if (latest != null) {
+            persistSettings(latest)
         }
     }
 }
