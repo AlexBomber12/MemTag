@@ -79,13 +79,6 @@ fun FindScreen(
             viewModel.applyExternalEpc(initialEpc, autoStart)
         }
     }
-    LaunchedEffect(hardwareActions) {
-        hardwareActions.collect { action ->
-            if (action == HardwareAction.Rfid) {
-                viewModel.toggleFind()
-            }
-        }
-    }
     val isValid = uiState.epcInput.isBlank() || EpcValidator.isValidEpcHex(uiState.epcInput)
     val showInputError = uiState.epcInput.isNotBlank() && !isValid
     val errorMessage = uiState.lastErrorMessage?.takeIf { it.isNotBlank() }
@@ -98,6 +91,15 @@ fun FindScreen(
             is FindStatus.Error -> "Idle"
         }
     val canEditTarget = !uiState.isRunning
+
+    LaunchedEffect(hardwareActions, canEditTarget) {
+        hardwareActions.collect { action ->
+            when (action) {
+                HardwareAction.Rfid -> viewModel.toggleFind()
+                HardwareAction.Scan -> if (canEditTarget) viewModel.scanQr()
+            }
+        }
+    }
 
     val showTargetUpdated: () -> Unit = {
         coroutineScope.launch {
@@ -138,8 +140,8 @@ fun FindScreen(
                         showTargetUpdated()
                     },
                     onClearClick = { viewModel.onEpcInputChange("") },
-                    onScanEpc = viewModel::startFind,
-                    onScanQr = {},
+                    onScanRfid = viewModel::scanRfidOnce,
+                    onScanQr = viewModel::scanQr,
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
@@ -184,7 +186,7 @@ private fun TargetSection(
     onValueChange: (String) -> Unit,
     onHistoryClick: () -> Unit,
     onClearClick: () -> Unit,
-    onScanEpc: () -> Unit,
+    onScanRfid: () -> Unit,
     onScanQr: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -203,7 +205,7 @@ private fun TargetSection(
         ) {
             PrimaryButton(
                 text = "Scan RFID",
-                onClick = onScanEpc,
+                onClick = onScanRfid,
                 modifier = Modifier.weight(1f),
                 enabled = enabled,
                 leadingIcon = {
@@ -301,6 +303,7 @@ private fun ProximitySection(
     onClearError: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val displayErrorMessage = errorMessage?.takeIf { !isQrTimeoutMessage(it) }
     val stopColors =
         if (isRunning) {
             ButtonDefaults.buttonColors(
@@ -319,9 +322,9 @@ private fun ProximitySection(
             Text(text = "Proximity", style = MaterialTheme.typography.titleMedium)
             StatChip(label = statusLabel)
         }
-        if (errorMessage != null) {
+        if (displayErrorMessage != null) {
             ErrorBanner(
-                message = errorMessage,
+                message = displayErrorMessage,
                 modifier = Modifier.fillMaxWidth(),
             )
         }
@@ -337,7 +340,7 @@ private fun ProximitySection(
                 colors = stopColors,
                 textStyle = MaterialTheme.typography.titleMedium,
             )
-            if (errorMessage != null) {
+            if (displayErrorMessage != null) {
                 SecondaryButton(
                     text = "Clear error",
                     onClick = onClearError,
@@ -481,7 +484,7 @@ private fun TargetFieldEmptyPreview() {
             onValueChange = {},
             onHistoryClick = {},
             onClearClick = {},
-            onScanEpc = {},
+            onScanRfid = {},
             onScanQr = {},
             modifier =
                 Modifier
@@ -502,7 +505,7 @@ private fun TargetFieldFilledPreview() {
             onValueChange = {},
             onHistoryClick = {},
             onClearClick = {},
-            onScanEpc = {},
+            onScanRfid = {},
             onScanQr = {},
             modifier =
                 Modifier
@@ -519,6 +522,27 @@ private fun ProximityIdlePreview() {
         ProximitySection(
             statusLabel = "Idle",
             errorMessage = null,
+            isRunning = false,
+            isValid = true,
+            proximity = 0,
+            targetNotSeenMessage = null,
+            onToggle = {},
+            onClearError = {},
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+        )
+    }
+}
+
+@Preview(showBackground = true, widthDp = 360)
+@Composable
+private fun ProximityQrTimeoutHiddenPreview() {
+    MemTagTheme {
+        ProximitySection(
+            statusLabel = "Idle",
+            errorMessage = "QR scan timed out.",
             isRunning = false,
             isValid = true,
             proximity = 0,
@@ -552,4 +576,10 @@ private fun ProximityRunningMaxPowerPreview() {
                     .padding(16.dp),
         )
     }
+}
+
+private const val QR_TIMEOUT_MESSAGE = "QR scan timed out."
+
+private fun isQrTimeoutMessage(message: String): Boolean {
+    return message.trim() == QR_TIMEOUT_MESSAGE
 }

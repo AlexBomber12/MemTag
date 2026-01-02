@@ -1,9 +1,13 @@
 package com.alexbomber12.memtag.integrations.uhf
 
+import kotlin.math.abs
+
 const val UHF_PROTOCOL_ISO_18000_6C = 0x00
 const val UHF_RFLINK_DSB_ASK = 0
 const val UHF_PROTOCOL_UNSUPPORTED = -1
 const val UHF_CONFIG_BUSY = -2
+internal const val UHF_POWER_SCALE_FACTOR = 100
+internal const val UHF_POWER_TOLERANCE_DBM = 1
 
 enum class ProtocolSupport {
     Unknown,
@@ -90,4 +94,32 @@ fun UhfApplyResult.toErrorMessage(): String {
         return ""
     }
     return "UHF config verify failed (${failures.joinToString(" ")})."
+}
+
+internal fun resolvePowerApplied(
+    desiredDbm: Int,
+    readback: Int?,
+    scaleFactor: Int = UHF_POWER_SCALE_FACTOR,
+    toleranceDbm: Int = UHF_POWER_TOLERANCE_DBM,
+): Boolean? {
+    if (readback == null) {
+        return null
+    }
+    val unscaledMatch = abs(readback - desiredDbm) <= toleranceDbm
+    val scaledMatch = abs(readback - desiredDbm * scaleFactor) <= toleranceDbm * scaleFactor
+    return unscaledMatch || scaledMatch
+}
+
+internal fun resolvePowerAppliedOrUnverified(
+    desiredDbm: Int,
+    readback: Int?,
+    setPowerOk: Boolean?,
+    scaleFactor: Int = UHF_POWER_SCALE_FACTOR,
+    toleranceDbm: Int = UHF_POWER_TOLERANCE_DBM,
+): Boolean? {
+    if (setPowerOk == false) {
+        return false
+    }
+    val applied = resolvePowerApplied(desiredDbm, readback, scaleFactor, toleranceDbm)
+    return if (applied == false && setPowerOk == true) null else applied
 }

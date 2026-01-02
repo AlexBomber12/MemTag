@@ -7,8 +7,10 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -72,6 +74,21 @@ fun SettingsScreen(
     var regionExpanded by rememberSaveable { mutableStateOf(false) }
     var pendingOpenDiagnostics by rememberSaveable { mutableStateOf(false) }
     var lastSuccessfulResult by remember { mutableStateOf<SyncResult?>(null) }
+    val queueSettingsUpdate = {
+        viewModel.queueSettingsUpdate(
+            AppSettings(
+                mementoBaseUrl = baseUrl,
+                mementoToken = token,
+                mementoLibraryId = libraryId,
+                uhfRegion = region,
+                uhfPower = power.toInt(),
+                scan2dAction = settings.scan2dAction,
+                scan2dExtraKey = settings.scan2dExtraKey,
+                rfidKeyCodes = rfidKeyCodes,
+                scanKeyCodes = scanKeyCodes,
+            ),
+        )
+    }
 
     LaunchedEffect(
         settings.mementoBaseUrl,
@@ -115,7 +132,10 @@ fun SettingsScreen(
         AppCard(title = "Memento") {
             OutlinedTextField(
                 value = baseUrl,
-                onValueChange = { baseUrl = it },
+                onValueChange = {
+                    baseUrl = it
+                    queueSettingsUpdate()
+                },
                 label = { Text(text = "Base URL") },
                 modifier = Modifier.fillMaxWidth(),
             )
@@ -125,7 +145,10 @@ fun SettingsScreen(
             )
             OutlinedTextField(
                 value = token,
-                onValueChange = { token = it },
+                onValueChange = {
+                    token = it
+                    queueSettingsUpdate()
+                },
                 label = { Text(text = "Token") },
                 modifier = Modifier.fillMaxWidth(),
                 visualTransformation =
@@ -144,7 +167,10 @@ fun SettingsScreen(
             )
             OutlinedTextField(
                 value = libraryId,
-                onValueChange = { libraryId = it },
+                onValueChange = {
+                    libraryId = it
+                    queueSettingsUpdate()
+                },
                 label = { Text(text = "Library ID") },
                 modifier = Modifier.fillMaxWidth(),
             )
@@ -183,6 +209,7 @@ fun SettingsScreen(
                             onClick = {
                                 region = option
                                 regionExpanded = false
+                                queueSettingsUpdate()
                             },
                         )
                     }
@@ -194,7 +221,10 @@ fun SettingsScreen(
             )
             Slider(
                 value = power,
-                onValueChange = { power = it },
+                onValueChange = {
+                    power = it
+                    queueSettingsUpdate()
+                },
                 valueRange = AppDefaults.UHF_POWER_MIN.toFloat()..AppDefaults.UHF_POWER_MAX.toFloat(),
                 steps = (AppDefaults.UHF_POWER_MAX - AppDefaults.UHF_POWER_MIN) - 1,
                 modifier = Modifier.fillMaxWidth(),
@@ -204,14 +234,20 @@ fun SettingsScreen(
         AppCard(title = "Hardware keys") {
             OutlinedTextField(
                 value = rfidKeyCodes,
-                onValueChange = { rfidKeyCodes = it },
+                onValueChange = {
+                    rfidKeyCodes = it
+                    queueSettingsUpdate()
+                },
                 label = { Text(text = "RFID key codes") },
                 supportingText = { Text(text = "Comma-separated key codes for RFID trigger.") },
                 modifier = Modifier.fillMaxWidth(),
             )
             OutlinedTextField(
                 value = scanKeyCodes,
-                onValueChange = { scanKeyCodes = it },
+                onValueChange = {
+                    scanKeyCodes = it
+                    queueSettingsUpdate()
+                },
                 label = { Text(text = "Scan key codes") },
                 supportingText = { Text(text = "Comma-separated key codes for QR scan.") },
                 modifier = Modifier.fillMaxWidth(),
@@ -370,25 +406,7 @@ fun SettingsScreen(
             )
         }
 
-        PrimaryButton(
-            text = "Save settings",
-            onClick = {
-                viewModel.saveSettings(
-                    AppSettings(
-                        mementoBaseUrl = baseUrl,
-                        mementoToken = token,
-                        mementoLibraryId = libraryId,
-                        uhfRegion = region,
-                        uhfPower = power.toInt(),
-                        scan2dAction = settings.scan2dAction,
-                        scan2dExtraKey = settings.scan2dExtraKey,
-                        rfidKeyCodes = rfidKeyCodes,
-                        scanKeyCodes = scanKeyCodes,
-                    ),
-                )
-            },
-            modifier = Modifier.fillMaxWidth(),
-        )
+        Spacer(modifier = Modifier.height(8.dp))
     }
 }
 

@@ -24,13 +24,13 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CenterFocusStrong
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.FileUpload
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -65,7 +65,6 @@ import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.alexbomber12.memtag.app.HardwareAction
 import com.alexbomber12.memtag.domain.batch.BatchInputItem
@@ -75,6 +74,7 @@ import com.alexbomber12.memtag.ui.components.AppScaffold
 import com.alexbomber12.memtag.ui.components.ErrorState
 import com.alexbomber12.memtag.ui.components.LoadingState
 import com.alexbomber12.memtag.ui.components.PrimaryButton
+import com.alexbomber12.memtag.ui.components.ResultsSectionHeader
 import com.alexbomber12.memtag.ui.components.SecondaryButton
 import com.alexbomber12.memtag.ui.components.SectionCard
 import com.alexbomber12.memtag.ui.components.StatChip
@@ -326,24 +326,47 @@ fun BatchScreen(
             }
 
             item {
-                if (state.mode == BatchMode.INVENTORY_SWEEP) {
-                    SweepPanel(
-                        state = state,
-                        onToggle = {
-                            if (state.sweepRunning) {
-                                viewModel.stopSweep()
-                            } else {
-                                viewModel.startSweep()
-                            }
-                        },
-                    )
-                } else {
-                    ManualPanel(
-                        state = state,
-                        onScan = viewModel::scanOnce,
-                        onToggleSession = viewModel::toggleManualSession,
-                        onUndo = viewModel::undoLast,
-                    )
+                val firstResult = state.inputItems.firstOrNull()
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    if (state.mode == BatchMode.INVENTORY_SWEEP) {
+                        SweepPanel(
+                            state = state,
+                            onToggle = {
+                                if (state.sweepRunning) {
+                                    viewModel.stopSweep()
+                                } else {
+                                    viewModel.startSweep()
+                                }
+                            },
+                        )
+                    } else {
+                        ManualPanel(
+                            state = state,
+                            onScan = viewModel::scanOnce,
+                            onToggleSession = viewModel::toggleManualSession,
+                            onUndo = viewModel::undoLast,
+                        )
+                    }
+                    if (!isEmpty) {
+                        ResultsSectionHeader(
+                            label = "LIVE RESULTS",
+                            onClear = { showClearConfirm = true },
+                            canClear = canClear,
+                        )
+                        if (firstResult != null) {
+                            val session = state.sessionMap[firstResult.epcNormalized]
+                            val lastUpdatedLabel =
+                                session?.updatedAt?.let { dateFormatter.format(Date(it)) }
+                            BatchItemRow(
+                                item = firstResult,
+                                session = session,
+                                isSelected = firstResult.epcNormalized == state.currentRowEpc,
+                                isLastScanned = firstResult.epcNormalized == state.lastScanEpc,
+                                lastUpdatedLabel = lastUpdatedLabel,
+                                onClick = { viewModel.selectItem(firstResult.epcNormalized) },
+                            )
+                        }
+                    }
                 }
             }
 
@@ -352,15 +375,7 @@ fun BatchScreen(
                     EmptyState(onImport = { importLauncher.launch(importTypes) })
                 }
             } else {
-                item {
-                    LiveResultsHeader(
-                        onClear = {
-                            showClearConfirm = true
-                        },
-                        canClear = canClear,
-                    )
-                }
-                items(state.inputItems, key = { it.epcNormalized }) { item ->
+                items(state.inputItems.drop(1), key = { it.epcNormalized }) { item ->
                     val session = state.sessionMap[item.epcNormalized]
                     val lastUpdatedLabel =
                         session?.updatedAt?.let { dateFormatter.format(Date(it)) }
@@ -471,7 +486,7 @@ private fun ManualPanel(
                 enabled = !state.isScanning && !state.sweepRunning && !state.manualSessionFinishing,
             )
             SecondaryButton(
-                text = "Scan",
+                text = "Scan RFID",
                 onClick = onScan,
                 modifier = Modifier.weight(1f),
                 enabled =
@@ -479,6 +494,12 @@ private fun ManualPanel(
                         !state.manualSessionFinishing &&
                         !state.isScanning &&
                         !state.sweepRunning,
+                leadingIcon = {
+                    Icon(
+                        imageVector = Icons.Filled.CenterFocusStrong,
+                        contentDescription = "Scan RFID",
+                    )
+                },
             )
         }
         Row(
@@ -491,9 +512,6 @@ private fun ManualPanel(
             ) {
                 Text(text = "Undo last")
             }
-        }
-        if (state.isScanning) {
-            LoadingState(message = "Scanning RFID...", modifier = Modifier.fillMaxWidth())
         }
     }
 }
@@ -605,31 +623,6 @@ private fun EmptyState(onImport: () -> Unit) {
             onClick = onImport,
             fullWidth = false,
         )
-    }
-}
-
-@Composable
-private fun LiveResultsHeader(
-    onClear: () -> Unit,
-    canClear: Boolean,
-) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            text = "LIVE RESULTS",
-            style = MaterialTheme.typography.labelLarge.copy(letterSpacing = 1.sp),
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        TextButton(
-            onClick = onClear,
-            enabled = canClear,
-            colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error),
-        ) {
-            Text(text = "Clear All")
-        }
     }
 }
 

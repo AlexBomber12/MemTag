@@ -1,6 +1,7 @@
 package com.alexbomber12.memtag.data.repository
 
 import androidx.room.withTransaction
+import com.alexbomber12.memtag.BuildConfig
 import com.alexbomber12.memtag.core.logging.Logger
 import com.alexbomber12.memtag.data.settings.SettingsStore
 import com.alexbomber12.memtag.db.InventoryItemDao
@@ -98,10 +99,13 @@ class DefaultMementoRepository(
             }
             val config = (validation as MementoSettingsValidation.Valid).config
             val startTime = System.currentTimeMillis()
+            var fetchedRawCount = 0
             var fetchedCount = 0
             var storedCount = 0
             var skippedCount = 0
+            var duplicateCount = 0
             var pagingStrategy: PagingStrategy? = null
+            val entryStatuses = mutableMapOf<String, EntryStatus>()
             onProgress(SyncProgress(stage = SyncStage.STARTING, fetchedCount = 0, storedCount = 0, skippedCount = 0))
             try {
                 logger.i(TAG, "Sync start for library ${config.libraryId} at ${config.baseUrl}")
@@ -117,15 +121,61 @@ class DefaultMementoRepository(
                 val fieldIdMap = FieldIdMap.fromSchema(schema)
                 val summary =
                     pager.pageThroughEntries(config, PAGE_SIZE) { page ->
-                        fetchedCount += page.entries.size
+                        if (BuildConfig.DEBUG) {
+                            logger.d(
+                                TAG,
+                                "Sync page entries=${page.entries.size} " +
+                                    "page=${page.page} pageCount=${page.pageCount} " +
+                                    "nextTokenPresent=${!page.nextPageToken.isNullOrBlank()} " +
+                                    "nextUrl=${redactTokenInUrl(page.nextUrl)}",
+                            )
+                        }
+                        fetchedRawCount += page.entries.size
                         val items = mutableListOf<InventoryItemEntity>()
                         page.entries.forEach { entry ->
-                            val parsed = parseEntry(entry, fieldIdMap)
-                            if (parsed == null) {
+                            val entryId = entry.entryId?.trim().orEmpty()
+                            val rawEpc = valueAsString(entry.fieldValues[fieldIdMap.epcId])
+                            val key = resolveEntryKey(entryId, rawEpc)
+                            if (key == null) {
+                                fetchedCount += 1
                                 skippedCount += 1
-                            } else {
-                                items.add(parsed.toEntity())
+                                if (BuildConfig.DEBUG) {
+                                    logger.d(TAG, "Sync skip reason=missing_key")
+                                }
+                                return@forEach
                             }
+                            val status = entryStatuses[key]
+                            val outcome = parseEntry(entry, fieldIdMap, entryId, rawEpc)
+                            if (outcome.item == null) {
+                                if (status == null) {
+                                    entryStatuses[key] = EntryStatus.IGNORED
+                                    fetchedCount += 1
+                                    skippedCount += 1
+                                    if (BuildConfig.DEBUG) {
+                                        logger.d(TAG, "Sync skip key=$key reason=${outcome.reason}")
+                                    }
+                                } else {
+                                    duplicateCount += 1
+                                    if (BuildConfig.DEBUG) {
+                                        logger.d(TAG, "Sync duplicate key=$key")
+                                    }
+                                }
+                                return@forEach
+                            }
+                            if (status == EntryStatus.SAVED) {
+                                duplicateCount += 1
+                                if (BuildConfig.DEBUG) {
+                                    logger.d(TAG, "Sync duplicate key=$key")
+                                }
+                                return@forEach
+                            }
+                            if (status == EntryStatus.IGNORED) {
+                                skippedCount = (skippedCount - 1).coerceAtLeast(0)
+                            } else {
+                                fetchedCount += 1
+                            }
+                            entryStatuses[key] = EntryStatus.SAVED
+                            items.add(outcome.item.toEntity())
                         }
                         if (items.isNotEmpty()) {
                             items.chunked(BATCH_SIZE).forEach { batch ->
@@ -157,7 +207,8 @@ class DefaultMementoRepository(
                 val durationMs = System.currentTimeMillis() - startTime
                 logger.i(
                     TAG,
-                    "Sync completed. fetched=$fetchedCount stored=$storedCount skipped=$skippedCount durationMs=$durationMs",
+                    "Sync completed. fetched=$fetchedCount stored=$storedCount skipped=$skippedCount " +
+                        "duplicates=$duplicateCount raw=$fetchedRawCount durationMs=$durationMs",
                 )
                 val result =
                     SyncResult(
@@ -270,18 +321,30 @@ class DefaultMementoRepository(
     private fun parseEntry(
         entry: com.alexbomber12.memtag.integrations.memento.MementoEntry,
         fieldIdMap: FieldIdMap,
-    ): InventoryItem? {
-        val entryId = entry.entryId?.trim().orEmpty()
+        entryId: String,
+        epcRaw: String?,
+    ): ParseOutcome {
         if (entryId.isEmpty()) {
-            return null
+            return ParseOutcome(null, "missing_entry_id")
         }
-        val epcRaw = valueAsString(entry.fieldValues[fieldIdMap.epcId]) ?: return null
+        val resolvedEpcRaw = epcRaw ?: return ParseOutcome(null, "missing_epc")
         val epcNormalized =
-            runCatching { EpcNormalizer.normalize(epcRaw) }.getOrNull()
-                ?: return null
+            runCatching { EpcNormalizer.normalize(resolvedEpcRaw) }.getOrNull()
+                ?: return ParseOutcome(null, "invalid_epc")
         val name = valueAsString(entry.fieldValues[fieldIdMap.nameId()])
         val content = valueAsString(entry.fieldValues[fieldIdMap.contentId()])
-        val locationPath = valueAsString(entry.fieldValues[fieldIdMap.locationId()])
+        val locationFieldId = fieldIdMap.locationId()
+        val rawLocation = locationFieldId?.let { entry.fieldValues[it] }
+        val locationPath = valueAsLocation(rawLocation)
+        logLocationDebug(
+            entryId = entryId,
+            epcNormalized = epcNormalized,
+            name = name,
+            locationFieldId = locationFieldId,
+            rawLocation = rawLocation,
+            locationPath = locationPath,
+            fieldKeys = entry.fieldValues.keys,
+        )
         val status = valueAsString(entry.fieldValues[fieldIdMap.statusId()])
         val category = valueAsString(entry.fieldValues[fieldIdMap.categoryId()])
         val comment = valueAsString(entry.fieldValues[fieldIdMap.commentId()])
@@ -290,21 +353,24 @@ class DefaultMementoRepository(
         val um = valueAsString(entry.fieldValues[fieldIdMap.umId()])
         val qrRaw = valueAsString(entry.fieldValues[fieldIdMap.qrId()])
         val photo = valueAsPhoto(entry.fieldValues[fieldIdMap.photoId()])
-        return InventoryItem(
-            entryId = entryId,
-            epcNormalized = epcNormalized,
-            name = name,
-            content = content,
-            locationPath = locationPath,
-            status = status,
-            category = category,
-            comment = comment,
-            labelRev = labelRev,
-            toPrint = toPrint,
-            um = um,
-            qrRaw = qrRaw,
-            photoThumbUrlOrRef = photo,
-            updatedAt = entry.updatedAt,
+        return ParseOutcome(
+            InventoryItem(
+                entryId = entryId,
+                epcNormalized = epcNormalized,
+                name = name,
+                content = content,
+                locationPath = locationPath,
+                status = status,
+                category = category,
+                comment = comment,
+                labelRev = labelRev,
+                toPrint = toPrint,
+                um = um,
+                qrRaw = qrRaw,
+                photoThumbUrlOrRef = photo,
+                updatedAt = entry.updatedAt,
+            ),
+            null,
         )
     }
 
@@ -367,7 +433,7 @@ class DefaultMementoRepository(
     }
 
     private fun extractStringFromMap(map: Map<*, *>): String? {
-        val candidates = listOf("url", "thumbUrl", "thumbnailUrl", "link", "value")
+        val candidates = listOf("url", "thumbUrl", "thumbnailUrl", "link", "value", "name", "path")
         candidates.forEach { key ->
             val candidate = map[key]
             val value = valueAsString(candidate)
@@ -376,6 +442,48 @@ class DefaultMementoRepository(
             }
         }
         return null
+    }
+
+    private fun valueAsLocation(value: Any?): String? {
+        return when (value) {
+            is String -> value.trim().takeIf { it.isNotEmpty() }
+            is List<*> -> locationFromList(value)
+            is Map<*, *> -> locationFromMap(value)
+            else -> valueAsString(value)
+        }
+    }
+
+    private fun locationFromMap(map: Map<*, *>): String? {
+        val pathCandidate = map["path"] ?: map["fullPath"] ?: map["locationPath"]
+        val resolvedPath =
+            when (pathCandidate) {
+                is String -> pathCandidate.trim()
+                is List<*> -> locationFromList(pathCandidate)
+                is Map<*, *> -> locationFromMap(pathCandidate)
+                else -> null
+            }
+        if (!resolvedPath.isNullOrBlank()) {
+            return resolvedPath
+        }
+        val nameCandidate = map["name"] ?: map["value"] ?: map["title"]
+        val resolvedName = valueAsString(nameCandidate)
+        if (!resolvedName.isNullOrBlank()) {
+            return resolvedName
+        }
+        return null
+    }
+
+    private fun locationFromList(list: List<*>): String? {
+        val parts =
+            list.mapNotNull { entry ->
+                when (entry) {
+                    is Map<*, *> -> locationFromMap(entry) ?: valueAsString(entry)
+                    else -> valueAsString(entry)
+                }
+            }
+                .map { it.trim() }
+                .filter { it.isNotEmpty() }
+        return parts.takeIf { it.isNotEmpty() }?.joinToString("/")
     }
 
     private fun valueAsPhoto(value: Any?): String? {
@@ -430,7 +538,62 @@ class DefaultMementoRepository(
 
     private companion object {
         const val TAG = "MementoRepository"
+        const val DEBUG_LOCATION_NAME = "DGX Spark"
         const val PAGE_SIZE = 250
         const val BATCH_SIZE = 250
+    }
+
+    private enum class EntryStatus {
+        SAVED,
+        IGNORED,
+    }
+
+    private data class ParseOutcome(
+        val item: InventoryItem?,
+        val reason: String?,
+    )
+
+    private fun resolveEntryKey(
+        entryId: String,
+        rawEpc: String?,
+    ): String? {
+        val trimmedId = entryId.trim()
+        if (trimmedId.isNotEmpty()) {
+            return trimmedId
+        }
+        val trimmedEpc = rawEpc?.trim().orEmpty()
+        return trimmedEpc.ifBlank { null }
+    }
+
+    private fun redactTokenInUrl(url: String?): String? {
+        if (url.isNullOrBlank()) {
+            return url
+        }
+        val tokenRegex = Regex("([?&]token=)[^&]+")
+        return url.replace(tokenRegex, "$1***")
+    }
+
+    private fun logLocationDebug(
+        entryId: String,
+        epcNormalized: String,
+        name: String?,
+        locationFieldId: String?,
+        rawLocation: Any?,
+        locationPath: String?,
+        fieldKeys: Set<String>,
+    ) {
+        if (!BuildConfig.DEBUG || !shouldLogLocationDebug(name)) {
+            return
+        }
+        logger.d(
+            TAG,
+            "Location debug entryId=$entryId epc=$epcNormalized " +
+                "locationFieldId=${locationFieldId ?: "--"} fields=$fieldKeys " +
+                "rawLocation=$rawLocation mappedLocation=${locationPath ?: "--"}",
+        )
+    }
+
+    private fun shouldLogLocationDebug(name: String?): Boolean {
+        return name?.equals(DEBUG_LOCATION_NAME, ignoreCase = true) == true
     }
 }

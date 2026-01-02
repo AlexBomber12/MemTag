@@ -8,6 +8,10 @@ import com.alexbomber12.memtag.data.settings.SettingsStore
 import com.alexbomber12.memtag.domain.find.ProximityCalculator
 import com.alexbomber12.memtag.domain.find.ProximitySnapshot
 import com.alexbomber12.memtag.integrations.feedback.FindFeedbackController
+import com.alexbomber12.memtag.integrations.scan2d.Scan2dError
+import com.alexbomber12.memtag.integrations.scan2d.Scan2dException
+import com.alexbomber12.memtag.integrations.scan2d.Scan2dScanner
+import com.alexbomber12.memtag.integrations.scan2d.asException
 import com.alexbomber12.memtag.integrations.uhf.TagReading
 import com.alexbomber12.memtag.integrations.uhf.UhfError
 import com.alexbomber12.memtag.integrations.uhf.UhfException
@@ -16,6 +20,9 @@ import com.alexbomber12.memtag.integrations.uhf.UhfReader
 import com.alexbomber12.memtag.integrations.uhf.asException
 import com.alexbomber12.memtag.integrations.uhf.toErrorMessage
 import com.alexbomber12.memtag.util.epc.EpcNormalizer
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -24,6 +31,7 @@ import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 sealed class FindStatus {
     data object Idle : FindStatus()
@@ -75,9 +83,11 @@ data class FindUiState(
 class FindViewModel(
     private val settingsStore: SettingsStore,
     private val uhfReader: UhfReader,
+    private val scan2dScanner: Scan2dScanner,
     private val feedbackController: FindFeedbackController,
     private val sessionFlagsStore: SessionFlagsStore,
     private val clock: () -> Long = { System.currentTimeMillis() },
+    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) : ViewModel() {
     private val mutableState = MutableStateFlow(FindUiState())
     val uiState: StateFlow<FindUiState> = mutableState
@@ -86,6 +96,8 @@ class FindViewModel(
     private var tickerJob: Job? = null
     private var feedbackJob: Job? = null
     private var reapplyProfileJob: Job? = null
+    private var scanQrJob: Job? = null
+    private var scanRfidJob: Job? = null
     private var calculator: ProximityCalculator? = null
     private var autoStartConsumedForEpc: String? = null
     private var scanStartMs: Long? = null
@@ -398,6 +410,81 @@ class FindViewModel(
         }
     }
 
+    fun scanQr() {
+        if (scanQrJob != null || uiState.value.isRunning) {
+            return
+        }
+        mutableState.update { it.copy(lastErrorMessage = null) }
+        val job =
+            viewModelScope.launch {
+                val result =
+                    runCatching { withContext(ioDispatcher) { scan2dScanner.scanOnce() } }
+                        .getOrElse { error ->
+                            val mapped =
+                                if (error is CancellationException) {
+                                    Scan2dError.Cancelled.asException(message = "QR scan cancelled.", cause = error)
+                                } else {
+                                    error
+                                }
+                            Result.failure(mapped)
+                        }
+                result
+                    .onSuccess { epc ->
+                        val normalized =
+                            runCatching { EpcNormalizer.normalize(epc) }.getOrElse { error ->
+                                setError(error.message ?: "Invalid EPC read from QR.")
+                                return@onSuccess
+                            }
+                        applyExternalEpc(normalized, autoStart = false)
+                    }
+                    .onFailure { error ->
+                        setError(mapScanError(error))
+                    }
+            }
+        scanQrJob = job
+        job.invokeOnCompletion { scanQrJob = null }
+    }
+
+    fun scanRfidOnce() {
+        if (scanRfidJob != null || uiState.value.isRunning) {
+            return
+        }
+        mutableState.update { it.copy(lastErrorMessage = null) }
+        val job =
+            viewModelScope.launch {
+                val initResult = uhfReader.initialize()
+                if (initResult.isFailure) {
+                    setError(mapError(initResult.exceptionOrNull()))
+                    return@launch
+                }
+                uhfReader.stopInventory()
+                val applyResult = uhfReader.applyDesiredConfigBestEffort("find-scan")
+                if (applyResult.isFailure) {
+                    setError(mapError(applyResult.exceptionOrNull()))
+                    return@launch
+                }
+                val applied = applyResult.getOrNull()
+                if (applied != null && !applied.success) {
+                    val vendorError = UhfError.VendorError(applied.toErrorMessage()).asException()
+                    setError(mapError(vendorError))
+                    return@launch
+                }
+                val readResult = uhfReader.readSingle(UHF_READ_TIMEOUT_MS)
+                if (readResult.isFailure) {
+                    setError(mapError(readResult.exceptionOrNull()))
+                    return@launch
+                }
+                val normalized =
+                    runCatching { EpcNormalizer.normalize(readResult.getOrNull().orEmpty()) }.getOrElse { error ->
+                        setError(error.message ?: "Invalid EPC read from tag.")
+                        return@launch
+                    }
+                applyExternalEpc(normalized, autoStart = false)
+            }
+        scanRfidJob = job
+        job.invokeOnCompletion { scanRfidJob = null }
+    }
+
     fun stopFind() {
         sessionFlagsStore.setFindRunning(false)
         inventoryJob?.cancel()
@@ -593,6 +680,19 @@ class FindViewModel(
         }
     }
 
+    private fun mapScanError(error: Throwable?): String {
+        val scanError = (error as? Scan2dException)?.error
+        return when (scanError) {
+            Scan2dError.Timeout -> "QR scan timed out."
+            Scan2dError.Cancelled -> "QR scan cancelled."
+            Scan2dError.OperationInProgress -> "Scanner is busy."
+            Scan2dError.HardwareUnavailable -> "QR scanner unavailable."
+            is Scan2dError.InvalidPayload -> scanError.message
+            is Scan2dError.VendorError -> scanError.message
+            null -> error?.message ?: "Unknown QR scan error."
+        }
+    }
+
     private fun logScanEnd(result: String) {
         val startedAt = scanStartMs ?: return
         val durationMs = System.currentTimeMillis() - startedAt
@@ -625,5 +725,6 @@ class FindViewModel(
         const val UI_UPDATE_INTERVAL_MS = 100L
         const val FEEDBACK_IDLE_POLL_MS = 200L
         const val GEIGER_LOG_LIMIT = 5
+        const val UHF_READ_TIMEOUT_MS = 4_000L
     }
 }

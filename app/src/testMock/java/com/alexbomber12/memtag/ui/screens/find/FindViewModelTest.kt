@@ -4,6 +4,7 @@ import com.alexbomber12.memtag.app.SessionFlagsStore
 import com.alexbomber12.memtag.data.settings.AppSettings
 import com.alexbomber12.memtag.data.settings.SettingsStore
 import com.alexbomber12.memtag.integrations.feedback.FindFeedbackController
+import com.alexbomber12.memtag.integrations.scan2d.Scan2dScanner
 import com.alexbomber12.memtag.integrations.uhf.FakeUhfReader
 import com.alexbomber12.memtag.integrations.uhf.MatrixProbeResult
 import com.alexbomber12.memtag.integrations.uhf.TagReading
@@ -21,6 +22,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -73,12 +75,30 @@ class FindViewModelTest {
             assertTrue(viewModel.uiState.value.status is FindStatus.Error)
         }
 
-    private fun createViewModel(reader: UhfReader): FindViewModel {
+    @Test
+    fun scanQrUpdatesTarget() =
+        runTest(mainDispatcherRule.dispatcher) {
+            val expected = "E2000017221101441890ABCD"
+            val scanner = FakeScan2dScanner(Result.success(expected))
+            val viewModel = createViewModel(FakeUhfReader(dispatcher = mainDispatcherRule.dispatcher), scanner)
+
+            viewModel.scanQr()
+            advanceUntilIdle()
+
+            assertEquals(expected, viewModel.uiState.value.epcInput)
+        }
+
+    private fun createViewModel(
+        reader: UhfReader,
+        scanner: Scan2dScanner = FakeScan2dScanner(Result.success("")),
+    ): FindViewModel {
         return FindViewModel(
             settingsStore = FakeSettingsStore(),
             uhfReader = reader,
+            scan2dScanner = scanner,
             feedbackController = FakeFeedbackController(),
             sessionFlagsStore = SessionFlagsStore(),
+            ioDispatcher = mainDispatcherRule.dispatcher,
         )
     }
 }
@@ -183,4 +203,10 @@ private class FailingUhfReader : UhfReader {
     override suspend fun clearFindProfile(): Result<Unit> = Result.failure(UhfError.NotInitialized.asException())
 
     override suspend fun runMatrixProbe(): List<MatrixProbeResult> = emptyList()
+}
+
+private class FakeScan2dScanner(
+    private val result: Result<String>,
+) : Scan2dScanner {
+    override suspend fun scanOnce(timeoutMs: Long): Result<String> = result
 }

@@ -9,6 +9,8 @@ import com.alexbomber12.memtag.data.settings.AppSettings
 import com.alexbomber12.memtag.data.settings.SettingsStore
 import com.alexbomber12.memtag.domain.SyncState
 import com.alexbomber12.memtag.integrations.uhf.UhfRegion
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -23,6 +25,10 @@ class SettingsViewModel(
     private val repository: MementoRepository,
     private val syncCoordinator: SyncCoordinator,
 ) : ViewModel() {
+    private val pendingLock = Any()
+    private var pendingSaveJob: Job? = null
+    private var pendingSettings: AppSettings? = null
+
     val settingsState: StateFlow<AppSettings> =
         settingsStore.settingsFlow
             .stateIn(
@@ -66,23 +72,22 @@ class SettingsViewModel(
                 initialValue = null,
             )
 
-    fun saveSettings(settings: AppSettings) {
-        viewModelScope.launch {
-            settingsStore.update { current ->
-                val frequencyMode = UhfRegion.fromSettings(settings.uhfRegion).toFrequencyMode()
-                current.copy(
-                    mementoBaseUrl = settings.mementoBaseUrl,
-                    mementoToken = settings.mementoToken,
-                    mementoLibraryId = settings.mementoLibraryId,
-                    uhfRegion = settings.uhfRegion,
-                    uhfPower = settings.uhfPower,
-                    uhfFrequencyMode = frequencyMode,
-                    scan2dAction = settings.scan2dAction,
-                    scan2dExtraKey = settings.scan2dExtraKey,
-                    rfidKeyCodes = settings.rfidKeyCodes,
-                    scanKeyCodes = settings.scanKeyCodes,
-                )
+    fun queueSettingsUpdate(settings: AppSettings) {
+        val job =
+            viewModelScope.launch {
+                delay(SETTINGS_AUTO_SAVE_DEBOUNCE_MS)
+                val latest =
+                    synchronized(pendingLock) {
+                        pendingSettings
+                    }
+                if (latest != null) {
+                    persistSettings(latest)
+                }
             }
+        synchronized(pendingLock) {
+            pendingSettings = settings
+            pendingSaveJob?.cancel()
+            pendingSaveJob = job
         }
     }
 
@@ -133,6 +138,46 @@ class SettingsViewModel(
     }
 
     fun syncNow() {
-        syncCoordinator.requestManualSync()
+        viewModelScope.launch {
+            flushPendingSettings()
+            syncCoordinator.requestManualSync()
+        }
+    }
+
+    private suspend fun persistSettings(settings: AppSettings) {
+        settingsStore.update { current ->
+            val frequencyMode = UhfRegion.fromSettings(settings.uhfRegion).toFrequencyMode()
+            val updated =
+                current.copy(
+                    mementoBaseUrl = settings.mementoBaseUrl,
+                    mementoToken = settings.mementoToken,
+                    mementoLibraryId = settings.mementoLibraryId,
+                    uhfRegion = settings.uhfRegion,
+                    uhfPower = settings.uhfPower,
+                    uhfFrequencyMode = frequencyMode,
+                    scan2dAction = settings.scan2dAction,
+                    scan2dExtraKey = settings.scan2dExtraKey,
+                    rfidKeyCodes = settings.rfidKeyCodes,
+                    scanKeyCodes = settings.scanKeyCodes,
+                )
+            if (updated == current) current else updated
+        }
+    }
+
+    private suspend fun flushPendingSettings() {
+        val latest: AppSettings?
+        val jobToCancel: Job?
+        synchronized(pendingLock) {
+            latest = pendingSettings
+            pendingSettings = null
+            jobToCancel = pendingSaveJob
+            pendingSaveJob = null
+        }
+        jobToCancel?.cancel()
+        if (latest != null) {
+            persistSettings(latest)
+        }
     }
 }
+
+internal const val SETTINGS_AUTO_SAVE_DEBOUNCE_MS = 400L
