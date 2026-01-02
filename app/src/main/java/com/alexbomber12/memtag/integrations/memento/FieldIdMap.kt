@@ -44,25 +44,41 @@ class FieldIdMap private constructor(
                 FIELD_QR,
             )
 
+        private val locationAliases =
+            setOf(
+                "locationpath",
+                "locationtext",
+                "location",
+                "locpath",
+            )
+
         fun fromSchema(schema: MementoLibrarySchema): FieldIdMap {
             val ids = mutableMapOf<String, String>()
+            var locationId: String? = null
+            var locationPriority = Int.MAX_VALUE
             schema.fields.forEach { field ->
                 val normalized = normalizeFieldName(field.name)
                 val canonical =
                     when {
                         normalized == "description" -> FIELD_CONTENT
-                        normalized in supported -> normalized
-                        normalized.contains(FIELD_LOCATION) -> FIELD_LOCATION
+                        normalized in supported && normalized != FIELD_LOCATION -> normalized
                         else -> null
                     }
                 if (canonical != null && canonical in supported) {
-                    if (canonical == FIELD_LOCATION && normalized != FIELD_LOCATION && ids.containsKey(FIELD_LOCATION)) {
-                        return@forEach
-                    }
                     if (!ids.containsKey(canonical)) {
                         ids[canonical] = field.id
                     }
                 }
+                val candidatePriority = locationPriority(normalized)
+                if (candidatePriority != null) {
+                    if (locationId == null || candidatePriority < locationPriority) {
+                        locationId = field.id
+                        locationPriority = candidatePriority
+                    }
+                }
+            }
+            if (locationId != null) {
+                ids[FIELD_LOCATION] = locationId
             }
             return FieldIdMap(ids)
         }
@@ -85,10 +101,22 @@ class FieldIdMap private constructor(
                     cleaned.startsWith("main") -> cleaned.removePrefix("main")
                     else -> null
                 }
-            return if (remainder != null && (remainder in supported || remainder == "description")) {
+            return if (
+                remainder != null &&
+                (remainder in supported || remainder == "description" || remainder in locationAliases)
+            ) {
                 remainder
             } else {
                 cleaned
+            }
+        }
+
+        private fun locationPriority(normalized: String): Int? {
+            return when {
+                normalized == "locationpath" -> 0
+                normalized in locationAliases -> 1
+                normalized.contains(FIELD_LOCATION) -> 2
+                else -> null
             }
         }
     }

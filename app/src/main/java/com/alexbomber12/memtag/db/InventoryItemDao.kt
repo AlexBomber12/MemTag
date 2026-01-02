@@ -48,4 +48,13 @@ interface InventoryItemDao {
         libraryId: String,
         currentSyncRunId: Long,
     )
+
+    @Query(
+        "DELETE FROM inventory_items " +
+            "WHERE libraryId = :libraryId AND entryId = :entryId",
+    )
+    suspend fun deleteByEntryId(
+        libraryId: String,
+        entryId: String,
+    ): Int
 }

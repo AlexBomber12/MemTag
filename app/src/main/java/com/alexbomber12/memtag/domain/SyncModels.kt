@@ -7,6 +7,7 @@ data class SyncResult(
     val fetchedCount: Int,
     val storedCount: Int,
     val skippedCount: Int,
+    val deletedTombstones: Int,
     val durationMs: Long,
     val pagingStrategy: PagingStrategy?,
     val errorMessage: String?,
@@ -17,6 +18,8 @@ data class SyncResult(
         get() = storedCount
     val ignoredCount: Int
         get() = skippedCount
+    val deletedCount: Int
+        get() = deletedTombstones
 }
 
 data class SyncProgress(
@@ -24,6 +27,7 @@ data class SyncProgress(
     val fetchedCount: Int,
     val storedCount: Int,
     val skippedCount: Int,
+    val deletedCount: Int,
     val message: String? = null,
 ) {
     val downloadedCount: Int

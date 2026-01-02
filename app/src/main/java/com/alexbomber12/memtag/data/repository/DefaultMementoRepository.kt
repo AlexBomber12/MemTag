@@ -95,6 +95,7 @@ class DefaultMementoRepository(
                     fetchedCount = 0,
                     storedCount = 0,
                     skippedCount = 0,
+                    deletedTombstones = 0,
                     durationMs = 0L,
                     pagingStrategy = null,
                     errorMessage = message,
@@ -103,22 +104,31 @@ class DefaultMementoRepository(
             val config = (validation as MementoSettingsValidation.Valid).config
             val syncRunId = System.currentTimeMillis()
             val startTime = syncRunId
-            var fetchedRawCount = 0
-            var fetchedCount = 0
+            var downloadedCount = 0
             var storedCount = 0
-            var skippedCount = 0
-            var duplicateCount = 0
+            var ignoredCount = 0
+            var invalidCount = 0
+            var deletedTombstones = 0
             var pagingStrategy: PagingStrategy? = null
             val entryStatuses = mutableMapOf<String, EntryStatus>()
-            onProgress(SyncProgress(stage = SyncStage.STARTING, fetchedCount = 0, storedCount = 0, skippedCount = 0))
+            onProgress(
+                SyncProgress(
+                    stage = SyncStage.STARTING,
+                    fetchedCount = 0,
+                    storedCount = 0,
+                    skippedCount = 0,
+                    deletedCount = 0,
+                ),
+            )
             try {
                 logger.i(TAG, "Sync start for library ${config.libraryId} at ${config.baseUrl}")
                 onProgress(
                     SyncProgress(
                         stage = SyncStage.FETCHING_SCHEMA,
-                        fetchedCount = fetchedCount,
+                        fetchedCount = downloadedCount,
                         storedCount = storedCount,
-                        skippedCount = skippedCount,
+                        skippedCount = ignoredCount,
+                        deletedCount = deletedTombstones,
                     ),
                 )
                 val schema = mementoClient.fetchLibrarySchema(config)
@@ -134,15 +144,24 @@ class DefaultMementoRepository(
                                     "nextUrl=${redactTokenInUrl(page.nextUrl)}",
                             )
                         }
-                        fetchedRawCount += page.entries.size
+                        downloadedCount += page.entries.size
                         val items = mutableListOf<InventoryItemEntity>()
                         page.entries.forEach { entry ->
                             val entryId = entry.entryId?.trim().orEmpty()
+                            if (entry.status?.trim()?.equals("deleted", ignoreCase = true) == true) {
+                                if (entryId.isNotBlank()) {
+                                    inventoryItemDao.deleteByEntryId(config.libraryId, entryId)
+                                }
+                                deletedTombstones += 1
+                                if (BuildConfig.DEBUG) {
+                                    logger.d(TAG, "Sync tombstone entryId=${entryId.ifBlank { "--" }}")
+                                }
+                                return@forEach
+                            }
                             val rawEpc = valueAsString(entry.fieldValues[fieldIdMap.epcId])
                             val key = resolveEntryKey(entryId, rawEpc)
                             if (key == null) {
-                                fetchedCount += 1
-                                skippedCount += 1
+                                invalidCount += 1
                                 if (BuildConfig.DEBUG) {
                                     logger.d(TAG, "Sync skip reason=missing_key")
                                 }
@@ -153,13 +172,12 @@ class DefaultMementoRepository(
                             if (outcome.item == null) {
                                 if (status == null) {
                                     entryStatuses[key] = EntryStatus.IGNORED
-                                    fetchedCount += 1
-                                    skippedCount += 1
+                                    invalidCount += 1
                                     if (BuildConfig.DEBUG) {
                                         logger.d(TAG, "Sync skip key=$key reason=${outcome.reason}")
                                     }
                                 } else {
-                                    duplicateCount += 1
+                                    ignoredCount += 1
                                     if (BuildConfig.DEBUG) {
                                         logger.d(TAG, "Sync duplicate key=$key")
                                     }
@@ -167,16 +185,14 @@ class DefaultMementoRepository(
                                 return@forEach
                             }
                             if (status == EntryStatus.SAVED) {
-                                duplicateCount += 1
+                                ignoredCount += 1
                                 if (BuildConfig.DEBUG) {
                                     logger.d(TAG, "Sync duplicate key=$key")
                                 }
                                 return@forEach
                             }
                             if (status == EntryStatus.IGNORED) {
-                                skippedCount = (skippedCount - 1).coerceAtLeast(0)
-                            } else {
-                                fetchedCount += 1
+                                invalidCount = (invalidCount - 1).coerceAtLeast(0)
                             }
                             entryStatuses[key] = EntryStatus.SAVED
                             items.add(outcome.item.toEntity(config.libraryId, syncRunId))
@@ -190,9 +206,10 @@ class DefaultMementoRepository(
                                 onProgress(
                                     SyncProgress(
                                         stage = SyncStage.SAVING_BATCH,
-                                        fetchedCount = fetchedCount,
+                                        fetchedCount = downloadedCount,
                                         storedCount = storedCount,
-                                        skippedCount = skippedCount,
+                                        skippedCount = ignoredCount,
+                                        deletedCount = deletedTombstones,
                                     ),
                                 )
                             }
@@ -200,9 +217,10 @@ class DefaultMementoRepository(
                             onProgress(
                                 SyncProgress(
                                     stage = SyncStage.FETCHING_ENTRIES,
-                                    fetchedCount = fetchedCount,
+                                    fetchedCount = downloadedCount,
                                     storedCount = storedCount,
-                                    skippedCount = skippedCount,
+                                    skippedCount = ignoredCount,
+                                    deletedCount = deletedTombstones,
                                 ),
                             )
                         }
@@ -211,8 +229,8 @@ class DefaultMementoRepository(
                 val durationMs = System.currentTimeMillis() - startTime
                 logger.i(
                     TAG,
-                    "Sync completed. fetched=$fetchedCount stored=$storedCount skipped=$skippedCount " +
-                        "duplicates=$duplicateCount raw=$fetchedRawCount durationMs=$durationMs",
+                    "Sync completed. downloaded=$downloadedCount stored=$storedCount ignored=$ignoredCount " +
+                        "deleted=$deletedTombstones invalid=$invalidCount durationMs=$durationMs",
                 )
                 database.withTransaction {
                     inventoryItemDao.deleteStale(config.libraryId, syncRunId)
@@ -220,9 +238,10 @@ class DefaultMementoRepository(
                 val result =
                     SyncResult(
                         status = SyncStatus.SUCCESS,
-                        fetchedCount = fetchedCount,
+                        fetchedCount = downloadedCount,
                         storedCount = storedCount,
-                        skippedCount = skippedCount,
+                        skippedCount = ignoredCount,
+                        deletedTombstones = deletedTombstones,
                         durationMs = durationMs,
                         pagingStrategy = pagingStrategy,
                         errorMessage = null,
@@ -238,9 +257,10 @@ class DefaultMementoRepository(
                 onProgress(
                     SyncProgress(
                         stage = SyncStage.COMPLETED,
-                        fetchedCount = fetchedCount,
+                        fetchedCount = downloadedCount,
                         storedCount = storedCount,
-                        skippedCount = skippedCount,
+                        skippedCount = ignoredCount,
+                        deletedCount = deletedTombstones,
                         message = "Sync completed.",
                     ),
                 )
@@ -259,17 +279,19 @@ class DefaultMementoRepository(
                 onProgress(
                     SyncProgress(
                         stage = SyncStage.ERROR,
-                        fetchedCount = fetchedCount,
+                        fetchedCount = downloadedCount,
                         storedCount = storedCount,
-                        skippedCount = skippedCount,
+                        skippedCount = ignoredCount,
+                        deletedCount = deletedTombstones,
                         message = message,
                     ),
                 )
                 SyncResult(
                     status = SyncStatus.ERROR,
-                    fetchedCount = fetchedCount,
+                    fetchedCount = downloadedCount,
                     storedCount = storedCount,
-                    skippedCount = skippedCount,
+                    skippedCount = ignoredCount,
+                    deletedTombstones = deletedTombstones,
                     durationMs = System.currentTimeMillis() - startTime,
                     pagingStrategy = pagingStrategy,
                     errorMessage = message,
@@ -483,27 +505,36 @@ class DefaultMementoRepository(
         return when (value) {
             is String -> value.trim().takeIf { it.isNotEmpty() }
             is List<*> -> locationFromList(value)
-            is Map<*, *> -> locationFromMap(value) ?: valueAsString(value)
+            is Map<*, *> -> locationFromMap(value)
             else -> valueAsString(value)
         }
     }
 
     private fun locationFromMap(map: Map<*, *>): String? {
-        val pathCandidate = map["path"] ?: map["fullPath"] ?: map["locationPath"]
-        val resolvedPath =
-            when (pathCandidate) {
-                is String -> pathCandidate.trim()
-                is List<*> -> locationFromList(pathCandidate)
-                is Map<*, *> -> locationFromMap(pathCandidate)
-                else -> null
+        val candidates =
+            listOf(
+                "displayValue",
+                "fullPath",
+                "full_path",
+                "path",
+                "value",
+                "val",
+                "name",
+                "text",
+                "t",
+            )
+        candidates.forEach { key ->
+            val candidate = map[key]
+            val resolved =
+                when (candidate) {
+                    is String -> candidate.trim()
+                    is List<*> -> locationFromList(candidate)
+                    is Map<*, *> -> locationFromMap(candidate)
+                    else -> valueAsString(candidate)
+                }
+            if (!resolved.isNullOrBlank()) {
+                return resolved
             }
-        if (!resolvedPath.isNullOrBlank()) {
-            return resolvedPath
-        }
-        val nameCandidate = map["name"] ?: map["value"] ?: map["title"]
-        val resolvedName = valueAsString(nameCandidate)
-        if (!resolvedName.isNullOrBlank()) {
-            return resolvedName
         }
         return null
     }
@@ -512,13 +543,42 @@ class DefaultMementoRepository(
         val parts =
             list.mapNotNull { entry ->
                 when (entry) {
-                    is Map<*, *> -> locationFromMap(entry) ?: valueAsString(entry)
-                    else -> valueAsString(entry)
+                    is String -> entry.trim().takeIf { it.isNotEmpty() }
+                    is Map<*, *> -> locationFromListMap(entry)
+                    else -> valueAsString(entry)?.trim()?.takeIf { it.isNotEmpty() }
                 }
             }
-                .map { it.trim() }
-                .filter { it.isNotEmpty() }
-        return parts.takeIf { it.isNotEmpty() }?.joinToString("/")
+        if (parts.isEmpty()) {
+            return null
+        }
+        if (parts.size == 1) {
+            return parts.first()
+        }
+        return parts.joinToString("/")
+    }
+
+    private fun locationFromListMap(map: Map<*, *>): String? {
+        val candidates =
+            listOf(
+                "t",
+                "text",
+                "name",
+                "value",
+                "val",
+                "displayValue",
+            )
+        candidates.forEach { key ->
+            val candidate = map[key]
+            val resolved =
+                when (candidate) {
+                    is String -> candidate.trim()
+                    else -> valueAsString(candidate)
+                }
+            if (!resolved.isNullOrBlank()) {
+                return resolved.trim()
+            }
+        }
+        return null
     }
 
     private fun valueAsPhoto(value: Any?): String? {
