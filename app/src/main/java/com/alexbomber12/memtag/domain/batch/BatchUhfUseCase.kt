@@ -6,6 +6,7 @@ import com.alexbomber12.memtag.integrations.uhf.UhfException
 import com.alexbomber12.memtag.integrations.uhf.UhfLogger
 import com.alexbomber12.memtag.integrations.uhf.UhfReader
 import com.alexbomber12.memtag.integrations.uhf.asException
+import com.alexbomber12.memtag.integrations.uhf.ensureConfiguredWithRecovery
 import com.alexbomber12.memtag.integrations.uhf.toErrorMessage
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.flow.collect
@@ -91,12 +92,8 @@ class BatchUhfUseCase(
     }
 
     private suspend fun ensureReady(reason: String) {
-        val initResult = uhfReader.initialize()
-        if (initResult.isFailure) {
-            throw initResult.exceptionOrNull() ?: UhfError.NotInitialized.asException()
-        }
         uhfReader.stopInventory()
-        val applyResult = uhfReader.applyDesiredConfigBestEffort(reason)
+        val applyResult = uhfReader.ensureConfiguredWithRecovery(reason)
         if (applyResult.isFailure) {
             throw applyResult.exceptionOrNull() ?: UhfError.VendorError("Apply config failed").asException()
         }

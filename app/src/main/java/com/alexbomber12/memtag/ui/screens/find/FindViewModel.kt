@@ -18,6 +18,7 @@ import com.alexbomber12.memtag.integrations.uhf.UhfException
 import com.alexbomber12.memtag.integrations.uhf.UhfLogger
 import com.alexbomber12.memtag.integrations.uhf.UhfReader
 import com.alexbomber12.memtag.integrations.uhf.asException
+import com.alexbomber12.memtag.integrations.uhf.ensureConfiguredWithRecovery
 import com.alexbomber12.memtag.integrations.uhf.toErrorMessage
 import com.alexbomber12.memtag.util.epc.EpcNormalizer
 import kotlinx.coroutines.CancellationException
@@ -317,13 +318,8 @@ class FindViewModel(
         val job =
             viewModelScope.launch {
                 try {
-                    val initResult = uhfReader.initialize()
-                    if (initResult.isFailure) {
-                        handleInventoryError(initResult.exceptionOrNull())
-                        return@launch
-                    }
                     uhfReader.stopInventory()
-                    val applyResult = uhfReader.applyDesiredConfigBestEffort("find-inventory")
+                    val applyResult = uhfReader.ensureConfiguredWithRecovery("find-inventory")
                     if (applyResult.isFailure) {
                         handleInventoryError(applyResult.exceptionOrNull())
                         return@launch
@@ -452,13 +448,8 @@ class FindViewModel(
         mutableState.update { it.copy(lastErrorMessage = null) }
         val job =
             viewModelScope.launch {
-                val initResult = uhfReader.initialize()
-                if (initResult.isFailure) {
-                    setError(mapError(initResult.exceptionOrNull()))
-                    return@launch
-                }
                 uhfReader.stopInventory()
-                val applyResult = uhfReader.applyDesiredConfigBestEffort("find-scan")
+                val applyResult = uhfReader.ensureConfiguredWithRecovery("find-scan")
                 if (applyResult.isFailure) {
                     setError(mapError(applyResult.exceptionOrNull()))
                     return@launch

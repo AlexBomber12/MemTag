@@ -21,6 +21,7 @@ import com.alexbomber12.memtag.integrations.uhf.UhfLogger
 import com.alexbomber12.memtag.integrations.uhf.UhfReader
 import com.alexbomber12.memtag.integrations.uhf.UhfRegion
 import com.alexbomber12.memtag.integrations.uhf.asException
+import com.alexbomber12.memtag.integrations.uhf.ensureConfiguredWithRecovery
 import com.alexbomber12.memtag.integrations.uhf.toErrorMessage
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -297,7 +298,7 @@ class DiagnosticsViewModel(
             if (wasInventoryRunning) {
                 setInventoryRunning(false)
             }
-            val applyResult = uhfReader.applyDesiredConfigBestEffort("diag-scan")
+            val applyResult = uhfReader.ensureConfiguredWithRecovery("diag-scan")
             if (applyResult.isFailure) {
                 mutableState.update { it.copy(isReadingSingle = false) }
                 updateError(applyResult.exceptionOrNull())
@@ -396,7 +397,7 @@ class DiagnosticsViewModel(
             viewModelScope.launch {
                 UhfLogger.i("ScanRFID start (screen=diagnostics source=inventory usedMethod=inventory)")
                 uhfReader.stopInventory()
-                val applyResult = uhfReader.applyDesiredConfigBestEffort("diag-inventory")
+                val applyResult = uhfReader.ensureConfiguredWithRecovery("diag-inventory")
                 if (applyResult.isFailure) {
                     updateError(applyResult.exceptionOrNull())
                     setInventoryRunning(false)

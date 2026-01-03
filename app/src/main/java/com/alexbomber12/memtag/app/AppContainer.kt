@@ -21,6 +21,7 @@ import com.alexbomber12.memtag.integrations.feedback.DeviceFindFeedbackControlle
 import com.alexbomber12.memtag.integrations.feedback.FindFeedbackController
 import com.alexbomber12.memtag.integrations.memento.MementoClient
 import com.alexbomber12.memtag.integrations.memento.MementoCloudClient
+import com.alexbomber12.memtag.integrations.scan2d.CoordinatedScan2dScanner
 import com.alexbomber12.memtag.integrations.scan2d.Scan2dScanner
 import com.alexbomber12.memtag.integrations.scan2d.Scan2dScannerProvider
 import com.alexbomber12.memtag.integrations.uhf.UhfReader
@@ -69,7 +70,14 @@ class AppContainer(context: Context) {
     val syncMementoLibraryUseCase = SyncMementoLibraryUseCase(mementoRepository)
     val syncCoordinator = SyncCoordinator(settingsStore, mementoRepository, syncMementoLibraryUseCase, appScope)
     val uhfReader: UhfReader = UhfReaderProvider.create(applicationContext, settingsStore)
-    val scan2dScanner: Scan2dScanner = Scan2dScannerProvider.create(applicationContext, settingsStore)
+    private val baseScan2dScanner: Scan2dScanner =
+        Scan2dScannerProvider.create(applicationContext, settingsStore)
+    val scan2dScanner: Scan2dScanner =
+        CoordinatedScan2dScanner(
+            delegate = baseScan2dScanner,
+            uhfReader = uhfReader,
+            ioDispatcher = Dispatchers.IO,
+        )
     val findFeedbackController: FindFeedbackController = DeviceFindFeedbackController(applicationContext)
     val hardwareKeyDispatcher = HardwareKeyDispatcher()
     val sessionFlagsStore = SessionFlagsStore()
