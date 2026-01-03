@@ -19,12 +19,54 @@ class UhfConfigTest {
     }
 
     @Test
-    fun resolvePowerAppliedFallsBackToUnverifiedWhenSetOk() {
+    fun resolvePowerAppliedOrUnverifiedReturnsTrueWhenReadbackMatches() {
+        val applied =
+            resolvePowerAppliedOrUnverified(
+                desiredDbm = 25,
+                readback = 25,
+                setPowerOk = false,
+                scaleFactor = UHF_POWER_SCALE_FACTOR,
+                toleranceDbm = UHF_POWER_TOLERANCE_DBM,
+            )
+
+        assertEquals(true, applied)
+    }
+
+    @Test
+    fun resolvePowerAppliedOrUnverifiedReturnsFalseWhenReadbackMismatches() {
         val applied =
             resolvePowerAppliedOrUnverified(
                 desiredDbm = 25,
                 readback = 10,
                 setPowerOk = true,
+                scaleFactor = UHF_POWER_SCALE_FACTOR,
+                toleranceDbm = UHF_POWER_TOLERANCE_DBM,
+            )
+
+        assertEquals(false, applied)
+    }
+
+    @Test
+    fun resolvePowerAppliedOrUnverifiedReturnsNullWhenReadbackMissingAndSetOk() {
+        val applied =
+            resolvePowerAppliedOrUnverified(
+                desiredDbm = 25,
+                readback = null,
+                setPowerOk = true,
+                scaleFactor = UHF_POWER_SCALE_FACTOR,
+                toleranceDbm = UHF_POWER_TOLERANCE_DBM,
+            )
+
+        assertEquals(null, applied)
+    }
+
+    @Test
+    fun resolvePowerAppliedOrUnverifiedReturnsNullWhenReadbackMissingAndSetFails() {
+        val applied =
+            resolvePowerAppliedOrUnverified(
+                desiredDbm = 25,
+                readback = null,
+                setPowerOk = false,
                 scaleFactor = UHF_POWER_SCALE_FACTOR,
                 toleranceDbm = UHF_POWER_TOLERANCE_DBM,
             )

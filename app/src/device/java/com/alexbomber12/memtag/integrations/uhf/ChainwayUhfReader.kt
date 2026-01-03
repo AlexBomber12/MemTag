@@ -833,7 +833,7 @@ class ChainwayUhfReader(
             }
             val modeSetForResult = if (modeApplied == null) null else setModeOk
             val rfLinkSetForResult = if (rfLinkApplied == null) null else setRfLinkOk
-            val powerSetForResult = if (powerApplied == null) null else setPowerOk
+            val powerSetForResult = setPowerOk
             val result =
                 UhfApplyResult(
                     reason = reason,

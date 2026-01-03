@@ -13,12 +13,12 @@ import com.alexbomber12.memtag.integrations.scan2d.Scan2dError
 import com.alexbomber12.memtag.integrations.scan2d.Scan2dException
 import com.alexbomber12.memtag.integrations.scan2d.Scan2dScanner
 import com.alexbomber12.memtag.integrations.scan2d.asException
-import com.alexbomber12.memtag.integrations.uhf.UhfApplyResult
 import com.alexbomber12.memtag.integrations.uhf.UhfError
 import com.alexbomber12.memtag.integrations.uhf.UhfException
 import com.alexbomber12.memtag.integrations.uhf.UhfLogger
 import com.alexbomber12.memtag.integrations.uhf.UhfReader
 import com.alexbomber12.memtag.integrations.uhf.asException
+import com.alexbomber12.memtag.integrations.uhf.ensureConfiguredWithRecovery
 import com.alexbomber12.memtag.integrations.uhf.toErrorMessage
 import com.alexbomber12.memtag.util.epc.EpcNormalizer
 import kotlinx.coroutines.CancellationException
@@ -528,15 +528,10 @@ class RepairViewModel(
     }
 
     private suspend fun ensureUhfReady(reason: String): Result<Unit> {
-        val initResult = uhfReader.initialize()
-        if (initResult.isFailure) {
-            logDebug("$reason init failed: ${initResult.exceptionOrNull()?.message ?: "unknown"}")
-            return Result.failure(initResult.exceptionOrNull() ?: IllegalStateException("UHF init failed."))
-        }
         stopInventoryBestEffort("$reason-stop")
-        val applyResult = applyConfigWithRetry(reason)
+        val applyResult = uhfReader.ensureConfiguredWithRecovery(reason)
         if (applyResult.isFailure) {
-            logDebug("$reason apply failed: ${applyResult.exceptionOrNull()?.message ?: "unknown"}")
+            logDebug("$reason init/config failed: ${applyResult.exceptionOrNull()?.message ?: "unknown"}")
             return Result.failure(
                 applyResult.exceptionOrNull() ?: IllegalStateException("UHF config apply failed."),
             )
@@ -546,18 +541,6 @@ class RepairViewModel(
             UhfLogger.w("verifyWrite config apply incomplete: ${applied.toErrorMessage()}")
         }
         return Result.success(Unit)
-    }
-
-    private suspend fun applyConfigWithRetry(reason: String): Result<UhfApplyResult> {
-        var result = uhfReader.applyDesiredConfigBestEffort(reason)
-        if (result.isSuccess || !isUhfBusy(result.exceptionOrNull())) {
-            return result
-        }
-        logDebug("$reason apply retry after busy")
-        stopInventoryBestEffort("$reason-apply-retry")
-        delay(CONFIG_RETRY_DELAY_MS)
-        result = uhfReader.applyDesiredConfigBestEffort("$reason-retry")
-        return result
     }
 
     private suspend fun readSingleWithRetries(
@@ -621,10 +604,6 @@ class RepairViewModel(
     private fun isRetryableReadError(error: Throwable?): Boolean {
         val uhfError = (error as? UhfException)?.error
         return uhfError == UhfError.Timeout || uhfError == UhfError.OperationInProgress
-    }
-
-    private fun isUhfBusy(error: Throwable?): Boolean {
-        return (error as? UhfException)?.error == UhfError.OperationInProgress
     }
 
     private fun logDebug(message: String) {
@@ -697,7 +676,6 @@ class RepairViewModel(
         const val VERIFY_RETRY_ATTEMPTS = 2
         const val READ_RETRY_DELAY_MS = 150L
         const val VERIFY_RETRY_DELAY_MS = 150L
-        const val CONFIG_RETRY_DELAY_MS = 150L
     }
 }
 

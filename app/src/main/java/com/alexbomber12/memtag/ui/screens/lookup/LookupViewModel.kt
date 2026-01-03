@@ -15,6 +15,7 @@ import com.alexbomber12.memtag.integrations.uhf.UhfException
 import com.alexbomber12.memtag.integrations.uhf.UhfLogger
 import com.alexbomber12.memtag.integrations.uhf.UhfReader
 import com.alexbomber12.memtag.integrations.uhf.asException
+import com.alexbomber12.memtag.integrations.uhf.ensureConfiguredWithRecovery
 import com.alexbomber12.memtag.integrations.uhf.toErrorMessage
 import com.alexbomber12.memtag.util.epc.EpcNormalizer
 import com.alexbomber12.memtag.util.epc.EpcValidator
@@ -162,13 +163,7 @@ class LookupViewModel(
                 val startMs = System.currentTimeMillis()
                 UhfLogger.i("ScanRFID start (screen=lookup source=button usedMethod=single)")
                 uhfReader.stopInventory()
-                val initResult = uhfReader.initialize()
-                if (initResult.isFailure) {
-                    updateUhfError(initResult.exceptionOrNull())
-                    UhfLogger.i("ScanRFID end (screen=lookup result=init_failed durationMs=${System.currentTimeMillis() - startMs})")
-                    return@launch
-                }
-                val applyResult = uhfReader.applyDesiredConfigBestEffort("lookup-scan")
+                val applyResult = uhfReader.ensureConfiguredWithRecovery("lookup-scan")
                 if (applyResult.isFailure) {
                     updateUhfError(applyResult.exceptionOrNull())
                     UhfLogger.i("ScanRFID end (screen=lookup result=config_error durationMs=${System.currentTimeMillis() - startMs})")

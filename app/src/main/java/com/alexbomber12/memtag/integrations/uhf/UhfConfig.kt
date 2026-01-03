@@ -60,6 +60,7 @@ data class UhfApplyResult(
     val powerApplied: Boolean?,
     val protocolApplied: Boolean?,
     val rfLinkApplied: Boolean?,
+    val recoveryAttempted: Boolean = false,
 ) {
     val success: Boolean =
         (modeApplied == true || (modeApplied == null && setModeOk != false)) &&
@@ -69,30 +70,38 @@ data class UhfApplyResult(
 }
 
 fun UhfApplyResult.toErrorMessage(): String {
-    val failures =
-        buildList {
-            if (modeApplied == false) {
-                add("modeApplied=false")
-            } else if (modeApplied == null && setModeOk == false) {
-                add("setModeOk=false")
-            }
-            if (powerApplied == false) {
-                add("powerApplied=false")
-            } else if (powerApplied == null && setPowerOk == false) {
-                add("setPowerOk=false")
-            }
-            if (protocolApplied == false) {
-                add("protocolApplied=false")
-            }
-            if (rfLinkApplied == false) {
-                add("rfLinkApplied=false")
-            } else if (rfLinkApplied == null && setRfLinkOk == false) {
-                add("setRfLinkOk=false")
-            }
-        }
+    val failures = mutableListOf<String>()
+    if (modeApplied == false) {
+        failures.add("modeApplied=false")
+    } else if (modeApplied == null && setModeOk == false) {
+        failures.add("setModeOk=false")
+    }
+    if (powerApplied == false) {
+        failures.add("powerApplied=false")
+    } else if (powerApplied == null && setPowerOk == false) {
+        failures.add("setPowerOk=false")
+    }
+    if (protocolApplied == false) {
+        failures.add("protocolApplied=false")
+    }
+    if (rfLinkApplied == false) {
+        failures.add("rfLinkApplied=false")
+    } else if (rfLinkApplied == null && setRfLinkOk == false) {
+        failures.add("setRfLinkOk=false")
+    }
     if (failures.isEmpty()) {
         return ""
     }
+    if (failures.none { it.startsWith("powerApplied=") }) {
+        val powerAppliedLabel =
+            when (powerApplied) {
+                true -> "true"
+                false -> "false"
+                null -> "null"
+            }
+        failures.add("powerApplied=$powerAppliedLabel")
+    }
+    failures.add("recoveryAttempted=$recoveryAttempted")
     return "UHF config verify failed (${failures.joinToString(" ")})."
 }
 
@@ -110,6 +119,7 @@ internal fun resolvePowerApplied(
     return unscaledMatch || scaledMatch
 }
 
+@Suppress("UNUSED_PARAMETER")
 internal fun resolvePowerAppliedOrUnverified(
     desiredDbm: Int,
     readback: Int?,
@@ -117,9 +127,8 @@ internal fun resolvePowerAppliedOrUnverified(
     scaleFactor: Int = UHF_POWER_SCALE_FACTOR,
     toleranceDbm: Int = UHF_POWER_TOLERANCE_DBM,
 ): Boolean? {
-    if (setPowerOk == false) {
-        return false
+    if (readback == null) {
+        return null
     }
-    val applied = resolvePowerApplied(desiredDbm, readback, scaleFactor, toleranceDbm)
-    return if (applied == false && setPowerOk == true) null else applied
+    return resolvePowerApplied(desiredDbm, readback, scaleFactor, toleranceDbm)
 }
