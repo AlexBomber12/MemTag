@@ -129,6 +129,7 @@ private class FakeMementoRepository : MementoRepository {
             fetchedCount = 0,
             storedCount = 0,
             skippedCount = 0,
+            deletedTombstones = 0,
             durationMs = 0L,
             pagingStrategy = PagingStrategy.SINGLE_PAGE,
             errorMessage = null,

@@ -353,6 +353,7 @@ fun SettingsScreen(
                             syncCountersText(
                                 downloaded = progress.downloadedCount,
                                 saved = progress.savedCount,
+                                deleted = progress.deletedCount,
                                 ignored = progress.ignoredCount,
                             ),
                     )
@@ -366,6 +367,7 @@ fun SettingsScreen(
                             syncCountersText(
                                 downloaded = result.downloadedCount,
                                 saved = result.savedCount,
+                                deleted = result.deletedCount,
                                 ignored = result.ignoredCount,
                             ),
                     )
@@ -386,6 +388,7 @@ fun SettingsScreen(
                                 syncCountersText(
                                     downloaded = lastResult.downloadedCount,
                                     saved = lastResult.savedCount,
+                                    deleted = lastResult.deletedCount,
                                     ignored = lastResult.ignoredCount,
                                 ),
                         )
@@ -424,9 +427,11 @@ private fun formatCount(count: Int?): String {
 private fun syncCountersText(
     downloaded: Int?,
     saved: Int?,
+    deleted: Int?,
     ignored: Int?,
 ): String {
     return "Downloaded: ${formatCount(downloaded)} | " +
         "Saved: ${formatCount(saved)} | " +
+        "Deleted: ${formatCount(deleted)} | " +
         "Ignored: ${formatCount(ignored)}"
 }

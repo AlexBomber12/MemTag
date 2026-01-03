@@ -5,6 +5,7 @@ import androidx.test.core.app.ApplicationProvider
 import com.alexbomber12.memtag.core.logging.Logger
 import com.alexbomber12.memtag.data.settings.AppSettings
 import com.alexbomber12.memtag.data.settings.SettingsStore
+import com.alexbomber12.memtag.db.InventoryItemEntity
 import com.alexbomber12.memtag.db.MemTagDatabase
 import com.alexbomber12.memtag.domain.SyncStatus
 import com.alexbomber12.memtag.integrations.memento.MementoClient
@@ -21,11 +22,13 @@ import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import java.io.IOException
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [26])
@@ -104,6 +107,61 @@ class DefaultMementoRepositoryTest {
         }
 
     @Test
+    fun syncLibraryStoresLocationFromString() =
+        runBlocking {
+            val settings =
+                AppSettings(
+                    mementoBaseUrl = "https://example.com",
+                    mementoToken = "token-123",
+                    mementoLibraryId = "lib-01",
+                )
+            val settingsStore = FakeSettingsStore(settings)
+            val schema =
+                MementoLibrarySchema(
+                    fields =
+                        listOf(
+                            MementoField(id = "f_epc", name = "EPC"),
+                            MementoField(id = "f_location", name = "Location"),
+                        ),
+                )
+            val entry =
+                MementoEntry(
+                    entryId = "entry-1",
+                    fieldValues =
+                        mapOf(
+                            "f_epc" to "ABC12347",
+                            "f_location" to "Building B/Floor 1",
+                        ),
+                    updatedAt = null,
+                )
+            val page =
+                MementoEntriesPage(
+                    entries = listOf(entry),
+                    nextPageToken = null,
+                    nextUrl = null,
+                    page = null,
+                    pageCount = null,
+                )
+            val repository =
+                DefaultMementoRepository(
+                    settingsStore = settingsStore,
+                    database = database,
+                    inventoryItemDao = database.inventoryItemDao(),
+                    syncStateDao = database.syncStateDao(),
+                    mementoClient = FakeMementoClient(schema, page),
+                    logger = NoopLogger(),
+                    ioDispatcher = Dispatchers.Unconfined,
+                )
+
+            val result = repository.syncLibrary("lib-01") { }
+
+            assertEquals(SyncStatus.SUCCESS, result.status)
+            val stored = database.inventoryItemDao().getByEpc("lib-01", "ABC12347")
+            assertNotNull(stored)
+            assertEquals("Building B/Floor 1", stored?.locationPath)
+        }
+
+    @Test
     fun syncLibraryStoresLocationFromDisplayValue() =
         runBlocking {
             val settings =
@@ -156,6 +214,61 @@ class DefaultMementoRepositoryTest {
             val stored = database.inventoryItemDao().getByEpc("lib-01", "ABC12346")
             assertNotNull(stored)
             assertEquals("Building A/Floor 2", stored?.locationPath)
+        }
+
+    @Test
+    fun syncLibraryStoresLocationFromStringList() =
+        runBlocking {
+            val settings =
+                AppSettings(
+                    mementoBaseUrl = "https://example.com",
+                    mementoToken = "token-123",
+                    mementoLibraryId = "lib-01",
+                )
+            val settingsStore = FakeSettingsStore(settings)
+            val schema =
+                MementoLibrarySchema(
+                    fields =
+                        listOf(
+                            MementoField(id = "f_epc", name = "EPC"),
+                            MementoField(id = "f_location", name = "LocationPath"),
+                        ),
+                )
+            val entry =
+                MementoEntry(
+                    entryId = "entry-3",
+                    fieldValues =
+                        mapOf(
+                            "f_epc" to "ABC00001",
+                            "f_location" to listOf("Apartment Novara", "Living Room", "livingroom"),
+                        ),
+                    updatedAt = null,
+                )
+            val page =
+                MementoEntriesPage(
+                    entries = listOf(entry),
+                    nextPageToken = null,
+                    nextUrl = null,
+                    page = null,
+                    pageCount = null,
+                )
+            val repository =
+                DefaultMementoRepository(
+                    settingsStore = settingsStore,
+                    database = database,
+                    inventoryItemDao = database.inventoryItemDao(),
+                    syncStateDao = database.syncStateDao(),
+                    mementoClient = FakeMementoClient(schema, page),
+                    logger = NoopLogger(),
+                    ioDispatcher = Dispatchers.Unconfined,
+                )
+
+            val result = repository.syncLibrary("lib-01") { }
+
+            assertEquals(SyncStatus.SUCCESS, result.status)
+            val stored = database.inventoryItemDao().getByEpc("lib-01", "ABC00001")
+            assertNotNull(stored)
+            assertEquals("Apartment Novara/Living Room/livingroom", stored?.locationPath)
         }
 
     @Test
@@ -214,6 +327,81 @@ class DefaultMementoRepositoryTest {
             val stored = database.inventoryItemDao().getByEpc("lib-01", "DEF67890")
             assertNotNull(stored)
             assertEquals("Apartment Novara/Living Room/livingroom", stored?.locationPath)
+        }
+
+    @Test
+    fun syncLibraryDeletesTombstones() =
+        runBlocking {
+            val settings =
+                AppSettings(
+                    mementoBaseUrl = "https://example.com",
+                    mementoToken = "token-123",
+                    mementoLibraryId = "lib-01",
+                )
+            val settingsStore = FakeSettingsStore(settings)
+            val schema =
+                MementoLibrarySchema(
+                    fields =
+                        listOf(
+                            MementoField(id = "f_epc", name = "EPC"),
+                        ),
+                )
+            database
+                .inventoryItemDao()
+                .upsertAll(
+                    listOf(
+                        InventoryItemEntity(
+                            libraryId = "lib-01",
+                            entryId = "entry-1",
+                            epcNormalized = "ABC12345",
+                            name = "Delete me",
+                            content = null,
+                            locationPath = null,
+                            status = null,
+                            category = null,
+                            comment = null,
+                            labelRev = null,
+                            toPrint = null,
+                            um = null,
+                            qrRaw = null,
+                            photoThumbUrlOrRef = null,
+                            updatedAt = null,
+                            syncRunId = 1L,
+                        ),
+                    ),
+                )
+            val tombstone =
+                MementoEntry(
+                    entryId = "entry-1",
+                    fieldValues = emptyMap(),
+                    updatedAt = null,
+                    status = "deleted",
+                )
+            val page1 =
+                MementoEntriesPage(
+                    entries = listOf(tombstone),
+                    nextPageToken = "next",
+                    nextUrl = null,
+                    page = null,
+                    pageCount = null,
+                )
+            val repository =
+                DefaultMementoRepository(
+                    settingsStore = settingsStore,
+                    database = database,
+                    inventoryItemDao = database.inventoryItemDao(),
+                    syncStateDao = database.syncStateDao(),
+                    mementoClient = FailingPagedMementoClient(schema, page1),
+                    logger = NoopLogger(),
+                    ioDispatcher = Dispatchers.Unconfined,
+                )
+
+            val result = repository.syncLibrary("lib-01") { }
+
+            assertEquals(SyncStatus.ERROR, result.status)
+            assertEquals(1, result.deletedCount)
+            val stored = database.inventoryItemDao().getByEpc("lib-01", "ABC12345")
+            assertNull(stored)
         }
 
     @Test
@@ -286,9 +474,9 @@ class DefaultMementoRepositoryTest {
 
             val result = repository.syncLibrary("lib-01") { }
 
-            assertEquals(3, result.downloadedCount)
+            assertEquals(4, result.downloadedCount)
             assertEquals(3, result.savedCount)
-            assertEquals(0, result.ignoredCount)
+            assertEquals(1, result.ignoredCount)
             val count = database.inventoryItemDao().observeCount("lib-01").first()
             assertEquals(3, count)
         }
@@ -321,6 +509,26 @@ class DefaultMementoRepositoryTest {
                 error("Unexpected page request.")
             }
             return pages[pageIndex++]
+        }
+    }
+
+    private class FailingPagedMementoClient(
+        private val schema: MementoLibrarySchema,
+        private val firstPage: MementoEntriesPage,
+    ) : MementoClient {
+        private var pageIndex = 0
+
+        override suspend fun fetchLibrarySchema(config: MementoConfig): MementoLibrarySchema = schema
+
+        override suspend fun fetchEntriesPage(
+            config: MementoConfig,
+            request: MementoEntriesRequest,
+        ): MementoEntriesPage {
+            pageIndex += 1
+            if (pageIndex == 1) {
+                return firstPage
+            }
+            throw IOException("Paging failed.")
         }
     }
 

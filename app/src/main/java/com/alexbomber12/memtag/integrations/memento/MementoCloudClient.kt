@@ -140,10 +140,18 @@ class MementoCloudClient(
                     ?: entry["lastUpdated"]
                     ?: entry["last_updated"],
             )
+        val status =
+            valueAsString(
+                entry["status"]
+                    ?: entry["entryStatus"]
+                    ?: entry["entry_status"]
+                    ?: entry["state"],
+            )
         return MementoEntry(
             entryId = entryId,
             fieldValues = fieldValues,
             updatedAt = updatedAt,
+            status = status,
         )
     }
 

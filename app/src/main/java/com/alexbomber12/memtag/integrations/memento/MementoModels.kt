@@ -19,6 +19,7 @@ data class MementoEntry(
     val entryId: String?,
     val fieldValues: Map<String, Any?>,
     val updatedAt: Long?,
+    val status: String? = null,
 )
 
 data class MementoEntriesPage(

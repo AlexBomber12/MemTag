@@ -71,4 +71,22 @@ class FieldIdMapTest {
         assertEquals("f_content_main", mainFieldMap.contentId())
         assertEquals("f_content_tech", techFieldMap.contentId())
     }
+
+    @Test
+    fun prefersLocationPathOverLocationAliases() {
+        val schema =
+            MementoLibrarySchema(
+                fields =
+                    listOf(
+                        MementoField(id = "f_epc", name = "EPC"),
+                        MementoField(id = "f_location_legacy", name = "LocationLegacy"),
+                        MementoField(id = "f_location", name = "Location"),
+                        MementoField(id = "f_location_path", name = "LocationPath"),
+                    ),
+            )
+
+        val fieldMap = FieldIdMap.fromSchema(schema)
+
+        assertEquals("f_location_path", fieldMap.locationId())
+    }
 }
