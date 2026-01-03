@@ -16,15 +16,14 @@ suspend fun UhfReader.ensureConfiguredWithRecovery(reason: String): Result<UhfAp
     if (firstResult.isSuccess && firstApply?.success == true) {
         return firstResult.withRecoveryAttempted(false)
     }
-    if (firstResult.isFailure || firstApply == null) {
-        return firstResult
-    }
 
     runCatching { close() }
     delay(RECOVERY_DELAY_MS)
     val retryInit = initialize()
     if (retryInit.isFailure) {
-        logApplyFailure(firstApply, recoveryAttempted = true)
+        if (firstApply != null) {
+            logApplyFailure(firstApply, recoveryAttempted = true)
+        }
         return Result.failure(retryInit.exceptionOrNull() ?: UhfError.NotInitialized.asException())
     }
     val secondResult = applyDesiredConfigBestEffort("$reason-recover").withRecoveryAttempted(true)

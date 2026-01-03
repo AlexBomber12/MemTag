@@ -30,6 +30,28 @@ class UhfRecoveryTest {
             assertTrue(result.getOrNull()?.recoveryAttempted == true)
         }
 
+    @Test
+    fun ensureConfiguredWithRecoveryRetriesAfterOperationInProgress() =
+        runTest {
+            val reader =
+                TestUhfReader(
+                    ArrayDeque(
+                        listOf(
+                            Result.failure(UhfError.OperationInProgress.asException()),
+                            Result.success(buildApplyResult(modeApplied = true)),
+                        ),
+                    ),
+                )
+
+            val result = reader.ensureConfiguredWithRecovery("diag-scan")
+
+            assertTrue(result.isSuccess)
+            assertEquals(listOf("diag-scan", "diag-scan-recover"), reader.applyReasons)
+            assertEquals(2, reader.initializeCalls)
+            assertEquals(1, reader.closeCalls)
+            assertTrue(result.getOrNull()?.recoveryAttempted == true)
+        }
+
     private fun buildApplyResult(modeApplied: Boolean): UhfApplyResult {
         return UhfApplyResult(
             reason = "ignored",

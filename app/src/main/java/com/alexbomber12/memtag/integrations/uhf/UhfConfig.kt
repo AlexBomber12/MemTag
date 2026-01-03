@@ -64,7 +64,7 @@ data class UhfApplyResult(
 ) {
     val success: Boolean =
         (modeApplied == true || (modeApplied == null && setModeOk != false)) &&
-            powerApplied != false &&
+            (powerApplied == true || (powerApplied == null && setPowerOk != false)) &&
             (rfLinkApplied == true || (rfLinkApplied == null && setRfLinkOk != false)) &&
             protocolApplied != false
 }
@@ -75,6 +75,11 @@ fun UhfApplyResult.toErrorMessage(): String {
         failures.add("modeApplied=false")
     } else if (modeApplied == null && setModeOk == false) {
         failures.add("setModeOk=false")
+    }
+    if (powerApplied == false) {
+        failures.add("powerApplied=false")
+    } else if (powerApplied == null && setPowerOk == false) {
+        failures.add("setPowerOk=false")
     }
     if (protocolApplied == false) {
         failures.add("protocolApplied=false")
@@ -87,13 +92,15 @@ fun UhfApplyResult.toErrorMessage(): String {
     if (failures.isEmpty()) {
         return ""
     }
-    val powerAppliedLabel =
-        when (powerApplied) {
-            true -> "true"
-            false -> "false"
-            null -> "null"
-        }
-    failures.add("powerApplied=$powerAppliedLabel")
+    if (failures.none { it.startsWith("powerApplied=") }) {
+        val powerAppliedLabel =
+            when (powerApplied) {
+                true -> "true"
+                false -> "false"
+                null -> "null"
+            }
+        failures.add("powerApplied=$powerAppliedLabel")
+    }
     failures.add("recoveryAttempted=$recoveryAttempted")
     return "UHF config verify failed (${failures.joinToString(" ")})."
 }
