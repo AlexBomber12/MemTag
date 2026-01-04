@@ -74,7 +74,7 @@ fun RepairScreen(
         }
     }
 
-    val isBusy = state.isReading || state.isScanningQr || state.isWriting || state.isVerifying
+    val isBusy = state.isUhfBusy || state.isQrBusy || state.isWriting || state.isVerifying
     val expectedBlank = state.expectedEpc.isBlank()
     val canWrite = canWriteExpectedEpc(state.expectedEpc, state.scannedEpc, state.isWriting)
     val selectedLabel =
@@ -132,7 +132,7 @@ fun RepairScreen(
                             onClick = viewModel::scanRfid,
                             enabled = !isBusy,
                             modifier = Modifier.weight(1f),
-                            loading = state.isReading,
+                            loading = state.isUhfBusy,
                             leadingIcon = {
                                 Icon(
                                     imageVector = Icons.Filled.CenterFocusStrong,
@@ -145,7 +145,7 @@ fun RepairScreen(
                             onClick = viewModel::scanQr,
                             enabled = !isBusy,
                             modifier = Modifier.weight(1f),
-                            loading = state.isScanningQr,
+                            loading = state.isQrBusy,
                             leadingIcon = {
                                 Icon(
                                     imageVector = Icons.Filled.QrCodeScanner,

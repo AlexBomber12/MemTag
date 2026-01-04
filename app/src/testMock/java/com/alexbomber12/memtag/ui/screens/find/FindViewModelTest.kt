@@ -208,5 +208,8 @@ private class FailingUhfReader : UhfReader {
 private class FakeScan2dScanner(
     private val result: Result<String>,
 ) : Scan2dScanner {
-    override suspend fun scanOnce(timeoutMs: Long): Result<String> = result
+    override suspend fun scanOnce(
+        timeoutMs: Long,
+        source: String,
+    ): Result<String> = result
 }

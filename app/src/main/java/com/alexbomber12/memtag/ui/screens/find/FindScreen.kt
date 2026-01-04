@@ -133,6 +133,8 @@ fun FindScreen(
                 TargetSection(
                     value = uiState.epcInput,
                     enabled = canEditTarget,
+                    isQrBusy = uiState.isQrBusy,
+                    isUhfBusy = uiState.isUhfBusy,
                     showInputError = showInputError,
                     onValueChange = viewModel::onEpcInputChange,
                     onHistoryClick = {
@@ -182,6 +184,8 @@ fun FindScreen(
 private fun TargetSection(
     value: String,
     enabled: Boolean,
+    isQrBusy: Boolean,
+    isUhfBusy: Boolean,
     showInputError: Boolean,
     onValueChange: (String) -> Unit,
     onHistoryClick: () -> Unit,
@@ -190,6 +194,7 @@ private fun TargetSection(
     onScanQr: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val scanEnabled = enabled && !isQrBusy && !isUhfBusy
     SectionCard(modifier = modifier) {
         TargetEpcField(
             value = value,
@@ -207,7 +212,8 @@ private fun TargetSection(
                 text = "Scan RFID",
                 onClick = onScanRfid,
                 modifier = Modifier.weight(1f),
-                enabled = enabled,
+                enabled = scanEnabled,
+                loading = isUhfBusy,
                 leadingIcon = {
                     Icon(
                         imageVector = Icons.Filled.CenterFocusStrong,
@@ -219,7 +225,8 @@ private fun TargetSection(
                 text = "Scan QR",
                 onClick = onScanQr,
                 modifier = Modifier.weight(1f),
-                enabled = enabled,
+                enabled = scanEnabled,
+                loading = isQrBusy,
                 leadingIcon = {
                     Icon(
                         imageVector = Icons.Filled.QrCodeScanner,
@@ -480,6 +487,8 @@ private fun TargetFieldEmptyPreview() {
         TargetSection(
             value = "",
             enabled = true,
+            isQrBusy = false,
+            isUhfBusy = false,
             showInputError = false,
             onValueChange = {},
             onHistoryClick = {},
@@ -501,6 +510,8 @@ private fun TargetFieldFilledPreview() {
         TargetSection(
             value = "E2000017221101441890ABCD",
             enabled = true,
+            isQrBusy = false,
+            isUhfBusy = false,
             showInputError = false,
             onValueChange = {},
             onHistoryClick = {},

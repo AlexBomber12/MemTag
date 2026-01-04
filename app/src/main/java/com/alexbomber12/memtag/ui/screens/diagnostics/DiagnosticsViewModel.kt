@@ -36,6 +36,7 @@ data class DiagnosticsUiState(
     val isInventoryRunning: Boolean = false,
     val isInitializing: Boolean = false,
     val isReadingSingle: Boolean = false,
+    val isUhfBusy: Boolean = false,
     val isMatrixProbeRunning: Boolean = false,
     val matrixProbeCurrent: String? = null,
     val matrixProbeResults: List<MatrixProbeResult> = emptyList(),
@@ -147,6 +148,7 @@ class DiagnosticsViewModel(
                         isInventoryRunning = false,
                         isInitializing = false,
                         isReadingSingle = false,
+                        isUhfBusy = false,
                         isMatrixProbeRunning = false,
                         matrixProbeCurrent = null,
                         matrixProbeResults = emptyList(),
@@ -285,7 +287,7 @@ class DiagnosticsViewModel(
         if (uiState.value.isReadingSingle) {
             return
         }
-        mutableState.update { it.copy(isReadingSingle = true, lastErrorMessage = null) }
+        mutableState.update { it.copy(isReadingSingle = true, isUhfBusy = true, lastErrorMessage = null) }
         viewModelScope.launch {
             val startMs = System.currentTimeMillis()
             UhfLogger.i("ScanRFID start (screen=diagnostics source=button usedMethod=single)")
@@ -300,7 +302,7 @@ class DiagnosticsViewModel(
             }
             val applyResult = uhfReader.ensureConfiguredWithRecovery("diag-scan")
             if (applyResult.isFailure) {
-                mutableState.update { it.copy(isReadingSingle = false) }
+                mutableState.update { it.copy(isReadingSingle = false, isUhfBusy = false) }
                 updateError(applyResult.exceptionOrNull())
                 UhfLogger.i("ScanRFID end (screen=diagnostics result=error durationMs=${System.currentTimeMillis() - startMs})")
                 return@launch
@@ -315,7 +317,7 @@ class DiagnosticsViewModel(
                     )
                 }
                 if (!applied.success) {
-                    mutableState.update { it.copy(isReadingSingle = false) }
+                    mutableState.update { it.copy(isReadingSingle = false, isUhfBusy = false) }
                     updateError(UhfError.VendorError(applied.toErrorMessage()).asException())
                     UhfLogger.i("ScanRFID end (screen=diagnostics result=config_failed durationMs=${System.currentTimeMillis() - startMs})")
                     return@launch
@@ -324,7 +326,7 @@ class DiagnosticsViewModel(
             val result = uhfReader.readSingle(timeoutMs)
             if (result.isSuccess) {
                 val epc = result.getOrNull().orEmpty()
-                mutableState.update { it.copy(isReadingSingle = false, lastReadEpc = epc) }
+                mutableState.update { it.copy(isReadingSingle = false, isUhfBusy = false, lastReadEpc = epc) }
                 appendReading(
                     TagReading(
                         epcHex = epc,
@@ -334,7 +336,7 @@ class DiagnosticsViewModel(
                 )
                 UhfLogger.i("ScanRFID end (screen=diagnostics result=$epc durationMs=${System.currentTimeMillis() - startMs})")
             } else {
-                mutableState.update { it.copy(isReadingSingle = false) }
+                mutableState.update { it.copy(isReadingSingle = false, isUhfBusy = false) }
                 updateError(result.exceptionOrNull())
                 UhfLogger.i("ScanRFID end (screen=diagnostics result=error durationMs=${System.currentTimeMillis() - startMs})")
             }

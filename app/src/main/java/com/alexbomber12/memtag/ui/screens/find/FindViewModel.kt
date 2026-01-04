@@ -10,6 +10,7 @@ import com.alexbomber12.memtag.domain.find.ProximitySnapshot
 import com.alexbomber12.memtag.integrations.feedback.FindFeedbackController
 import com.alexbomber12.memtag.integrations.scan2d.Scan2dError
 import com.alexbomber12.memtag.integrations.scan2d.Scan2dException
+import com.alexbomber12.memtag.integrations.scan2d.Scan2dLogger
 import com.alexbomber12.memtag.integrations.scan2d.Scan2dScanner
 import com.alexbomber12.memtag.integrations.scan2d.asException
 import com.alexbomber12.memtag.integrations.uhf.TagReading
@@ -32,7 +33,6 @@ import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 sealed class FindStatus {
     data object Idle : FindStatus()
@@ -56,6 +56,8 @@ data class FindUiState(
     val epcInput: String = "",
     val targetEpcNormalized: String? = null,
     val lastScannedEpc: String = "",
+    val isQrBusy: Boolean = false,
+    val isUhfBusy: Boolean = false,
     val isRunning: Boolean = false,
     val status: FindStatus = FindStatus.Idle,
     val proximity: Int = 0,
@@ -407,73 +409,83 @@ class FindViewModel(
     }
 
     fun scanQr() {
-        if (scanQrJob != null || uiState.value.isRunning) {
+        if (scanQrJob != null || uiState.value.isRunning || uiState.value.isUhfBusy) {
+            Scan2dLogger.i("Scan QR ignored: already scanning (screen=$SCAN_SOURCE)")
             return
         }
-        mutableState.update { it.copy(lastErrorMessage = null) }
-        val job =
+        mutableState.update { it.copy(lastErrorMessage = null, isQrBusy = true) }
+        scanQrJob =
             viewModelScope.launch {
-                val result =
-                    runCatching { withContext(ioDispatcher) { scan2dScanner.scanOnce() } }
-                        .getOrElse { error ->
-                            val mapped =
-                                if (error is CancellationException) {
-                                    Scan2dError.Cancelled.asException(message = "QR scan cancelled.", cause = error)
-                                } else {
-                                    error
-                                }
-                            Result.failure(mapped)
-                        }
-                result
-                    .onSuccess { epc ->
-                        val normalized =
-                            runCatching { EpcNormalizer.normalize(epc) }.getOrElse { error ->
-                                setError(error.message ?: "Invalid EPC read from QR.")
-                                return@onSuccess
+                try {
+                    Scan2dLogger.i("Scan QR clicked: calling scanOnce (screen=$SCAN_SOURCE)")
+                    val result =
+                        runCatching { scan2dScanner.scanOnce(source = SCAN_SOURCE) }
+                            .getOrElse { error ->
+                                val mapped =
+                                    if (error is CancellationException) {
+                                        Scan2dError.Cancelled.asException(message = "QR scan cancelled.", cause = error)
+                                    } else {
+                                        error
+                                    }
+                                Result.failure(mapped)
                             }
-                        applyExternalEpc(normalized, autoStart = false)
-                    }
-                    .onFailure { error ->
-                        setError(mapScanError(error))
-                    }
+                    Scan2dLogger.i("Scan QR finished: result=${scanResultLabel(result)} (screen=$SCAN_SOURCE)")
+                    result
+                        .onSuccess { epc ->
+                            val normalized =
+                                runCatching { EpcNormalizer.normalize(epc) }.getOrElse { error ->
+                                    setError(error.message ?: "Invalid EPC read from QR.")
+                                    return@onSuccess
+                                }
+                            applyExternalEpc(normalized, autoStart = false)
+                        }
+                        .onFailure { error ->
+                            logScanFailure(error)
+                            setError(mapScanError(error))
+                        }
+                } finally {
+                    mutableState.update { it.copy(isQrBusy = false) }
+                    scanQrJob = null
+                }
             }
-        scanQrJob = job
-        job.invokeOnCompletion { scanQrJob = null }
     }
 
     fun scanRfidOnce() {
-        if (scanRfidJob != null || uiState.value.isRunning) {
+        if (scanRfidJob != null || uiState.value.isRunning || uiState.value.isQrBusy) {
             return
         }
-        mutableState.update { it.copy(lastErrorMessage = null) }
-        val job =
+        mutableState.update { it.copy(lastErrorMessage = null, isUhfBusy = true) }
+        scanRfidJob =
             viewModelScope.launch {
-                uhfReader.stopInventory()
-                val applyResult = uhfReader.ensureConfiguredWithRecovery("find-scan")
-                if (applyResult.isFailure) {
-                    setError(mapError(applyResult.exceptionOrNull()))
-                    return@launch
-                }
-                val applied = applyResult.getOrNull()
-                if (applied != null && !applied.success) {
-                    val vendorError = UhfError.VendorError(applied.toErrorMessage()).asException()
-                    setError(mapError(vendorError))
-                    return@launch
-                }
-                val readResult = uhfReader.readSingle(UHF_READ_TIMEOUT_MS)
-                if (readResult.isFailure) {
-                    setError(mapError(readResult.exceptionOrNull()))
-                    return@launch
-                }
-                val normalized =
-                    runCatching { EpcNormalizer.normalize(readResult.getOrNull().orEmpty()) }.getOrElse { error ->
-                        setError(error.message ?: "Invalid EPC read from tag.")
+                try {
+                    uhfReader.stopInventory()
+                    val applyResult = uhfReader.ensureConfiguredWithRecovery("find-scan")
+                    if (applyResult.isFailure) {
+                        setError(mapError(applyResult.exceptionOrNull()))
                         return@launch
                     }
-                applyExternalEpc(normalized, autoStart = false)
+                    val applied = applyResult.getOrNull()
+                    if (applied != null && !applied.success) {
+                        val vendorError = UhfError.VendorError(applied.toErrorMessage()).asException()
+                        setError(mapError(vendorError))
+                        return@launch
+                    }
+                    val readResult = uhfReader.readSingle(UHF_READ_TIMEOUT_MS)
+                    if (readResult.isFailure) {
+                        setError(mapError(readResult.exceptionOrNull()))
+                        return@launch
+                    }
+                    val normalized =
+                        runCatching { EpcNormalizer.normalize(readResult.getOrNull().orEmpty()) }.getOrElse { error ->
+                            setError(error.message ?: "Invalid EPC read from tag.")
+                            return@launch
+                        }
+                    applyExternalEpc(normalized, autoStart = false)
+                } finally {
+                    mutableState.update { it.copy(isUhfBusy = false) }
+                    scanRfidJob = null
+                }
             }
-        scanRfidJob = job
-        job.invokeOnCompletion { scanRfidJob = null }
     }
 
     fun stopFind() {
@@ -684,6 +696,31 @@ class FindViewModel(
         }
     }
 
+    private fun scanResultLabel(result: Result<String>): String {
+        return result.fold(
+            onSuccess = { "ok" },
+            onFailure = { error -> "error:${error::class.java.simpleName}" },
+        )
+    }
+
+    private fun logScanFailure(error: Throwable?) {
+        val scanError = (error as? Scan2dException)?.error ?: return
+        Scan2dLogger.w(
+            "Scan2D error source=$SCAN_SOURCE message=${scanErrorMessage(scanError)}",
+        )
+    }
+
+    private fun scanErrorMessage(error: Scan2dError): String {
+        return when (error) {
+            Scan2dError.Timeout -> "QR scan timed out."
+            Scan2dError.Cancelled -> "QR scan cancelled."
+            Scan2dError.OperationInProgress -> "Scanner is busy."
+            Scan2dError.HardwareUnavailable -> "QR scanner unavailable."
+            is Scan2dError.InvalidPayload -> error.message
+            is Scan2dError.VendorError -> error.message
+        }
+    }
+
     private fun logScanEnd(result: String) {
         val startedAt = scanStartMs ?: return
         val durationMs = System.currentTimeMillis() - startedAt
@@ -713,6 +750,7 @@ class FindViewModel(
     }
 
     private companion object {
+        const val SCAN_SOURCE = "find"
         const val UI_UPDATE_INTERVAL_MS = 100L
         const val FEEDBACK_IDLE_POLL_MS = 200L
         const val GEIGER_LOG_LIMIT = 5
