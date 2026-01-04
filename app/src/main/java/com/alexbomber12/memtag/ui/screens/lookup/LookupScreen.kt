@@ -65,9 +65,7 @@ fun LookupScreen(
         state.query.isNotBlank() &&
             state.isSearching.not() &&
             state.results.isNotEmpty()
-    val isScanning =
-        state.uhfScanStatus is ScanUhfStatus.Scanning ||
-            state.scanStatus is ScanQrStatus.Scanning
+    val isScanning = state.isQrBusy || state.isUhfBusy
 
     DisposableEffect(Unit) {
         onDispose { viewModel.cancelUhfScan() }
@@ -153,7 +151,7 @@ fun LookupScreen(
                                         onClick = viewModel::scanUhf,
                                         enabled = !isScanning,
                                         modifier = Modifier.weight(1f),
-                                        loading = state.uhfScanStatus is ScanUhfStatus.Scanning,
+                                        loading = state.isUhfBusy,
                                         leadingIcon = {
                                             Icon(
                                                 imageVector = Icons.Filled.CenterFocusStrong,
@@ -166,7 +164,7 @@ fun LookupScreen(
                                         onClick = viewModel::scanQr,
                                         enabled = !isScanning,
                                         modifier = Modifier.weight(1f),
-                                        loading = state.scanStatus is ScanQrStatus.Scanning,
+                                        loading = state.isQrBusy,
                                         leadingIcon = {
                                             Icon(
                                                 imageVector = Icons.Filled.QrCodeScanner,

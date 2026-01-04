@@ -10,22 +10,29 @@ import com.alexbomber12.memtag.data.settings.SettingsStore
 import com.barcode.BarcodeUtility
 import com.rscja.deviceapi.Barcode2D
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
-import kotlin.coroutines.resume
-import kotlin.coroutines.resumeWithException
 
 class ChainwayBroadcastScan2dScanner(
     context: Context,
     private val settingsStore: SettingsStore,
+    private val ioDispatcher: CoroutineDispatcher,
 ) : Scan2dScanner {
     private val appContext = context.applicationContext
     private val lock = Any()
     private var scanInProgress = false
 
-    override suspend fun scanOnce(timeoutMs: Long): Result<String> {
+    override suspend fun scanOnce(
+        timeoutMs: Long,
+        source: String,
+    ): Result<String> {
         synchronized(lock) {
             if (scanInProgress) {
                 return Result.failure(Scan2dError.OperationInProgress.asException())
@@ -33,27 +40,11 @@ class ChainwayBroadcastScan2dScanner(
             scanInProgress = true
         }
 
-        var receiver: BroadcastReceiver? = null
-        var receiverRegistered = false
-        var barcode2d: Barcode2D? = null
-        var utility: BarcodeUtility? = null
-
-        try {
-            utility =
-                runCatching { BarcodeUtility.getInstance() }.getOrElse { error ->
-                    return Result.failure(
-                        Scan2dError.HardwareUnavailable.asException(
-                            message = "2D scanner unavailable.",
-                            cause = error,
-                        ),
-                    )
+        return try {
+            val settings =
+                withContext(ioDispatcher) {
+                    settingsStore.settingsFlow.first()
                 }
-            val resolvedUtility =
-                utility ?: return Result.failure(
-                    Scan2dError.HardwareUnavailable.asException(message = "2D scanner unavailable."),
-                )
-
-            val settings = settingsStore.settingsFlow.first()
             val action =
                 settings.scan2dAction.trim().ifBlank {
                     AppDefaults.SCAN2D_ACTION
@@ -63,8 +54,8 @@ class ChainwayBroadcastScan2dScanner(
                     AppDefaults.SCAN2D_EXTRA_KEY
                 }
 
-            barcode2d =
-                runCatching { Barcode2D.getInstance() }.getOrElse { error ->
+            val utility =
+                runCatching { onMain { BarcodeUtility.getInstance() } }.getOrElse { error ->
                     return Result.failure(
                         Scan2dError.HardwareUnavailable.asException(
                             message = "2D scanner unavailable.",
@@ -72,87 +63,181 @@ class ChainwayBroadcastScan2dScanner(
                         ),
                     )
                 }
-            val opened =
-                runCatching { barcode2d.open(appContext) }.getOrElse { error ->
+            val barcode2d =
+                runCatching { onMain { Barcode2D.getInstance() } }.getOrElse { error ->
                     return Result.failure(
-                        Scan2dError.VendorError("QR scanner init failed.").asException(cause = error),
+                        Scan2dError.HardwareUnavailable.asException(
+                            message = "2D scanner unavailable.",
+                            cause = error,
+                        ),
                     )
                 }
-            if (!opened) {
-                return Result.failure(
-                    Scan2dError.HardwareUnavailable.asException(message = "2D scanner unavailable."),
-                )
-            }
 
-            runCatching {
-                resolvedUtility.open(appContext, BarcodeUtility.ModuleType.BARCODE_2D)
-                configureScanner(resolvedUtility, action, extraKey)
-            }.getOrElse { error ->
-                return Result.failure(
-                    Scan2dError.VendorError("QR scanner configuration failed.").asException(cause = error),
+            val moduleTypes =
+                listOf(
+                    BarcodeUtility.ModuleType.BARCODE_2D,
+                    BarcodeUtility.ModuleType.BARCODE_2D_H,
                 )
-            }
+            var finalOutcome: AttemptOutcome.Started? = null
+            var lastStartError: Throwable? = null
+            for ((index, moduleType) in moduleTypes.withIndex()) {
+                val outcome =
+                    attemptScan(
+                        utility = utility,
+                        barcode2d = barcode2d,
+                        moduleType = moduleType,
+                        action = action,
+                        extraKey = extraKey,
+                        timeoutMs = timeoutMs,
+                        source = source,
+                    )
+                when (outcome) {
+                    is AttemptOutcome.Started -> {
+                        finalOutcome = outcome
+                        break
+                    }
 
-            val rawResult =
-                try {
-                    withTimeout(timeoutMs) {
-                        suspendCancellableCoroutine<String?> { continuation ->
-                            val scanReceiver =
-                                object : BroadcastReceiver() {
-                                    override fun onReceive(
-                                        context: Context?,
-                                        intent: Intent?,
-                                    ) {
-                                        if (intent == null || !continuation.isActive) {
-                                            return
-                                        }
-                                        val payload = extractPayload(intent, extraKey)
-                                        continuation.resume(payload)
-                                    }
-                                }
-                            receiver = scanReceiver
-                            registerReceiver(scanReceiver, IntentFilter(action))
-                            receiverRegistered = true
-                            continuation.invokeOnCancellation {
-                                runCatching {
-                                    resolvedUtility.stopScan(appContext, BarcodeUtility.ModuleType.BARCODE_2D)
-                                }
-                                runCatching { barcode2d?.stopScan() }
-                                if (receiverRegistered) {
-                                    runCatching { appContext.unregisterReceiver(scanReceiver) }
-                                    receiverRegistered = false
-                                }
-                            }
-                            try {
-                                resolvedUtility.startScan(appContext, BarcodeUtility.ModuleType.BARCODE_2D)
-                            } catch (error: Exception) {
-                                if (continuation.isActive) {
-                                    continuation.resumeWithException(error)
-                                }
-                            }
+                    is AttemptOutcome.ImmediateFailure -> {
+                        lastStartError = outcome.error
+                        if (!outcome.retryable || index == moduleTypes.lastIndex) {
+                            break
                         }
                     }
+                }
+            }
+
+            val result =
+                finalOutcome?.result
+                    ?: Result.failure(
+                        Scan2dError.VendorError("QR scan failed to start.").asException(cause = lastStartError),
+                    )
+            logEndResult(finalOutcome?.outcome)
+            result
+        } finally {
+            synchronized(lock) {
+                scanInProgress = false
+            }
+        }
+    }
+
+    private suspend fun attemptScan(
+        utility: BarcodeUtility,
+        barcode2d: Barcode2D,
+        moduleType: BarcodeUtility.ModuleType,
+        action: String,
+        extraKey: String,
+        timeoutMs: Long,
+        source: String,
+    ): AttemptOutcome {
+        var receiver: BroadcastReceiver? = null
+        var receiverRegistered = false
+        val payloadDeferred = CompletableDeferred<String?>()
+
+        try {
+            val opened =
+                runCatching { onMain { barcode2d.open(appContext) } }.getOrElse { error ->
+                    return AttemptOutcome.ImmediateFailure(error, retryable = false)
+                }
+            if (!opened) {
+                Scan2dLogger.w("Barcode2D.open returned false source=$source module=${moduleType.name}")
+                return AttemptOutcome.ImmediateFailure(
+                    IllegalStateException("Barcode2D.open returned false"),
+                    retryable = false,
+                )
+            }
+
+            val configThread =
+                runCatching {
+                    onMain {
+                        utility.open(appContext, moduleType)
+                        configureScanner(utility, action, extraKey)
+                        Thread.currentThread().name
+                    }
+                }.getOrElse { error ->
+                    return AttemptOutcome.ImmediateFailure(error, retryable = true)
+                }
+            Scan2dLogger.i(
+                "qr cfg output=broadcast action=$action extra=$extraKey module=${moduleType.name} " +
+                    "thread=$configThread",
+            )
+            delay(OPEN_DELAY_MS)
+
+            val scanReceiver =
+                object : BroadcastReceiver() {
+                    override fun onReceive(
+                        context: Context?,
+                        intent: Intent?,
+                    ) {
+                        if (intent == null || payloadDeferred.isCompleted) {
+                            return
+                        }
+                        val payload = extractPayload(intent, extraKey)
+                        val extrasKeys = intent.extras?.keySet()?.sorted()?.joinToString(",") ?: ""
+                        Scan2dLogger.i(
+                            "qr onReceive action=${intent.action} extrasKeys=[$extrasKeys] " +
+                                "hasPayload=${!payload.isNullOrBlank()}",
+                        )
+                        payloadDeferred.complete(payload)
+                    }
+                }
+            receiver = scanReceiver
+            registerReceiver(scanReceiver, IntentFilter(action))
+            receiverRegistered = true
+
+            val startError =
+                runCatching {
+                    onMain { utility.startScan(appContext, moduleType) }
+                    delay(START_DELAY_MS)
+                }.exceptionOrNull()
+            if (startError != null) {
+                return AttemptOutcome.ImmediateFailure(startError, retryable = true)
+            }
+
+            val rawPayload =
+                try {
+                    withTimeout(timeoutMs) {
+                        payloadDeferred.await()
+                    }
                 } catch (_: TimeoutCancellationException) {
-                    return Result.failure(Scan2dError.Timeout.asException(message = "QR scan timed out."))
+                    return AttemptOutcome.Started(
+                        Result.failure(Scan2dError.Timeout.asException(message = "QR scan timed out.")),
+                        ScanOutcome.TIMEOUT,
+                    )
                 } catch (_: CancellationException) {
-                    return Result.failure(Scan2dError.Cancelled.asException(message = "QR scan cancelled."))
+                    return AttemptOutcome.Started(
+                        Result.failure(Scan2dError.Cancelled.asException(message = "QR scan cancelled.")),
+                        ScanOutcome.CANCELLED,
+                    )
                 } catch (error: Exception) {
-                    return Result.failure(
-                        Scan2dError.VendorError(error.message ?: "QR scan failed.").asException(cause = error),
+                    return AttemptOutcome.Started(
+                        Result.failure(
+                            Scan2dError.VendorError(error.message ?: "QR scan failed.").asException(cause = error),
+                        ),
+                        ScanOutcome.ERROR,
                     )
                 }
 
-            return Scan2dPayloadParser.parse(rawResult)
+            val parsed = Scan2dPayloadParser.parse(rawPayload)
+            val outcome = if (parsed.isSuccess) ScanOutcome.OK else ScanOutcome.ERROR
+            return AttemptOutcome.Started(parsed, outcome)
         } finally {
-            runCatching { utility?.stopScan(appContext, BarcodeUtility.ModuleType.BARCODE_2D) }
-            runCatching { barcode2d?.stopScan() }
-            if (receiverRegistered && receiver != null) {
-                runCatching { appContext.unregisterReceiver(receiver) }
-            }
-            runCatching { utility?.close(appContext, BarcodeUtility.ModuleType.BARCODE_2D) }
-            runCatching { barcode2d?.close() }
-            synchronized(lock) {
-                scanInProgress = false
+            withContext(NonCancellable) {
+                runCatching {
+                    onMain {
+                        utility.stopScan(appContext, moduleType)
+                        barcode2d.stopScan()
+                    }
+                }
+                delay(CLOSE_DELAY_MS)
+                if (receiverRegistered && receiver != null) {
+                    runCatching { appContext.unregisterReceiver(receiver) }
+                }
+                runCatching {
+                    onMain {
+                        utility.close(appContext, moduleType)
+                        barcode2d.close()
+                    }
+                }
             }
         }
     }
@@ -164,6 +249,7 @@ class ChainwayBroadcastScan2dScanner(
     ) {
         utility.setOutputMode(appContext, OUTPUT_MODE_BROADCAST)
         utility.setScanResultBroadcast(appContext, action, extraKey)
+        utility.setReleaseScan(appContext, false)
         utility.enableEnter(appContext, false)
         utility.enableTAB(appContext, false)
         utility.setPrefix(appContext, "")
@@ -192,7 +278,47 @@ class ChainwayBroadcastScan2dScanner(
         }
     }
 
+    private fun logEndResult(outcome: ScanOutcome?) {
+        val label =
+            when (outcome) {
+                ScanOutcome.OK -> "ok"
+                ScanOutcome.TIMEOUT -> "timeout"
+                ScanOutcome.CANCELLED -> "cancel"
+                ScanOutcome.ERROR -> "error"
+                null -> "error"
+            }
+        Scan2dLogger.i("qr end result=$label")
+    }
+
+    private suspend fun <T> onMain(block: () -> T): T {
+        return withContext(Dispatchers.Main.immediate) {
+            block()
+        }
+    }
+
+    private sealed class AttemptOutcome {
+        data class Started(
+            val result: Result<String>,
+            val outcome: ScanOutcome,
+        ) : AttemptOutcome()
+
+        data class ImmediateFailure(
+            val error: Throwable,
+            val retryable: Boolean,
+        ) : AttemptOutcome()
+    }
+
+    private enum class ScanOutcome {
+        OK,
+        TIMEOUT,
+        CANCELLED,
+        ERROR,
+    }
+
     private companion object {
         const val OUTPUT_MODE_BROADCAST = 2
+        const val OPEN_DELAY_MS = 50L
+        const val START_DELAY_MS = 20L
+        const val CLOSE_DELAY_MS = 50L
     }
 }

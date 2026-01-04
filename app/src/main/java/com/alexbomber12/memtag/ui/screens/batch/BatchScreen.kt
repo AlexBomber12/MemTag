@@ -483,7 +483,7 @@ private fun ManualPanel(
                     },
                 onClick = onToggleSession,
                 modifier = Modifier.weight(1f),
-                enabled = !state.isScanning && !state.sweepRunning && !state.manualSessionFinishing,
+                enabled = !state.isUhfBusy && !state.sweepRunning && !state.manualSessionFinishing,
             )
             SecondaryButton(
                 text = "Scan RFID",
@@ -492,8 +492,9 @@ private fun ManualPanel(
                 enabled =
                     state.manualSessionActive &&
                         !state.manualSessionFinishing &&
-                        !state.isScanning &&
+                        !state.isUhfBusy &&
                         !state.sweepRunning,
+                loading = state.isUhfBusy,
                 leadingIcon = {
                     Icon(
                         imageVector = Icons.Filled.CenterFocusStrong,

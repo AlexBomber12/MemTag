@@ -1,7 +1,10 @@
 package com.alexbomber12.memtag.integrations.scan2d
 
 interface Scan2dScanner {
-    suspend fun scanOnce(timeoutMs: Long = DEFAULT_TIMEOUT_MS): Result<String>
+    suspend fun scanOnce(
+        timeoutMs: Long = DEFAULT_TIMEOUT_MS,
+        source: String = "unknown",
+    ): Result<String>
 
     companion object {
         const val DEFAULT_TIMEOUT_MS = 8_000L

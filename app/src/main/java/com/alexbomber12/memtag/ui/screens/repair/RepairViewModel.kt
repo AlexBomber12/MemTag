@@ -11,6 +11,7 @@ import com.alexbomber12.memtag.domain.repair.RepairActionResult
 import com.alexbomber12.memtag.domain.repair.RepairActionType
 import com.alexbomber12.memtag.integrations.scan2d.Scan2dError
 import com.alexbomber12.memtag.integrations.scan2d.Scan2dException
+import com.alexbomber12.memtag.integrations.scan2d.Scan2dLogger
 import com.alexbomber12.memtag.integrations.scan2d.Scan2dScanner
 import com.alexbomber12.memtag.integrations.scan2d.asException
 import com.alexbomber12.memtag.integrations.uhf.UhfError
@@ -22,7 +23,6 @@ import com.alexbomber12.memtag.integrations.uhf.ensureConfiguredWithRecovery
 import com.alexbomber12.memtag.integrations.uhf.toErrorMessage
 import com.alexbomber12.memtag.util.epc.EpcNormalizer
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -30,7 +30,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 private const val EXPECTED_MISSING_MESSAGE = "Select a card in Lookup or paste an EPC."
 
@@ -65,6 +64,8 @@ data class RepairUiState(
     val status: VerifyWriteStatus = VerifyWriteStatus.Invalid(EXPECTED_MISSING_MESSAGE),
     val isReading: Boolean = false,
     val isScanningQr: Boolean = false,
+    val isQrBusy: Boolean = false,
+    val isUhfBusy: Boolean = false,
     val isWriting: Boolean = false,
     val isVerifying: Boolean = false,
     val confirmation: WriteConfirmation? = null,
@@ -149,7 +150,16 @@ class RepairViewModel(
             }
             return
         }
-        mutableState.update { it.copy(isReading = true, isScanningQr = false, message = null, errorMessage = null) }
+        mutableState.update {
+            it.copy(
+                isReading = true,
+                isScanningQr = false,
+                isUhfBusy = true,
+                isQrBusy = false,
+                message = null,
+                errorMessage = null,
+            )
+        }
         sessionFlagsStore.setVerifyRunning(true)
         val job =
             viewModelScope.launch {
@@ -198,15 +208,26 @@ class RepairViewModel(
             if (state.isReading || state.isScanningQr || state.isWriting || state.isVerifying) {
                 UhfLogger.i("verifyWrite scan ignored: already busy")
             }
+            Scan2dLogger.i("Scan QR ignored: already scanning (screen=$SCAN_SOURCE)")
             return
         }
-        mutableState.update { it.copy(isScanningQr = true, isReading = false, message = null, errorMessage = null) }
+        mutableState.update {
+            it.copy(
+                isScanningQr = true,
+                isReading = false,
+                isQrBusy = true,
+                isUhfBusy = false,
+                message = null,
+                errorMessage = null,
+            )
+        }
         sessionFlagsStore.setVerifyRunning(true)
-        val job =
+        operationJob =
             viewModelScope.launch {
                 try {
+                    Scan2dLogger.i("Scan QR clicked: calling scanOnce (screen=$SCAN_SOURCE)")
                     val result =
-                        runCatching { withContext(Dispatchers.IO) { scan2dScanner.scanOnce() } }
+                        runCatching { scan2dScanner.scanOnce(source = SCAN_SOURCE) }
                             .getOrElse { error ->
                                 val mapped =
                                     if (error is CancellationException) {
@@ -216,6 +237,7 @@ class RepairViewModel(
                                     }
                                 Result.failure(mapped)
                             }
+                    Scan2dLogger.i("Scan QR finished: result=${scanResultLabel(result)} (screen=$SCAN_SOURCE)")
                     result
                         .onSuccess { epc ->
                             val normalized =
@@ -226,17 +248,15 @@ class RepairViewModel(
                             applyScannedEpc(normalized)
                         }
                         .onFailure { error ->
+                            logScanFailure(error)
                             handleScanFailure(mapScanError(error))
                         }
                 } finally {
                     clearScanFlags()
                     sessionFlagsStore.setVerifyRunning(false)
+                    operationJob = null
                 }
             }
-        operationJob = job
-        job.invokeOnCompletion {
-            operationJob = null
-        }
     }
 
     fun startWriteConfirmation() {
@@ -291,6 +311,8 @@ class RepairViewModel(
             it.copy(
                 isReading = false,
                 isScanningQr = false,
+                isQrBusy = false,
+                isUhfBusy = false,
                 isWriting = false,
                 isVerifying = false,
                 confirmation = null,
@@ -402,6 +424,8 @@ class RepairViewModel(
             state.copy(
                 isReading = false,
                 isScanningQr = false,
+                isQrBusy = false,
+                isUhfBusy = false,
                 scannedEpc = normalized,
                 confirmation = null,
                 message = null,
@@ -420,7 +444,16 @@ class RepairViewModel(
     }
 
     private fun handleScanFailure(message: String) {
-        mutableState.update { it.copy(isReading = false, isScanningQr = false, message = null, errorMessage = message) }
+        mutableState.update {
+            it.copy(
+                isReading = false,
+                isScanningQr = false,
+                isQrBusy = false,
+                isUhfBusy = false,
+                message = null,
+                errorMessage = message,
+            )
+        }
         viewModelScope.launch {
             logAction(
                 actionType = RepairActionType.VERIFY_WRITE_SCAN,
@@ -467,7 +500,7 @@ class RepairViewModel(
             if (!state.isReading && !state.isScanningQr) {
                 state
             } else {
-                state.copy(isReading = false, isScanningQr = false)
+                state.copy(isReading = false, isScanningQr = false, isQrBusy = false, isUhfBusy = false)
             }
         }
     }
@@ -635,6 +668,31 @@ class RepairViewModel(
         }
     }
 
+    private fun scanResultLabel(result: Result<String>): String {
+        return result.fold(
+            onSuccess = { "ok" },
+            onFailure = { error -> "error:${error::class.java.simpleName}" },
+        )
+    }
+
+    private fun logScanFailure(error: Throwable?) {
+        val scanError = (error as? Scan2dException)?.error ?: return
+        Scan2dLogger.w(
+            "Scan2D error source=$SCAN_SOURCE message=${scanErrorMessage(scanError)}",
+        )
+    }
+
+    private fun scanErrorMessage(error: Scan2dError): String {
+        return when (error) {
+            Scan2dError.Timeout -> "QR scan timed out."
+            Scan2dError.Cancelled -> "QR scan cancelled."
+            Scan2dError.OperationInProgress -> "Scanner is busy."
+            Scan2dError.HardwareUnavailable -> "QR scanner unavailable."
+            is Scan2dError.InvalidPayload -> error.message
+            is Scan2dError.VendorError -> error.message
+        }
+    }
+
     private fun mapWriteError(error: Throwable?): String {
         val uhfError = (error as? UhfException)?.error
         return when (uhfError) {
@@ -665,10 +723,11 @@ class RepairViewModel(
     }
 
     private fun isBusy(state: RepairUiState): Boolean {
-        return state.isReading || state.isScanningQr || state.isWriting || state.isVerifying
+        return state.isUhfBusy || state.isQrBusy || state.isWriting || state.isVerifying
     }
 
     private companion object {
+        const val SCAN_SOURCE = "repair"
         const val READ_TIMEOUT_MS = 4_000L
         const val WRITE_TIMEOUT_MS = 7_000L
         const val VERIFY_TIMEOUT_MS = 7_000L

@@ -3,6 +3,7 @@ package com.alexbomber12.memtag.app
 import android.content.Context
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.room.Room
+import com.alexbomber12.memtag.BuildConfig
 import com.alexbomber12.memtag.core.logging.AndroidLogger
 import com.alexbomber12.memtag.core.logging.Logger
 import com.alexbomber12.memtag.data.batch.BatchRepository
@@ -24,6 +25,7 @@ import com.alexbomber12.memtag.integrations.memento.MementoCloudClient
 import com.alexbomber12.memtag.integrations.scan2d.CoordinatedScan2dScanner
 import com.alexbomber12.memtag.integrations.scan2d.Scan2dScanner
 import com.alexbomber12.memtag.integrations.scan2d.Scan2dScannerProvider
+import com.alexbomber12.memtag.integrations.uhf.CoordinatedUhfReader
 import com.alexbomber12.memtag.integrations.uhf.UhfReader
 import com.alexbomber12.memtag.integrations.uhf.UhfReaderProvider
 import kotlinx.coroutines.CoroutineScope
@@ -69,15 +71,34 @@ class AppContainer(context: Context) {
         )
     val syncMementoLibraryUseCase = SyncMementoLibraryUseCase(mementoRepository)
     val syncCoordinator = SyncCoordinator(settingsStore, mementoRepository, syncMementoLibraryUseCase, appScope)
-    val uhfReader: UhfReader = UhfReaderProvider.create(applicationContext, settingsStore)
+    private val hwCoordinator = HardwareModeCoordinator()
+    private val rawUhfReader: UhfReader = UhfReaderProvider.create(applicationContext, settingsStore)
+    val uhfReader: UhfReader = CoordinatedUhfReader(rawUhfReader, hwCoordinator)
     private val baseScan2dScanner: Scan2dScanner =
-        Scan2dScannerProvider.create(applicationContext, settingsStore)
+        Scan2dScannerProvider.create(
+            applicationContext,
+            settingsStore,
+            Dispatchers.IO,
+        )
     val scan2dScanner: Scan2dScanner =
         CoordinatedScan2dScanner(
             delegate = baseScan2dScanner,
-            uhfReader = uhfReader,
+            rawUhfReader = rawUhfReader,
+            coordinator = hwCoordinator,
             ioDispatcher = Dispatchers.IO,
+            mainDispatcher = Dispatchers.Main.immediate,
         )
+
+    init {
+        val flavor = BuildConfig.FLAVOR.ifBlank { "unknown" }
+        val baseImpl = baseScan2dScanner::class.java.simpleName
+        logger.i("Scan2D", "Scan2D flavor=$flavor")
+        logger.i("Scan2D", "Scan2D impl=$baseImpl")
+        if (flavor == "device" && baseImpl.contains("Fake", ignoreCase = true)) {
+            logger.w("Scan2D", "Scan2D device flavor resolved to non-vendor impl=$baseImpl")
+        }
+    }
+
     val findFeedbackController: FindFeedbackController = DeviceFindFeedbackController(applicationContext)
     val hardwareKeyDispatcher = HardwareKeyDispatcher()
     val sessionFlagsStore = SessionFlagsStore()

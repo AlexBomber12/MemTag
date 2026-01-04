@@ -8,6 +8,7 @@ import com.alexbomber12.memtag.domain.InventoryItem
 import com.alexbomber12.memtag.domain.SyncState
 import com.alexbomber12.memtag.integrations.scan2d.Scan2dError
 import com.alexbomber12.memtag.integrations.scan2d.Scan2dException
+import com.alexbomber12.memtag.integrations.scan2d.Scan2dLogger
 import com.alexbomber12.memtag.integrations.scan2d.Scan2dScanner
 import com.alexbomber12.memtag.integrations.scan2d.asException
 import com.alexbomber12.memtag.integrations.uhf.UhfError
@@ -62,6 +63,8 @@ data class LookupUiState(
     val results: List<InventoryItem> = emptyList(),
     val selectedEpc: String? = null,
     val searchError: String? = null,
+    val isQrBusy: Boolean = false,
+    val isUhfBusy: Boolean = false,
     val scanStatus: ScanQrStatus = ScanQrStatus.Idle,
     val uhfScanStatus: ScanUhfStatus = ScanUhfStatus.Idle,
     val lastSyncState: SyncState? = null,
@@ -122,75 +125,117 @@ class LookupViewModel(
     }
 
     fun scanQr() {
-        if (scanJob != null) {
+        if (scanJob != null || uiState.value.isUhfBusy) {
+            Scan2dLogger.i("Scan QR ignored: already scanning (screen=$SCAN_SOURCE)")
             return
         }
-        mutableState.update { it.copy(scanStatus = ScanQrStatus.Scanning, uhfScanStatus = ScanUhfStatus.Idle) }
-        val job =
+        mutableState.update {
+            it.copy(
+                isQrBusy = true,
+                isUhfBusy = false,
+                scanStatus = ScanQrStatus.Scanning,
+                uhfScanStatus = ScanUhfStatus.Idle,
+            )
+        }
+        scanJob =
             viewModelScope.launch {
-                val result =
-                    runCatching { withContext(Dispatchers.IO) { scan2dScanner.scanOnce() } }
-                        .getOrElse { error ->
-                            val mapped =
-                                if (error is CancellationException) {
-                                    Scan2dError.Cancelled.asException(message = "QR scan cancelled.", cause = error)
-                                } else {
-                                    error
-                                }
-                            Result.failure(mapped)
+                try {
+                    Scan2dLogger.i("Scan QR clicked: calling scanOnce (screen=$SCAN_SOURCE)")
+                    val result =
+                        runCatching { scan2dScanner.scanOnce(source = SCAN_SOURCE) }
+                            .getOrElse { error ->
+                                val mapped =
+                                    if (error is CancellationException) {
+                                        Scan2dError.Cancelled.asException(message = "QR scan cancelled.", cause = error)
+                                    } else {
+                                        error
+                                    }
+                                Result.failure(mapped)
+                            }
+                    Scan2dLogger.i("Scan QR finished: result=${scanResultLabel(result)} (screen=$SCAN_SOURCE)")
+                    result
+                        .onSuccess { epc ->
+                            handleScanSuccess(epc, ScanSource.QR)
                         }
-                result
-                    .onSuccess { epc ->
-                        handleScanSuccess(epc, ScanSource.QR)
-                    }
-                    .onFailure { error ->
-                        mutableState.update {
-                            it.copy(scanStatus = ScanQrStatus.Error(scanErrorMessage(error)))
+                        .onFailure { error ->
+                            logScanFailure(error)
+                            mutableState.update {
+                                it.copy(scanStatus = ScanQrStatus.Error(scanErrorMessage(error)))
+                            }
                         }
+                } finally {
+                    mutableState.update { state ->
+                        val nextStatus =
+                            if (state.scanStatus is ScanQrStatus.Scanning) {
+                                ScanQrStatus.Idle
+                            } else {
+                                state.scanStatus
+                            }
+                        state.copy(isQrBusy = false, scanStatus = nextStatus)
                     }
+                    scanJob = null
+                }
             }
-        scanJob = job
-        job.invokeOnCompletion { scanJob = null }
     }
 
     fun scanUhf() {
-        if (scanUhfJob != null) {
+        if (scanUhfJob != null || uiState.value.isQrBusy) {
             return
         }
-        mutableState.update { it.copy(uhfScanStatus = ScanUhfStatus.Scanning, scanStatus = ScanQrStatus.Idle) }
+        mutableState.update {
+            it.copy(
+                isUhfBusy = true,
+                isQrBusy = false,
+                uhfScanStatus = ScanUhfStatus.Scanning,
+                scanStatus = ScanQrStatus.Idle,
+            )
+        }
         val job =
             viewModelScope.launch {
-                val startMs = System.currentTimeMillis()
-                UhfLogger.i("ScanRFID start (screen=lookup source=button usedMethod=single)")
-                uhfReader.stopInventory()
-                val applyResult = uhfReader.ensureConfiguredWithRecovery("lookup-scan")
-                if (applyResult.isFailure) {
-                    updateUhfError(applyResult.exceptionOrNull())
-                    UhfLogger.i("ScanRFID end (screen=lookup result=config_error durationMs=${System.currentTimeMillis() - startMs})")
-                    return@launch
+                try {
+                    val startMs = System.currentTimeMillis()
+                    UhfLogger.i("ScanRFID start (screen=lookup source=button usedMethod=single)")
+                    uhfReader.stopInventory()
+                    val applyResult = uhfReader.ensureConfiguredWithRecovery("lookup-scan")
+                    if (applyResult.isFailure) {
+                        updateUhfError(applyResult.exceptionOrNull())
+                        UhfLogger.i(
+                            "ScanRFID end (screen=lookup result=config_error durationMs=${System.currentTimeMillis() - startMs})",
+                        )
+                        return@launch
+                    }
+                    val applied = applyResult.getOrNull()
+                    if (applied != null && !applied.success) {
+                        updateUhfError(UhfError.VendorError(applied.toErrorMessage()).asException())
+                        UhfLogger.i(
+                            "ScanRFID end (screen=lookup result=config_failed durationMs=${System.currentTimeMillis() - startMs})",
+                        )
+                        return@launch
+                    }
+                    val readResult = uhfReader.readSingle(UHF_READ_TIMEOUT_MS)
+                    if (readResult.isFailure) {
+                        updateUhfError(readResult.exceptionOrNull())
+                        UhfLogger.i(
+                            "ScanRFID end (screen=lookup result=read_failed durationMs=${System.currentTimeMillis() - startMs})",
+                        )
+                        return@launch
+                    }
+                    handleScanSuccess(readResult.getOrNull().orEmpty(), ScanSource.RFID)
+                    UhfLogger.i("ScanRFID end (screen=lookup result=ok durationMs=${System.currentTimeMillis() - startMs})")
+                } finally {
+                    mutableState.update { state ->
+                        val nextStatus =
+                            if (state.uhfScanStatus is ScanUhfStatus.Scanning) {
+                                ScanUhfStatus.Idle
+                            } else {
+                                state.uhfScanStatus
+                            }
+                        state.copy(isUhfBusy = false, uhfScanStatus = nextStatus)
+                    }
+                    scanUhfJob = null
                 }
-                val applied = applyResult.getOrNull()
-                if (applied != null && !applied.success) {
-                    updateUhfError(UhfError.VendorError(applied.toErrorMessage()).asException())
-                    UhfLogger.i("ScanRFID end (screen=lookup result=config_failed durationMs=${System.currentTimeMillis() - startMs})")
-                    return@launch
-                }
-                val readResult = uhfReader.readSingle(UHF_READ_TIMEOUT_MS)
-                if (readResult.isFailure) {
-                    updateUhfError(readResult.exceptionOrNull())
-                    UhfLogger.i("ScanRFID end (screen=lookup result=read_failed durationMs=${System.currentTimeMillis() - startMs})")
-                    return@launch
-                }
-                handleScanSuccess(readResult.getOrNull().orEmpty(), ScanSource.RFID)
-                UhfLogger.i("ScanRFID end (screen=lookup result=ok durationMs=${System.currentTimeMillis() - startMs})")
             }
         scanUhfJob = job
-        job.invokeOnCompletion { error ->
-            if (error is CancellationException) {
-                mutableState.update { it.copy(uhfScanStatus = ScanUhfStatus.Idle) }
-            }
-            scanUhfJob = null
-        }
     }
 
     override fun onCleared() {
@@ -201,7 +246,7 @@ class LookupViewModel(
     fun cancelUhfScan() {
         scanUhfJob?.cancel()
         scanUhfJob = null
-        mutableState.update { it.copy(uhfScanStatus = ScanUhfStatus.Idle) }
+        mutableState.update { it.copy(isUhfBusy = false, uhfScanStatus = ScanUhfStatus.Idle) }
     }
 
     private suspend fun handleSearch(trimmed: String) {
@@ -314,6 +359,31 @@ class LookupViewModel(
         }
     }
 
+    private fun scanResultLabel(result: Result<String>): String {
+        return result.fold(
+            onSuccess = { "ok" },
+            onFailure = { error -> "error:${error::class.java.simpleName}" },
+        )
+    }
+
+    private fun logScanFailure(error: Throwable?) {
+        val scanError = (error as? Scan2dException)?.error ?: return
+        Scan2dLogger.w(
+            "Scan2D error source=$SCAN_SOURCE message=${scanErrorMessage(scanError)}",
+        )
+    }
+
+    private fun scanErrorMessage(error: Scan2dError): String {
+        return when (error) {
+            Scan2dError.Timeout -> "QR scan timed out."
+            Scan2dError.Cancelled -> "QR scan cancelled."
+            Scan2dError.OperationInProgress -> "Scanner is busy."
+            Scan2dError.HardwareUnavailable -> "QR scanner unavailable."
+            is Scan2dError.InvalidPayload -> error.message
+            is Scan2dError.VendorError -> error.message
+        }
+    }
+
     private fun updateUhfError(error: Throwable?) {
         mutableState.update { it.copy(uhfScanStatus = ScanUhfStatus.Error(mapUhfError(error))) }
     }
@@ -361,6 +431,7 @@ class LookupViewModel(
     }
 
     private companion object {
+        const val SCAN_SOURCE = "lookup"
         const val UHF_READ_TIMEOUT_MS = 4_000L
         const val SEARCH_LIMIT = 20
         const val SEARCH_DEBOUNCE_MS = 250L

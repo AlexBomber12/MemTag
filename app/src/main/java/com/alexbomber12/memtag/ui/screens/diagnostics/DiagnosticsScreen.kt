@@ -394,6 +394,7 @@ fun DiagnosticsScreen(viewModel: DiagnosticsViewModel) {
                         onClick = { viewModel.readSingle() },
                         enabled = canReadSingle,
                         modifier = Modifier.weight(1f),
+                        loading = state.isUhfBusy,
                     )
                     SecondaryButton(
                         text = "Clear list",

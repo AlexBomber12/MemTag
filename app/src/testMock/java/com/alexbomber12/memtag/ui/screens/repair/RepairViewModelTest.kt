@@ -228,7 +228,10 @@ class RepairViewModelTest {
 private class FakeScan2dScanner : Scan2dScanner {
     var nextResult: Result<String> = Result.failure(Scan2dError.Timeout.asException())
 
-    override suspend fun scanOnce(timeoutMs: Long): Result<String> = nextResult
+    override suspend fun scanOnce(
+        timeoutMs: Long,
+        source: String,
+    ): Result<String> = nextResult
 }
 
 private class FakeActionsLogDao : ActionsLogDao {

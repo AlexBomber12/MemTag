@@ -70,6 +70,7 @@ data class BatchUiState(
     val isImporting: Boolean = false,
     val isExporting: Boolean = false,
     val isScanning: Boolean = false,
+    val isUhfBusy: Boolean = false,
     val manualSessionActive: Boolean = false,
     val manualSessionFinishing: Boolean = false,
     val manualScanCount: Int = 0,
@@ -172,6 +173,8 @@ class BatchViewModel(
                     lastScanEpc = null,
                     lastScanRssi = null,
                     lastScanMatched = null,
+                    isScanning = false,
+                    isUhfBusy = false,
                     manualSessionActive = false,
                     manualSessionFinishing = false,
                     manualScanCount = 0,
@@ -356,6 +359,7 @@ class BatchViewModel(
         mutableState.update {
             it.copy(
                 isScanning = true,
+                isUhfBusy = true,
                 manualScanCount = it.manualScanCount + 1,
                 lastErrorMessage = null,
                 lastInfoMessage = null,
@@ -390,7 +394,7 @@ class BatchViewModel(
                     handleManualScan(normalized, reading.rssi, reading.timestampMs)
                 } finally {
                     scanInProgress = false
-                    mutableState.update { it.copy(isScanning = false) }
+                    mutableState.update { it.copy(isScanning = false, isUhfBusy = false) }
                 }
             }
         scanJob = job
