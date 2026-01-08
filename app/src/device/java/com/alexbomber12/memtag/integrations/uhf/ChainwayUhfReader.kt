@@ -677,7 +677,7 @@ class ChainwayUhfReader(
             }
             val instance = reader ?: return@withLock Result.failure(UhfError.HardwareUnavailable.asException())
             withContext(Dispatchers.IO) {
-                uhfMutex.withLock { runCatching { instance.rfLink } }
+                uhfMutex.withLock { runCatching { instance.getRFLink() } }
                     .fold(
                         onSuccess = {
                             Log.i(LOG_TAG, "getRFLink(reason=$reason) -> $it")
@@ -895,7 +895,7 @@ class ChainwayUhfReader(
     }
 
     private suspend fun safeGetRFLinkLocked(instance: IUHF): Int? {
-        return safeGetConfigValueLocked { instance.rfLink }
+        return safeGetConfigValueLocked { instance.getRFLink() }
     }
 
     private suspend fun safeGetPowerLocked(instance: IUHF): Int? {
@@ -986,7 +986,7 @@ class ChainwayUhfReader(
                         )
                     }
             val beforeRfLink =
-                uhfMutex.withLock { runCatching { instance.rfLink } }
+                uhfMutex.withLock { runCatching { instance.getRFLink() } }
                     .getOrElse { error ->
                         return@withContext Result.failure(
                             UhfError.VendorError(error.message ?: "UHF get rflink error")
@@ -1082,7 +1082,7 @@ class ChainwayUhfReader(
                         )
                     }
             val afterRfLink =
-                uhfMutex.withLock { runCatching { instance.rfLink } }
+                uhfMutex.withLock { runCatching { instance.getRFLink() } }
                     .getOrElse { error ->
                         return@withContext Result.failure(
                             UhfError.VendorError(error.message ?: "UHF get rflink error")
@@ -1636,7 +1636,7 @@ class ChainwayUhfReader(
     private fun readTagFromBufferDirectLocked(instance: IUHF): ProbeRead? {
         val info = runCatching { instance.readTagFromBuffer() }.getOrNull() ?: return null
         return ProbeRead(
-            raw0 = normalizeProbeField(info.epc),
+            raw0 = normalizeProbeField(info.getEPC()),
             raw1 = normalizeProbeField(info.tid),
             rssi = normalizeProbeField(info.rssi),
         )
@@ -1646,7 +1646,7 @@ class ChainwayUhfReader(
         tagInfo: UHFTAGInfo,
         source: String,
     ): ParsedTag {
-        val rawEpc = normalizeProbeField(tagInfo.epc)
+        val rawEpc = normalizeProbeField(tagInfo.getEPC())
         val epc = rawEpc?.let { runCatching { EpcNormalizer.normalize(it) }.getOrNull() }
         val tid = normalizeProbeField(tagInfo.tid)
         val rssiRaw = normalizeProbeField(tagInfo.rssi)
