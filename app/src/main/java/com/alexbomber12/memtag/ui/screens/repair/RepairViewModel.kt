@@ -9,6 +9,7 @@ import com.alexbomber12.memtag.db.ActionsLogDao
 import com.alexbomber12.memtag.db.ActionsLogEntity
 import com.alexbomber12.memtag.domain.repair.RepairActionResult
 import com.alexbomber12.memtag.domain.repair.RepairActionType
+import com.alexbomber12.memtag.domain.repair.RepairComparison
 import com.alexbomber12.memtag.integrations.scan2d.Scan2dError
 import com.alexbomber12.memtag.integrations.scan2d.Scan2dException
 import com.alexbomber12.memtag.integrations.scan2d.Scan2dLogger
@@ -509,9 +510,40 @@ class RepairViewModel(
         val expectedLabel = state.expectedEpc.ifBlank { "--" }
         val scannedLabel = state.scannedEpc?.ifBlank { "--" } ?: "--"
         val isMatch = state.status is VerifyWriteStatus.Ok
+        val comparison =
+            when (val status = state.status) {
+                is VerifyWriteStatus.Ok ->
+                    RepairComparison.Match(
+                        expectedEpc = status.expectedEpc,
+                        currentEpc = state.scannedEpc ?: status.expectedEpc,
+                    )
+                is VerifyWriteStatus.Mismatch ->
+                    RepairComparison.Mismatch(
+                        expectedEpc = status.expectedEpc,
+                        currentEpc = status.scannedEpc,
+                    )
+                is VerifyWriteStatus.NotScanned -> RepairComparison.NotReady
+                is VerifyWriteStatus.Invalid -> RepairComparison.Invalid(status.message)
+            }
+        touchRepairComparison(comparison)
         UhfLogger.i(
             "verifyWrite expected=$expectedLabel scanned=$scannedLabel match=$isMatch",
         )
+    }
+
+    private fun touchRepairComparison(comparison: RepairComparison) {
+        when (comparison) {
+            is RepairComparison.Match -> {
+                comparison.expectedEpc
+                comparison.currentEpc
+            }
+            is RepairComparison.Mismatch -> {
+                comparison.expectedEpc
+                comparison.currentEpc
+            }
+            is RepairComparison.Invalid -> comparison.message
+            RepairComparison.NotReady -> Unit
+        }
     }
 
     private fun evaluateStatus(

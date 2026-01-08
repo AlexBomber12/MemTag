@@ -94,7 +94,7 @@ internal class Soft2dScan2dScanner(
                     adapter.setScanCallback(callback)
                     adapter.scan()
                 }
-                Scan2dLogger.i("soft2d scan started")
+                Scan2dLogger.i("soft2d scan started source=$source")
                 try {
                     val payload =
                         withTimeout(timeoutMs) {
