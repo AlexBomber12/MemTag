@@ -1,3 +1,6 @@
+# suppress inspection "Newer Library Versions Available"
+# suppress inspection "Obsolete Gradle Dependency"
+# suppress inspection "Obsolete Android Gradle Plugin Version"
 [versions]
 agp = "8.13.2"
 kotlin = "2.0.21"
