@@ -242,155 +242,156 @@ fun BatchScreen(
                 }
             }
         },
-    ) { contentPadding ->
-        LazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = contentPadding,
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            item {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                        SummaryStatCard(
-                            label = "Total",
-                            count = state.summary.total,
-                            labelColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                            valueColor = MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.weight(1f),
-                        )
-                        SummaryStatCard(
-                            label = "Found",
-                            count = state.summary.found,
-                            labelColor = SuccessGreen,
-                            valueColor = SuccessGreen,
-                            modifier = Modifier.weight(1f),
-                        )
-                        SummaryStatCard(
-                            label = "Extra",
-                            count = state.summary.extra,
-                            labelColor = MaterialTheme.colorScheme.tertiary,
-                            valueColor = MaterialTheme.colorScheme.tertiary,
-                            modifier = Modifier.weight(1f),
-                        )
-                        SummaryStatCard(
-                            label = "Unknown",
-                            count = state.summary.unknown,
-                            labelColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                            valueColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.weight(1f),
-                        )
-                    }
-                    Surface(
-                        modifier = Modifier.fillMaxWidth(),
-                        color = MaterialTheme.colorScheme.surfaceVariant,
-                        shape = MaterialTheme.shapes.large,
-                    ) {
-                        SingleChoiceSegmentedButtonRow(
-                            modifier =
-                                Modifier
-                                    .fillMaxWidth()
-                                    .padding(4.dp),
-                        ) {
-                            SegmentedButton(
-                                selected = state.mode == BatchMode.INVENTORY_SWEEP,
-                                onClick = { viewModel.setMode(BatchMode.INVENTORY_SWEEP) },
-                                shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2),
-                                label = { Text(text = "Inventory Sweep") },
-                                enabled = !state.sweepRunning && !state.manualSessionActive,
-                                colors = segmentedColors,
-                            )
-                            SegmentedButton(
-                                selected = state.mode == BatchMode.MANUAL_SCAN,
-                                onClick = { viewModel.setMode(BatchMode.MANUAL_SCAN) },
-                                shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2),
-                                label = { Text(text = "Manual Scan") },
-                                enabled = !state.sweepRunning && !state.manualSessionActive,
-                                colors = segmentedColors,
-                            )
-                        }
-                    }
-                }
-            }
-
-            if (state.isImporting) {
-                item { LoadingState(message = "Importing CSV...", modifier = Modifier.fillMaxWidth()) }
-            }
-            if (state.isExporting) {
-                item { LoadingState(message = "Exporting CSV...", modifier = Modifier.fillMaxWidth()) }
-            }
-            state.lastErrorMessage?.let { message ->
-                item { ErrorState(message = message, modifier = Modifier.fillMaxWidth()) }
-            }
-
-            item {
-                val firstResult = state.inputItems.firstOrNull()
-                Column(modifier = Modifier.fillMaxWidth()) {
-                    if (state.mode == BatchMode.INVENTORY_SWEEP) {
-                        SweepPanel(
-                            state = state,
-                            onToggle = {
-                                if (state.sweepRunning) {
-                                    viewModel.stopSweep()
-                                } else {
-                                    viewModel.startSweep()
-                                }
-                            },
-                        )
-                    } else {
-                        ManualPanel(
-                            state = state,
-                            onScan = viewModel::scanOnce,
-                            onToggleSession = viewModel::toggleManualSession,
-                            onUndo = viewModel::undoLast,
-                        )
-                    }
-                    if (!isEmpty) {
-                        ResultsSectionHeader(
-                            label = "LIVE RESULTS",
-                            onClear = { showClearConfirm = true },
-                            canClear = canClear,
-                        )
-                        if (firstResult != null) {
-                            val session = state.sessionMap[firstResult.epcNormalized]
-                            val lastUpdatedLabel =
-                                session?.updatedAt?.let { dateFormatter.format(Date(it)) }
-                            BatchItemRow(
-                                item = firstResult,
-                                session = session,
-                                isSelected = firstResult.epcNormalized == state.currentRowEpc,
-                                isLastScanned = firstResult.epcNormalized == state.lastScanEpc,
-                                lastUpdatedLabel = lastUpdatedLabel,
-                                onClick = { viewModel.selectItem(firstResult.epcNormalized) },
-                            )
-                        }
-                    }
-                }
-            }
-
-            if (isEmpty) {
+        content = { contentPadding ->
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = contentPadding,
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
                 item {
-                    EmptyState(onImport = { importLauncher.launch(importTypes) })
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            SummaryStatCard(
+                                label = "Total",
+                                count = state.summary.total,
+                                labelColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                valueColor = MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.weight(1f),
+                            )
+                            SummaryStatCard(
+                                label = "Found",
+                                count = state.summary.found,
+                                labelColor = SuccessGreen,
+                                valueColor = SuccessGreen,
+                                modifier = Modifier.weight(1f),
+                            )
+                            SummaryStatCard(
+                                label = "Extra",
+                                count = state.summary.extra,
+                                labelColor = MaterialTheme.colorScheme.tertiary,
+                                valueColor = MaterialTheme.colorScheme.tertiary,
+                                modifier = Modifier.weight(1f),
+                            )
+                            SummaryStatCard(
+                                label = "Unknown",
+                                count = state.summary.unknown,
+                                labelColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                valueColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.weight(1f),
+                            )
+                        }
+                        Surface(
+                            modifier = Modifier.fillMaxWidth(),
+                            color = MaterialTheme.colorScheme.surfaceVariant,
+                            shape = MaterialTheme.shapes.large,
+                        ) {
+                            SingleChoiceSegmentedButtonRow(
+                                modifier =
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .padding(4.dp),
+                            ) {
+                                SegmentedButton(
+                                    selected = state.mode == BatchMode.INVENTORY_SWEEP,
+                                    onClick = { viewModel.setMode(BatchMode.INVENTORY_SWEEP) },
+                                    shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2),
+                                    label = { Text(text = "Inventory Sweep") },
+                                    enabled = !state.sweepRunning && !state.manualSessionActive,
+                                    colors = segmentedColors,
+                                )
+                                SegmentedButton(
+                                    selected = state.mode == BatchMode.MANUAL_SCAN,
+                                    onClick = { viewModel.setMode(BatchMode.MANUAL_SCAN) },
+                                    shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2),
+                                    label = { Text(text = "Manual Scan") },
+                                    enabled = !state.sweepRunning && !state.manualSessionActive,
+                                    colors = segmentedColors,
+                                )
+                            }
+                        }
+                    }
                 }
-            } else {
-                items(state.inputItems.drop(1), key = { it.epcNormalized }) { item ->
-                    val session = state.sessionMap[item.epcNormalized]
-                    val lastUpdatedLabel =
-                        session?.updatedAt?.let { dateFormatter.format(Date(it)) }
-                    BatchItemRow(
-                        item = item,
-                        session = session,
-                        isSelected = item.epcNormalized == state.currentRowEpc,
-                        isLastScanned = item.epcNormalized == state.lastScanEpc,
-                        lastUpdatedLabel = lastUpdatedLabel,
-                        onClick = { viewModel.selectItem(item.epcNormalized) },
-                    )
+
+                if (state.isImporting) {
+                    item { LoadingState(message = "Importing CSV...", modifier = Modifier.fillMaxWidth()) }
+                }
+                if (state.isExporting) {
+                    item { LoadingState(message = "Exporting CSV...", modifier = Modifier.fillMaxWidth()) }
+                }
+                state.lastErrorMessage?.let { message ->
+                    item { ErrorState(message = message, modifier = Modifier.fillMaxWidth()) }
+                }
+
+                item {
+                    val firstResult = state.inputItems.firstOrNull()
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        if (state.mode == BatchMode.INVENTORY_SWEEP) {
+                            SweepPanel(
+                                state = state,
+                                onToggle = {
+                                    if (state.sweepRunning) {
+                                        viewModel.stopSweep()
+                                    } else {
+                                        viewModel.startSweep()
+                                    }
+                                },
+                            )
+                        } else {
+                            ManualPanel(
+                                state = state,
+                                onScan = viewModel::scanOnce,
+                                onToggleSession = viewModel::toggleManualSession,
+                                onUndo = viewModel::undoLast,
+                            )
+                        }
+                        if (!isEmpty) {
+                            ResultsSectionHeader(
+                                label = "LIVE RESULTS",
+                                onClear = { showClearConfirm = true },
+                                canClear = canClear,
+                            )
+                            if (firstResult != null) {
+                                val session = state.sessionMap[firstResult.epcNormalized]
+                                val lastUpdatedLabel =
+                                    session?.updatedAt?.let { dateFormatter.format(Date(it)) }
+                                BatchItemRow(
+                                    item = firstResult,
+                                    session = session,
+                                    isSelected = firstResult.epcNormalized == state.currentRowEpc,
+                                    isLastScanned = firstResult.epcNormalized == state.lastScanEpc,
+                                    lastUpdatedLabel = lastUpdatedLabel,
+                                    onClick = { viewModel.selectItem(firstResult.epcNormalized) },
+                                )
+                            }
+                        }
+                    }
+                }
+
+                if (isEmpty) {
+                    item {
+                        EmptyState(onImport = { importLauncher.launch(importTypes) })
+                    }
+                } else {
+                    items(state.inputItems.drop(1), key = { it.epcNormalized }) { item ->
+                        val session = state.sessionMap[item.epcNormalized]
+                        val lastUpdatedLabel =
+                            session?.updatedAt?.let { dateFormatter.format(Date(it)) }
+                        BatchItemRow(
+                            item = item,
+                            session = session,
+                            isSelected = item.epcNormalized == state.currentRowEpc,
+                            isLastScanned = item.epcNormalized == state.lastScanEpc,
+                            lastUpdatedLabel = lastUpdatedLabel,
+                            onClick = { viewModel.selectItem(item.epcNormalized) },
+                        )
+                    }
                 }
             }
-        }
-    }
+        },
+    )
 }
 
 @Composable
@@ -401,34 +402,36 @@ private fun SweepPanel(
     val statusLabel = if (state.sweepRunning) "Running" else "Idle"
     val subTitle = if (state.sweepRunning) "Sweeping tags..." else null
     val buttonIcon = if (state.sweepRunning) Icons.Filled.Stop else Icons.Filled.PlayArrow
-    SectionCard {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(text = "Session", style = MaterialTheme.typography.titleMedium)
-                if (!subTitle.isNullOrBlank()) {
-                    Text(
-                        text = subTitle,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+    SectionCard(
+        content = {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(text = "Session", style = MaterialTheme.typography.titleMedium)
+                    if (!subTitle.isNullOrBlank()) {
+                        Text(
+                            text = subTitle,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
+                StatChip(label = statusLabel)
             }
-            StatChip(label = statusLabel)
-        }
-        PrimaryButton(
-            text = if (state.sweepRunning) "Stop Sweep" else "Start Sweep",
-            onClick = onToggle,
-            modifier = Modifier.fillMaxWidth(),
-            leadingIcon = { Icon(imageVector = buttonIcon, contentDescription = null) },
-        )
-        if (state.sweepRunning) {
-            LoadingState(message = "Sweeping tags...", modifier = Modifier.fillMaxWidth())
-        }
-    }
+            PrimaryButton(
+                text = if (state.sweepRunning) "Stop Sweep" else "Start Sweep",
+                onClick = onToggle,
+                modifier = Modifier.fillMaxWidth(),
+                leadingIcon = { Icon(imageVector = buttonIcon, contentDescription = null) },
+            )
+            if (state.sweepRunning) {
+                LoadingState(message = "Sweeping tags...", modifier = Modifier.fillMaxWidth())
+            }
+        },
+    )
 }
 
 @Composable
@@ -438,83 +441,85 @@ private fun ManualPanel(
     onToggleSession: () -> Unit,
     onUndo: () -> Unit,
 ) {
-    SectionCard {
-        val sessionLabel =
-            when {
-                state.manualSessionFinishing -> "Finishing"
-                state.manualSessionActive -> "Running"
-                else -> "Idle"
+    SectionCard(
+        content = {
+            val sessionLabel =
+                when {
+                    state.manualSessionFinishing -> "Finishing"
+                    state.manualSessionActive -> "Running"
+                    else -> "Idle"
+                }
+            val subTitle = if (state.manualSessionFinishing) "Finishing session..." else null
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(text = "Session", style = MaterialTheme.typography.titleMedium)
+                    if (!subTitle.isNullOrBlank()) {
+                        Text(
+                            text = subTitle,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+                StatChip(label = sessionLabel)
             }
-        val subTitle = if (state.manualSessionFinishing) "Finishing session..." else null
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(text = "Session", style = MaterialTheme.typography.titleMedium)
-                if (!subTitle.isNullOrBlank()) {
-                    Text(
-                        text = subTitle,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+            state.lastInfoMessage?.let { message ->
+                Text(
+                    text = message,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                PrimaryButton(
+                    text =
+                        when {
+                            state.manualSessionFinishing -> "Finishing..."
+                            state.manualSessionActive -> "Finish Session"
+                            else -> "Start Session"
+                        },
+                    onClick = onToggleSession,
+                    modifier = Modifier.weight(1f),
+                    enabled = !state.isUhfBusy && !state.sweepRunning && !state.manualSessionFinishing,
+                )
+                SecondaryButton(
+                    text = "Scan RFID",
+                    onClick = onScan,
+                    modifier = Modifier.weight(1f),
+                    enabled =
+                        state.manualSessionActive &&
+                            !state.manualSessionFinishing &&
+                            !state.isUhfBusy &&
+                            !state.sweepRunning,
+                    loading = state.isUhfBusy,
+                    leadingIcon = {
+                        Icon(
+                            imageVector = Icons.Filled.CenterFocusStrong,
+                            contentDescription = "Scan RFID",
+                        )
+                    },
+                )
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+            ) {
+                TextButton(
+                    onClick = onUndo,
+                    enabled = state.canUndo,
+                ) {
+                    Text(text = "Undo last")
                 }
             }
-            StatChip(label = sessionLabel)
-        }
-        state.lastInfoMessage?.let { message ->
-            Text(
-                text = message,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            PrimaryButton(
-                text =
-                    when {
-                        state.manualSessionFinishing -> "Finishing..."
-                        state.manualSessionActive -> "Finish Session"
-                        else -> "Start Session"
-                    },
-                onClick = onToggleSession,
-                modifier = Modifier.weight(1f),
-                enabled = !state.isUhfBusy && !state.sweepRunning && !state.manualSessionFinishing,
-            )
-            SecondaryButton(
-                text = "Scan RFID",
-                onClick = onScan,
-                modifier = Modifier.weight(1f),
-                enabled =
-                    state.manualSessionActive &&
-                        !state.manualSessionFinishing &&
-                        !state.isUhfBusy &&
-                        !state.sweepRunning,
-                loading = state.isUhfBusy,
-                leadingIcon = {
-                    Icon(
-                        imageVector = Icons.Filled.CenterFocusStrong,
-                        contentDescription = "Scan RFID",
-                    )
-                },
-            )
-        }
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.End,
-        ) {
-            TextButton(
-                onClick = onUndo,
-                enabled = state.canUndo,
-            ) {
-                Text(text = "Undo last")
-            }
-        }
-    }
+        },
+    )
 }
 
 @Composable

@@ -120,64 +120,66 @@ fun FindScreen(
 
     AppScaffold(
         snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
-    ) { contentPadding ->
-        LazyColumn(
-            modifier =
-                Modifier
-                    .fillMaxSize()
-                    .imePadding(),
-            contentPadding = contentPadding,
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            item {
-                TargetSection(
-                    value = uiState.epcInput,
-                    enabled = canEditTarget,
-                    isQrBusy = uiState.isQrBusy,
-                    isUhfBusy = uiState.isUhfBusy,
-                    showInputError = showInputError,
-                    onValueChange = viewModel::onEpcInputChange,
-                    onHistoryClick = {
-                        viewModel.useLastScannedEpc()
-                        showTargetUpdated()
-                    },
-                    onClearClick = { viewModel.onEpcInputChange("") },
-                    onScanRfid = viewModel::scanRfidOnce,
-                    onScanQr = viewModel::scanQr,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            }
-
-            item {
-                ProximitySection(
-                    statusLabel = statusLabel,
-                    errorMessage = errorMessage,
-                    isRunning = uiState.isRunning,
-                    isValid = isValid,
-                    proximity = uiState.proximity,
-                    targetNotSeenMessage = targetNotSeenMessage,
-                    onToggle = viewModel::toggleFind,
-                    onClearError = viewModel::clearError,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            }
-
-            if (showBackToBatch) {
+        content = { contentPadding ->
+            LazyColumn(
+                modifier =
+                    Modifier
+                        .fillMaxSize()
+                        .imePadding(),
+                contentPadding = contentPadding,
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
                 item {
-                    SectionCard(
-                        title = "Actions",
+                    TargetSection(
+                        value = uiState.epcInput,
+                        enabled = canEditTarget,
+                        isQrBusy = uiState.isQrBusy,
+                        isUhfBusy = uiState.isUhfBusy,
+                        showInputError = showInputError,
+                        onValueChange = viewModel::onEpcInputChange,
+                        onHistoryClick = {
+                            viewModel.useLastScannedEpc()
+                            showTargetUpdated()
+                        },
+                        onClearClick = { viewModel.onEpcInputChange("") },
+                        onScanRfid = viewModel::scanRfidOnce,
+                        onScanQr = viewModel::scanQr,
                         modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        SecondaryButton(
-                            text = "Back to Batch",
-                            onClick = onBackToBatch,
+                    )
+                }
+
+                item {
+                    ProximitySection(
+                        statusLabel = statusLabel,
+                        errorMessage = errorMessage,
+                        isRunning = uiState.isRunning,
+                        isValid = isValid,
+                        proximity = uiState.proximity,
+                        targetNotSeenMessage = targetNotSeenMessage,
+                        onToggle = viewModel::toggleFind,
+                        onClearError = viewModel::clearError,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+
+                if (showBackToBatch) {
+                    item {
+                        SectionCard(
+                            title = "Actions",
                             modifier = Modifier.fillMaxWidth(),
+                            content = {
+                                SecondaryButton(
+                                    text = "Back to Batch",
+                                    onClick = onBackToBatch,
+                                    modifier = Modifier.fillMaxWidth(),
+                                )
+                            },
                         )
                     }
                 }
             }
-        }
-    }
+        },
+    )
 }
 
 @Composable
@@ -195,47 +197,50 @@ private fun TargetSection(
     modifier: Modifier = Modifier,
 ) {
     val scanEnabled = enabled && !isQrBusy && !isUhfBusy
-    SectionCard(modifier = modifier) {
-        TargetEpcField(
-            value = value,
-            enabled = enabled,
-            showInputError = showInputError,
-            onValueChange = onValueChange,
-            onHistoryClick = onHistoryClick,
-            onClearClick = onClearClick,
-        )
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            PrimaryButton(
-                text = "Scan RFID",
-                onClick = onScanRfid,
-                modifier = Modifier.weight(1f),
-                enabled = scanEnabled,
-                loading = isUhfBusy,
-                leadingIcon = {
-                    Icon(
-                        imageVector = Icons.Filled.CenterFocusStrong,
-                        contentDescription = "Scan RFID",
-                    )
-                },
+    SectionCard(
+        modifier = modifier,
+        content = {
+            TargetEpcField(
+                value = value,
+                enabled = enabled,
+                showInputError = showInputError,
+                onValueChange = onValueChange,
+                onHistoryClick = onHistoryClick,
+                onClearClick = onClearClick,
             )
-            SecondaryButton(
-                text = "Scan QR",
-                onClick = onScanQr,
-                modifier = Modifier.weight(1f),
-                enabled = scanEnabled,
-                loading = isQrBusy,
-                leadingIcon = {
-                    Icon(
-                        imageVector = Icons.Filled.QrCodeScanner,
-                        contentDescription = "Scan QR",
-                    )
-                },
-            )
-        }
-    }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                PrimaryButton(
+                    text = "Scan RFID",
+                    onClick = onScanRfid,
+                    modifier = Modifier.weight(1f),
+                    enabled = scanEnabled,
+                    loading = isUhfBusy,
+                    leadingIcon = {
+                        Icon(
+                            imageVector = Icons.Filled.CenterFocusStrong,
+                            contentDescription = "Scan RFID",
+                        )
+                    },
+                )
+                SecondaryButton(
+                    text = "Scan QR",
+                    onClick = onScanQr,
+                    modifier = Modifier.weight(1f),
+                    enabled = scanEnabled,
+                    loading = isQrBusy,
+                    leadingIcon = {
+                        Icon(
+                            imageVector = Icons.Filled.QrCodeScanner,
+                            contentDescription = "Scan QR",
+                        )
+                    },
+                )
+            }
+        },
+    )
 }
 
 @Composable
@@ -320,53 +325,56 @@ private fun ProximitySection(
         } else {
             null
         }
-    SectionCard(modifier = modifier) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(text = "Proximity", style = MaterialTheme.typography.titleMedium)
-            StatChip(label = statusLabel)
-        }
-        if (displayErrorMessage != null) {
-            ErrorBanner(
-                message = displayErrorMessage,
+    SectionCard(
+        modifier = modifier,
+        content = {
+            Row(
                 modifier = Modifier.fillMaxWidth(),
-            )
-        }
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            PrimaryButton(
-                text = if (isRunning) "Stop" else "Start",
-                onClick = onToggle,
-                modifier = Modifier.weight(1f),
-                enabled = isRunning || isValid,
-                colors = stopColors,
-                textStyle = MaterialTheme.typography.titleMedium,
-            )
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(text = "Proximity", style = MaterialTheme.typography.titleMedium)
+                StatChip(label = statusLabel)
+            }
             if (displayErrorMessage != null) {
-                SecondaryButton(
-                    text = "Clear error",
-                    onClick = onClearError,
-                    modifier = Modifier.weight(1f),
+                ErrorBanner(
+                    message = displayErrorMessage,
+                    modifier = Modifier.fillMaxWidth(),
                 )
             }
-        }
-        ProximityMeter(
-            proximity = proximity,
-            isRunning = isRunning,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        if (targetNotSeenMessage != null) {
-            Text(
-                text = targetNotSeenMessage,
-                style = MaterialTheme.typography.bodySmall,
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                PrimaryButton(
+                    text = if (isRunning) "Stop" else "Start",
+                    onClick = onToggle,
+                    modifier = Modifier.weight(1f),
+                    enabled = isRunning || isValid,
+                    colors = stopColors,
+                    textStyle = MaterialTheme.typography.titleMedium,
+                )
+                if (displayErrorMessage != null) {
+                    SecondaryButton(
+                        text = "Clear error",
+                        onClick = onClearError,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+            }
+            ProximityMeter(
+                proximity = proximity,
+                isRunning = isRunning,
+                modifier = Modifier.fillMaxWidth(),
             )
-        }
-    }
+            if (targetNotSeenMessage != null) {
+                Text(
+                    text = targetNotSeenMessage,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+        },
+    )
 }
 
 @Composable

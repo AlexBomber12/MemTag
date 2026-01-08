@@ -20,8 +20,8 @@ enum class StatChipTone {
 @Composable
 fun StatChip(
     label: String,
-    onClick: () -> Unit = {},
     modifier: Modifier = Modifier,
+    onClick: () -> Unit = {},
     tone: StatChipTone = StatChipTone.Neutral,
 ) {
     val (containerColor, labelColor, borderColor) = statChipColors(tone)

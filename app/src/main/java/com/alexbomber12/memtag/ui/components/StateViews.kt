@@ -33,9 +33,9 @@ fun LoadingState(
 @Composable
 fun ErrorState(
     message: String,
+    modifier: Modifier = Modifier,
     actionLabel: String? = null,
     onAction: (() -> Unit)? = null,
-    modifier: Modifier = Modifier,
 ) {
     Column(
         modifier = modifier,
