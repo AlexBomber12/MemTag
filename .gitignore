@@ -22,3 +22,14 @@ local.properties
 .kotlin/
 .kotlin/errors/
 /artifacts
+witch main
+memtag.db
+Thumbs.db
+*.apk
+*.aab
+*.jks
+*.keystore
+*.log
+*.tmp
+*~
+/app/build
