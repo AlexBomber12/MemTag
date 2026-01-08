@@ -14,7 +14,10 @@
 .cxx
 local.properties
 .local
-.idea
+.idea/*
+!.idea/inspectionProfiles/
+!.idea/inspectionProfiles/*.xml
+!.idea/inspectionProfiles/profiles_settings.xml
 /vendor
 /app/libs
 /app/lib
