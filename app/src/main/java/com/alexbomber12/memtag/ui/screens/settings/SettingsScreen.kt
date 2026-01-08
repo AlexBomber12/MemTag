@@ -31,8 +31,10 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -67,7 +69,16 @@ fun SettingsScreen(
     var token by rememberSaveable { mutableStateOf(settings.mementoToken) }
     var libraryId by rememberSaveable { mutableStateOf(settings.mementoLibraryId) }
     var region by rememberSaveable { mutableStateOf(settings.uhfRegion) }
-    var power by rememberSaveable { mutableStateOf(settings.uhfPower.toFloat()) }
+    var power by
+        rememberSaveable(
+            saver =
+                Saver(
+                    save = { it.value },
+                    restore = { mutableFloatStateOf(it) },
+                ),
+        ) {
+            mutableFloatStateOf(settings.uhfPower.toFloat())
+        }
     var rfidKeyCodes by rememberSaveable { mutableStateOf(settings.rfidKeyCodes) }
     var scanKeyCodes by rememberSaveable { mutableStateOf(settings.scanKeyCodes) }
     var tokenVisible by rememberSaveable { mutableStateOf(false) }

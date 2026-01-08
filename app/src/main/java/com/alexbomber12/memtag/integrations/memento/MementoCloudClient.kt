@@ -287,8 +287,7 @@ class MementoCloudClient(
         if (resolved.queryParameter("token") == null) {
             builder.addQueryParameter("token", config.token)
         }
-        val url = builder.build().toString()
-        return url
+        return builder.build().toString()
     }
 
     private fun createApi(baseUrl: String): MementoApi {

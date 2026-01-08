@@ -435,8 +435,7 @@ class BatchViewModel(
         if (undoStack.isEmpty()) {
             return
         }
-        val action = undoStack.removeLast()
-        when (action) {
+        when (val action = undoStack.removeLast()) {
             is UpdateEntry -> {
                 val previous = action.previous
                 viewModelScope.launch {
@@ -734,8 +733,7 @@ class BatchViewModel(
         var notFound = 0
         var unknown = 0
         inputItems.forEach { item ->
-            val status = sessionMap[item.epcNormalized]?.status ?: BatchStatus.UNKNOWN
-            when (status) {
+            when (val status = sessionMap[item.epcNormalized]?.status ?: BatchStatus.UNKNOWN) {
                 BatchStatus.FOUND -> found += 1
                 BatchStatus.NOT_FOUND -> notFound += 1
                 else -> unknown += 1
@@ -793,8 +791,7 @@ class BatchViewModel(
     }
 
     private fun mapUhfError(error: Throwable?): String {
-        val uhfError = (error as? UhfException)?.error
-        return when (uhfError) {
+        return when (val uhfError = (error as? UhfException)?.error) {
             UhfError.NotInitialized -> "UHF not initialized."
             UhfError.HardwareUnavailable -> "UHF hardware unavailable."
             UhfError.Timeout -> "UHF operation timed out."
