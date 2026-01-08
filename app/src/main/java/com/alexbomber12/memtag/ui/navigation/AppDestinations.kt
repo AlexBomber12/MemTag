@@ -83,7 +83,6 @@ object AppDestinations {
         autoStart: Boolean = false,
         fromBatch: Boolean = false,
     ): String {
-        val encoded = Uri.encode(epc)
-        return "find?epc=$encoded&autoStart=$autoStart&fromBatch=$fromBatch"
+        return "find?epc=${Uri.encode(epc)}&autoStart=$autoStart&fromBatch=$fromBatch"
     }
 }

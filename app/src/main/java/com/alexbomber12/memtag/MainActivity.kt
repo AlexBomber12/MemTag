@@ -70,8 +70,7 @@ class MainActivity : ComponentActivity() {
         super.onStart()
         val appContainer = (application as MemTagApplication).container
         lifecycleScope.launch {
-            val initResult = appContainer.uhfReader.initialize()
-            if (initResult.isSuccess) {
+            if (appContainer.uhfReader.initialize().isSuccess) {
                 appContainer.uhfReader.applyDesiredConfigBestEffort("activity-start")
             }
         }

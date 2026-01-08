@@ -175,8 +175,7 @@ fun BatchScreen(
             }
             IconButton(
                 onClick = {
-                    val name = "batch_export_${exportFormatter.format(Date())}.csv"
-                    exportLauncher.launch(name)
+                    exportLauncher.launch("batch_export_${exportFormatter.format(Date())}.csv")
                 },
                 enabled = !state.isExporting && canExport,
             ) {
@@ -217,8 +216,7 @@ fun BatchScreen(
                         text = { Text(text = "Export CSV") },
                         onClick = {
                             showOverflowMenu = false
-                            val name = "batch_export_${exportFormatter.format(Date())}.csv"
-                            exportLauncher.launch(name)
+                            exportLauncher.launch("batch_export_${exportFormatter.format(Date())}.csv")
                         },
                         enabled = !state.isExporting && canExport,
                         leadingIcon = {

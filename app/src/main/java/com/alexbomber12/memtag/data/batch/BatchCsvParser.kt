@@ -81,8 +81,7 @@ object BatchCsvParser {
         var epcIndex: Int? = null
         var nameIndex: Int? = null
         cells.forEachIndexed { index, value ->
-            val normalized = value.trim().trimStart('\uFEFF').lowercase()
-            when (normalized) {
+            when (val normalized = value.trim().trimStart('\uFEFF').lowercase()) {
                 "epc" -> epcIndex = index
                 "name" -> nameIndex = index
             }
@@ -105,8 +104,7 @@ object BatchCsvParser {
         var inQuotes = false
         var index = 0
         while (index < line.length) {
-            val char = line[index]
-            when (char) {
+            when (val char = line[index]) {
                 '"' -> {
                     val next = if (index + 1 < line.length) line[index + 1] else null
                     if (inQuotes && next == '"') {

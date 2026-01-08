@@ -27,8 +27,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
+import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -58,7 +60,16 @@ fun DiagnosticsScreen(viewModel: DiagnosticsViewModel) {
     }
 
     var regionExpanded by rememberSaveable { mutableStateOf(false) }
-    var pendingPower by rememberSaveable { mutableStateOf(state.currentPower.toFloat()) }
+    var pendingPower by
+        rememberSaveable(
+            saver =
+                Saver(
+                    save = { it.value },
+                    restore = { mutableFloatStateOf(it) },
+                ),
+        ) {
+            mutableFloatStateOf(state.currentPower.toFloat())
+        }
 
     LaunchedEffect(state.currentPower) {
         pendingPower = state.currentPower.toFloat()

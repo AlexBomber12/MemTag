@@ -672,8 +672,7 @@ class FindViewModel(
     }
 
     private fun mapError(error: Throwable?): String {
-        val uhfError = (error as? UhfException)?.error
-        return when (uhfError) {
+        return when (val uhfError = (error as? UhfException)?.error) {
             UhfError.NotInitialized -> "UHF not initialized."
             UhfError.HardwareUnavailable -> "UHF hardware unavailable."
             UhfError.Timeout -> "UHF operation timed out."
@@ -684,8 +683,7 @@ class FindViewModel(
     }
 
     private fun mapScanError(error: Throwable?): String {
-        val scanError = (error as? Scan2dException)?.error
-        return when (scanError) {
+        return when (val scanError = (error as? Scan2dException)?.error) {
             Scan2dError.Timeout -> "QR scan timed out."
             Scan2dError.Cancelled -> "QR scan cancelled."
             Scan2dError.OperationInProgress -> "Scanner is busy."
