@@ -4,7 +4,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
-import android.os.Build
+import androidx.core.content.ContextCompat
 import com.alexbomber12.memtag.data.AppDefaults
 import com.alexbomber12.memtag.data.settings.SettingsStore
 import com.barcode.BarcodeUtility
@@ -181,7 +181,12 @@ class ChainwayBroadcastScan2dScanner(
                     }
                 }
             receiver = scanReceiver
-            registerReceiver(scanReceiver, IntentFilter(action))
+            ContextCompat.registerReceiver(
+                appContext,
+                scanReceiver,
+                IntentFilter(action),
+                ContextCompat.RECEIVER_EXPORTED,
+            )
             receiverRegistered = true
 
             val startError =
@@ -264,18 +269,6 @@ class ChainwayBroadcastScan2dScanner(
         return intent.getStringExtra(extraKey)
             ?: intent.getByteArrayExtra(extraKey)?.toString(Charsets.UTF_8)
             ?: intent.extras?.get(extraKey)?.toString()
-    }
-
-    private fun registerReceiver(
-        receiver: BroadcastReceiver,
-        filter: IntentFilter,
-    ) {
-        if (Build.VERSION.SDK_INT >= 33) {
-            appContext.registerReceiver(receiver, filter, Context.RECEIVER_EXPORTED)
-        } else {
-            @Suppress("DEPRECATION")
-            appContext.registerReceiver(receiver, filter)
-        }
     }
 
     private fun logEndResult(outcome: ScanOutcome?) {
