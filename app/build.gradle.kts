@@ -51,6 +51,9 @@ android {
         buildConfig = true
         compose = true
     }
+    lint {
+        lintConfig = file("$rootDir/lint.xml")
+    }
 }
 
 val deviceLibDirs =
