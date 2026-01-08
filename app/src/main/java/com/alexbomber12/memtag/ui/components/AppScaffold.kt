@@ -22,12 +22,12 @@ private val DefaultContentPadding = PaddingValues(horizontal = 16.dp, vertical =
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AppScaffold(
+    content: @Composable (PaddingValues) -> Unit,
+    modifier: Modifier = Modifier,
     title: String? = null,
     navigationIcon: (@Composable () -> Unit)? = null,
     actions: @Composable RowScope.() -> Unit = {},
     snackbarHost: @Composable () -> Unit = {},
-    modifier: Modifier = Modifier,
-    content: @Composable (PaddingValues) -> Unit,
 ) {
     val layoutDirection = LocalLayoutDirection.current
     val resolvedTitle = title?.takeIf { it.isNotBlank() }

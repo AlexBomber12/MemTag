@@ -54,8 +54,9 @@ private fun CardPreview() {
                 Modifier
                     .fillMaxWidth()
                     .padding(16.dp),
-        ) {
-            Text(text = "Card content goes here.")
-        }
+            content = {
+                Text(text = "Card content goes here.")
+            },
+        )
     }
 }

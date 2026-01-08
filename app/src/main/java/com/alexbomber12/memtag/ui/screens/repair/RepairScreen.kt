@@ -121,41 +121,44 @@ fun RepairScreen(
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         item {
-            SectionCard(modifier = Modifier.fillMaxWidth()) {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        PrimaryButton(
-                            text = "Scan RFID",
-                            onClick = viewModel::scanRfid,
-                            enabled = !isBusy,
-                            modifier = Modifier.weight(1f),
-                            loading = state.isUhfBusy,
-                            leadingIcon = {
-                                Icon(
-                                    imageVector = Icons.Filled.CenterFocusStrong,
-                                    contentDescription = "Scan RFID",
-                                )
-                            },
-                        )
-                        SecondaryButton(
-                            text = "Scan QR",
-                            onClick = viewModel::scanQr,
-                            enabled = !isBusy,
-                            modifier = Modifier.weight(1f),
-                            loading = state.isQrBusy,
-                            leadingIcon = {
-                                Icon(
-                                    imageVector = Icons.Filled.QrCodeScanner,
-                                    contentDescription = "Scan QR",
-                                )
-                            },
-                        )
+            SectionCard(
+                modifier = Modifier.fillMaxWidth(),
+                content = {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            PrimaryButton(
+                                text = "Scan RFID",
+                                onClick = viewModel::scanRfid,
+                                enabled = !isBusy,
+                                modifier = Modifier.weight(1f),
+                                loading = state.isUhfBusy,
+                                leadingIcon = {
+                                    Icon(
+                                        imageVector = Icons.Filled.CenterFocusStrong,
+                                        contentDescription = "Scan RFID",
+                                    )
+                                },
+                            )
+                            SecondaryButton(
+                                text = "Scan QR",
+                                onClick = viewModel::scanQr,
+                                enabled = !isBusy,
+                                modifier = Modifier.weight(1f),
+                                loading = state.isQrBusy,
+                                leadingIcon = {
+                                    Icon(
+                                        imageVector = Icons.Filled.QrCodeScanner,
+                                        contentDescription = "Scan QR",
+                                    )
+                                },
+                            )
+                        }
                     }
-                }
-            }
+                },
+            )
         }
 
         item {
@@ -174,90 +177,91 @@ fun RepairScreen(
                                 strokeWidth = strokeWidth,
                             )
                         },
-            ) {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(text = "Verification", style = MaterialTheme.typography.titleMedium)
-                    if (statusMessage != null) {
-                        Text(
-                            text = statusMessage,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = statusMessageColor,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                    if (selectedLabel != null) {
-                        Text(
-                            text = "Selected: $selectedLabel",
-                            style = MaterialTheme.typography.labelSmall,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                    OutlinedTextField(
-                        value = state.expectedEpc,
-                        onValueChange = viewModel::onExpectedEpcChange,
-                        label = { Text(text = "Expected EPC") },
-                        placeholder = { Text(text = "Expected EPC") },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
-                        enabled = !isBusy,
-                        textStyle = epcTextStyle,
-                        colors =
-                            OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = MaterialTheme.colorScheme.outline,
-                                unfocusedBorderColor = MaterialTheme.colorScheme.outline,
-                                focusedLabelColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                                unfocusedLabelColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                                cursorColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                            ),
-                        trailingIcon = {
-                            if (state.expectedEpc.isNotBlank()) {
-                                IconButton(
-                                    onClick = { viewModel.onExpectedEpcChange("") },
-                                    enabled = !isBusy,
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Filled.Clear,
-                                        contentDescription = "Clear expected EPC",
-                                    )
-                                }
-                            }
-                        },
-                    )
-                    OutlinedTextField(
-                        value = scannedEpcValue,
-                        onValueChange = {},
-                        label = { Text(text = "Scanned EPC") },
-                        placeholder = { Text(text = "--") },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
-                        readOnly = true,
-                        textStyle = epcTextStyle.copy(color = highlightColor),
-                        colors =
-                            OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = MaterialTheme.colorScheme.outline,
-                                unfocusedBorderColor = MaterialTheme.colorScheme.outline,
-                                focusedLabelColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                                unfocusedLabelColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                                cursorColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                            ),
-                    )
-                    if (!expectedBlank) {
-                        if (state.isWriting) {
-                            LoadingState(message = "Writing EPC...")
-                        } else if (state.isVerifying) {
-                            LoadingState(message = "Verifying tag EPC...")
+                content = {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(text = "Verification", style = MaterialTheme.typography.titleMedium)
+                        if (statusMessage != null) {
+                            Text(
+                                text = statusMessage,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = statusMessageColor,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
                         }
+                        if (selectedLabel != null) {
+                            Text(
+                                text = "Selected: $selectedLabel",
+                                style = MaterialTheme.typography.labelSmall,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                        OutlinedTextField(
+                            value = state.expectedEpc,
+                            onValueChange = viewModel::onExpectedEpcChange,
+                            label = { Text(text = "Expected EPC") },
+                            placeholder = { Text(text = "Expected EPC") },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            enabled = !isBusy,
+                            textStyle = epcTextStyle,
+                            colors =
+                                OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor = MaterialTheme.colorScheme.outline,
+                                    unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+                                    focusedLabelColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    unfocusedLabelColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    cursorColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                ),
+                            trailingIcon = {
+                                if (state.expectedEpc.isNotBlank()) {
+                                    IconButton(
+                                        onClick = { viewModel.onExpectedEpcChange("") },
+                                        enabled = !isBusy,
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Filled.Clear,
+                                            contentDescription = "Clear expected EPC",
+                                        )
+                                    }
+                                }
+                            },
+                        )
+                        OutlinedTextField(
+                            value = scannedEpcValue,
+                            onValueChange = {},
+                            label = { Text(text = "Scanned EPC") },
+                            placeholder = { Text(text = "--") },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            readOnly = true,
+                            textStyle = epcTextStyle.copy(color = highlightColor),
+                            colors =
+                                OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor = MaterialTheme.colorScheme.outline,
+                                    unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+                                    focusedLabelColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    unfocusedLabelColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    cursorColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                ),
+                        )
+                        if (!expectedBlank) {
+                            if (state.isWriting) {
+                                LoadingState(message = "Writing EPC...")
+                            } else if (state.isVerifying) {
+                                LoadingState(message = "Verifying tag EPC...")
+                            }
+                        }
+                        PrimaryButton(
+                            text = "Write expected EPC",
+                            onClick = viewModel::startWriteConfirmation,
+                            enabled = canWrite,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
                     }
-                    PrimaryButton(
-                        text = "Write expected EPC",
-                        onClick = viewModel::startWriteConfirmation,
-                        enabled = canWrite,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                }
-            }
+                },
+            )
         }
     }
 }

@@ -19,9 +19,9 @@ private val SectionCardSpacing = 12.dp
 
 @Composable
 fun SectionCard(
-    title: String? = null,
-    modifier: Modifier = Modifier,
     content: @Composable ColumnScope.() -> Unit,
+    modifier: Modifier = Modifier,
+    title: String? = null,
 ) {
     Card(
         modifier = modifier,
