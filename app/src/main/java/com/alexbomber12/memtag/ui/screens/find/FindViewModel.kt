@@ -414,7 +414,10 @@ class FindViewModel(
             Scan2dLogger.i("Scan QR ignored: already scanning (screen=$SCAN_SOURCE)")
             return
         }
-        mutableState.update { it.copy(lastErrorMessage = null, isQrBusy = true) }
+        mutableState.update { state ->
+            val updated = state.copy(lastErrorMessage = null, isQrBusy = true)
+            updated.copy(status = computeStatus(updated))
+        }
         scanQrJob =
             viewModelScope.launch {
                 try {
@@ -455,7 +458,10 @@ class FindViewModel(
         if (scanRfidJob != null || uiState.value.isRunning || uiState.value.isQrBusy) {
             return
         }
-        mutableState.update { it.copy(lastErrorMessage = null, isUhfBusy = true) }
+        mutableState.update { state ->
+            val updated = state.copy(lastErrorMessage = null, isUhfBusy = true)
+            updated.copy(status = computeStatus(updated))
+        }
         scanRfidJob =
             viewModelScope.launch {
                 try {
