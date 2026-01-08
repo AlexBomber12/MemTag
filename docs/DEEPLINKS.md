@@ -1,6 +1,6 @@
 # Deep Links
 
-MemTag supports an external Find entrypoint for Memento buttons.
+MemTag supports an external Find entry point for Memento buttons.
 
 Supported formats:
 - `memtag://find?epc=<EPC>`
