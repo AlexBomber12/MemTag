@@ -99,26 +99,26 @@ class UhfRecoveryTest {
             return Result.success(Unit)
         }
 
-        override suspend fun readSingle(timeoutMs: Long): Result<String> {
+        override suspend fun readSingle(_timeoutMs: Long): Result<String> {
             return Result.failure(IllegalStateException("Not used"))
         }
 
         override suspend fun writeEpc(
-            epcHex: String,
-            targetEpcHex: String?,
-            timeoutMs: Long,
+            _epcHex: String,
+            _targetEpcHex: String?,
+            _timeoutMs: Long,
         ): Result<Unit> {
             return Result.failure(IllegalStateException("Not used"))
         }
 
         override suspend fun verifyEpc(
-            expectedEpcHex: String,
-            timeoutMs: Long,
+            _expectedEpcHex: String,
+            _timeoutMs: Long,
         ): Result<Boolean> {
             return Result.failure(IllegalStateException("Not used"))
         }
 
-        override suspend fun startInventory(filterEpcHex: String?): Flow<TagReading> {
+        override suspend fun startInventory(_filterEpcHex: String?): Flow<TagReading> {
             return emptyFlow()
         }
 
@@ -126,31 +126,31 @@ class UhfRecoveryTest {
             return Result.success(Unit)
         }
 
-        override suspend fun setPower(dbm: Int): Result<Unit> {
+        override suspend fun setPower(_dbm: Int): Result<Unit> {
             return Result.failure(IllegalStateException("Not used"))
         }
 
-        override suspend fun getPower(reason: String): Result<Int> {
+        override suspend fun getPower(_reason: String): Result<Int> {
             return Result.failure(IllegalStateException("Not used"))
         }
 
-        override suspend fun getFrequencyMode(reason: String): Result<Int> {
+        override suspend fun getFrequencyMode(_reason: String): Result<Int> {
             return Result.failure(IllegalStateException("Not used"))
         }
 
-        override suspend fun getProtocol(reason: String): Result<Int> {
+        override suspend fun getProtocol(_reason: String): Result<Int> {
             return Result.failure(IllegalStateException("Not used"))
         }
 
-        override suspend fun getRfLink(reason: String): Result<Int> {
+        override suspend fun getRfLink(_reason: String): Result<Int> {
             return Result.failure(IllegalStateException("Not used"))
         }
 
-        override suspend fun setRegion(region: UhfRegion): Result<Unit> {
+        override suspend fun setRegion(_region: UhfRegion): Result<Unit> {
             return Result.failure(IllegalStateException("Not used"))
         }
 
-        override suspend fun getRegion(reason: String): Result<UhfRegion> {
+        override suspend fun getRegion(_reason: String): Result<UhfRegion> {
             return Result.failure(IllegalStateException("Not used"))
         }
 
@@ -160,13 +160,13 @@ class UhfRecoveryTest {
             return result.map { it.copy(reason = reason) }
         }
 
-        override suspend fun applyDesiredConfigWithReadback(reason: String): Result<UhfApplyResult> {
+        override suspend fun applyDesiredConfigWithReadback(_reason: String): Result<UhfApplyResult> {
             return Result.failure(IllegalStateException("Not used"))
         }
 
         override suspend fun applyFindProfile(
-            targetEpcHex: String?,
-            useHardwareFilter: Boolean,
+            _targetEpcHex: String?,
+            _useHardwareFilter: Boolean,
         ): Result<Unit> {
             return Result.failure(IllegalStateException("Not used"))
         }

@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.alexbomber12.memtag.data.repository.MementoRepository
 import com.alexbomber12.memtag.data.settings.SettingsStore
 import com.alexbomber12.memtag.domain.InventoryItem
+import com.alexbomber12.memtag.domain.LookupResult
 import com.alexbomber12.memtag.domain.SyncState
 import com.alexbomber12.memtag.integrations.scan2d.Scan2dError
 import com.alexbomber12.memtag.integrations.scan2d.Scan2dException
@@ -288,6 +289,9 @@ class LookupViewModel(
                         persistSelection(selectedItem)
                     }
                 }
+                if (items.isNotEmpty()) {
+                    touchLookupResult(LookupResult.Found(items.first()))
+                }
             }
             .onFailure { error ->
                 mutableState.update {
@@ -298,6 +302,7 @@ class LookupViewModel(
                         selectedEpc = null,
                     )
                 }
+                touchLookupResult(LookupResult.Error(error.message ?: "Search failed."))
             }
     }
 
@@ -343,6 +348,14 @@ class LookupViewModel(
                     lastScannedEpcAt = timestamp,
                 )
             }
+        }
+    }
+
+    private fun touchLookupResult(result: LookupResult) {
+        when (result) {
+            is LookupResult.Found -> result.item
+            is LookupResult.Error -> result.message
+            LookupResult.NotFound -> Unit
         }
     }
 

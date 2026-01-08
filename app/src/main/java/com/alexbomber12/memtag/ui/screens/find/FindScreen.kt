@@ -81,7 +81,8 @@ fun FindScreen(
     }
     val isValid = uiState.epcInput.isBlank() || EpcValidator.isValidEpcHex(uiState.epcInput)
     val showInputError = uiState.epcInput.isNotBlank() && !isValid
-    val errorMessage = uiState.lastErrorMessage?.takeIf { it.isNotBlank() }
+    val statusErrorMessage = (uiState.status as? FindStatus.Error)?.message
+    val errorMessage = (statusErrorMessage ?: uiState.lastErrorMessage)?.takeIf { it.isNotBlank() }
     val isNearbyMode = uiState.targetEpcNormalized.isNullOrBlank()
     val statusLabel =
         when (uiState.status) {

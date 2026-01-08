@@ -33,6 +33,7 @@ import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 sealed class FindStatus {
     data object Idle : FindStatus()
@@ -738,11 +739,13 @@ class FindViewModel(
     private fun persistFindTarget(value: String) {
         viewModelScope.launch {
             val normalized = runCatching { EpcNormalizer.normalize(value) }.getOrNull().orEmpty()
-            settingsStore.update {
-                it.copy(
-                    lastFindTargetEpc = normalized,
-                    lastFindTargetEpcAt = clock(),
-                )
+            withContext(ioDispatcher) {
+                settingsStore.update {
+                    it.copy(
+                        lastFindTargetEpc = normalized,
+                        lastFindTargetEpcAt = clock(),
+                    )
+                }
             }
         }
     }
