@@ -42,4 +42,4 @@ If you build the device flavor without vendor libraries, Gradle fails fast with 
 - Use **Repair** only when a scanned tag EPC does not match the expected EPC for a selected item.
 - A mismatch means the tag you scanned is not encoded with the selected item's EPC (wrong tag or incorrect encoding).
 - Common failure causes: tag locked or not writable, wrong tag type, poor RF power/region, or weak coupling.
-- Write success is confirmed only after a readback verify matches the expected EPC.
+- Write success is confirmed only after a read-back verification matches the expected EPC.

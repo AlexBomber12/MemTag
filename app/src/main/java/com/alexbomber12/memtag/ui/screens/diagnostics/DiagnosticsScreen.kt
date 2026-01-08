@@ -184,7 +184,7 @@ fun DiagnosticsScreen(viewModel: DiagnosticsViewModel) {
                                 Text(
                                     text =
                                         "Start: $startOk | Stop: $stopOk | " +
-                                            "Reads: ${result.reads} | NonNull: ${result.nonNullReads}",
+                                            "Reads: ${result.reads} | Non-null: ${result.nonNullReads}",
                                     style = MaterialTheme.typography.bodySmall,
                                 )
                                 Text(
