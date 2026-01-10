@@ -25,9 +25,9 @@ class ProximityCalculator(
     data class Config(
         val windowMs: Long = 500L,
         val hitsMax: Int = 10,
-        val rssiMin: Int = -85,
-        val rssiMax: Int = -35,
-        val rssiGamma: Float = 0.7f,
+        val rssiMin: Int = -65,
+        val rssiMax: Int = -25,
+        val rssiGamma: Float = 1.0f,
         val alpha: Float = 0.4f,
         val noSignalMs: Long = 700L,
         val decayPerSecond: Float = 0.8f,
@@ -89,7 +89,8 @@ class ProximityCalculator(
         val hits = hitTimestamps.size
         val rssiScore = lastRssi?.let(::mapRssiToScore) ?: 0f
         val hitScore = (hits.toFloat() / config.hitsMax.coerceAtLeast(1)).coerceIn(0f, 1f)
-        rawScore = (0.7f * rssiScore) + (0.3f * hitScore)
+        val hitBonus = 0.15f * hitScore
+        rawScore = (rssiScore + hitBonus).coerceIn(0f, 1f)
         if (isReading && rawScore > 0f) {
             lastNonZeroAt = nowMs
         }
