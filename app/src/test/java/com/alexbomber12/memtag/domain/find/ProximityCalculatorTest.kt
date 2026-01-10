@@ -22,6 +22,27 @@ class ProximityCalculatorTest {
     }
 
     @Test
+    fun maxRssiHitsTopProximityImmediately() {
+        val snapshot =
+            ProximityCalculator(
+                targetEpc = "E2000017221101441890ABCD",
+            ).onReading(reading(-25, 0L)) ?: error("Missing snapshot")
+
+        assertEquals(100, snapshot.proximity)
+    }
+
+    @Test
+    fun minRssiIsNearZeroWithLargeHitWindow() {
+        val snapshot =
+            ProximityCalculator(
+                targetEpc = "E2000017221101441890ABCD",
+                config = ProximityCalculator.Config(hitsMax = 1000),
+            ).onReading(reading(-65, 0L)) ?: error("Missing snapshot")
+
+        assertTrue(snapshot.proximity <= 1)
+    }
+
+    @Test
     fun increasesAsRssiAndHitRateImprove() {
         val calculator =
             ProximityCalculator(
@@ -99,10 +120,10 @@ class ProximityCalculatorTest {
                     ),
             )
 
-        calculator.onReading(reading(-70, 0L))
+        calculator.onReading(reading(-55, 0L))
         val afterDecay = calculator.onTick(3000L).smoothedScore
         val wake =
-            calculator.onReading(reading(-70, 3200L)) ?: error("Missing snapshot")
+            calculator.onReading(reading(-55, 3200L)) ?: error("Missing snapshot")
 
         assertTrue(afterDecay < 0.05f)
         assertTrue(wake.smoothedScore > 0.1f)
