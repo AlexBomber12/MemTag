@@ -1,3 +1,5 @@
 <lint>
     <issue id="KaptUsageInsteadOfKsp" severity="ignore" />
+    <issue id="NewerVersionAvailable" severity="ignore" />
+    <issue id="GradleDependency" severity="ignore" />
 </lint>
