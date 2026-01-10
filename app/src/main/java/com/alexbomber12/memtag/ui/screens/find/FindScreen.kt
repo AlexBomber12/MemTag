@@ -87,7 +87,7 @@ fun FindScreen(
     val statusLabel =
         when (uiState.status) {
             FindStatus.Idle -> "Idle"
-            FindStatus.NoSignal -> "Running"
+            FindStatus.NoSignal -> "No signal"
             FindStatus.Running -> "Signal detected"
             is FindStatus.Error -> "Idle"
         }
@@ -155,7 +155,7 @@ fun FindScreen(
                         errorMessage = errorMessage,
                         isRunning = uiState.isRunning,
                         isValid = isValid,
-                        proximity = uiState.proximity,
+                        displayProximity = uiState.displayProximity,
                         targetNotSeenMessage = targetNotSeenMessage,
                         onToggle = viewModel::toggleFind,
                         onClearError = viewModel::clearError,
@@ -310,7 +310,7 @@ private fun ProximitySection(
     errorMessage: String?,
     isRunning: Boolean,
     isValid: Boolean,
-    proximity: Int,
+    displayProximity: Int,
     targetNotSeenMessage: String?,
     onToggle: () -> Unit,
     onClearError: () -> Unit,
@@ -364,7 +364,7 @@ private fun ProximitySection(
                 }
             }
             ProximityMeter(
-                proximity = proximity,
+                displayProximity = displayProximity,
                 isRunning = isRunning,
                 modifier = Modifier.fillMaxWidth(),
             )
@@ -380,15 +380,14 @@ private fun ProximitySection(
 
 @Composable
 private fun ProximityMeter(
-    proximity: Int,
+    displayProximity: Int,
     isRunning: Boolean,
     modifier: Modifier = Modifier,
 ) {
-    val uiScore = rescaleProximityUiScore(proximity)
     val animatedProgress by
         animateFloatAsState(
-            targetValue = uiScore / 100f,
-            animationSpec = tween(durationMillis = 200),
+            targetValue = displayProximity / 100f,
+            animationSpec = tween(durationMillis = 350),
             label = "proximityProgress",
         )
     val displayValue = (animatedProgress * 100f).roundToInt().coerceIn(0, 100)
@@ -545,7 +544,7 @@ private fun ProximityIdlePreview() {
             errorMessage = null,
             isRunning = false,
             isValid = true,
-            proximity = 0,
+            displayProximity = 0,
             targetNotSeenMessage = null,
             onToggle = {},
             onClearError = {},
@@ -566,7 +565,7 @@ private fun ProximityQrTimeoutHiddenPreview() {
             errorMessage = "QR scan timed out.",
             isRunning = false,
             isValid = true,
-            proximity = 0,
+            displayProximity = 0,
             targetNotSeenMessage = null,
             onToggle = {},
             onClearError = {},
@@ -587,7 +586,7 @@ private fun ProximityRunningMaxPowerPreview() {
             errorMessage = null,
             isRunning = true,
             isValid = true,
-            proximity = 91,
+            displayProximity = 91,
             targetNotSeenMessage = null,
             onToggle = {},
             onClearError = {},
