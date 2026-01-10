@@ -62,6 +62,7 @@ data class FindUiState(
     val isRunning: Boolean = false,
     val status: FindStatus = FindStatus.Idle,
     val proximity: Int = 0,
+    val displayProximity: Int = 0,
     val rawProximity: Float = 0f,
     val smoothedProximity: Float = 0f,
     val hitsPerWindow: Int = 0,
@@ -295,6 +296,7 @@ class FindViewModel(
                     isRunning = true,
                     lastErrorMessage = null,
                     proximity = 0,
+                    displayProximity = 0,
                     rawProximity = 0f,
                     smoothedProximity = 0f,
                     hitsPerWindow = 0,
@@ -514,6 +516,7 @@ class FindViewModel(
                     status = FindStatus.Idle,
                     lastErrorMessage = null,
                     proximity = 0,
+                    displayProximity = 0,
                     rawProximity = 0f,
                     smoothedProximity = 0f,
                     hitsPerWindow = 0,
@@ -588,8 +591,10 @@ class FindViewModel(
     private fun applySnapshot(snapshot: ProximitySnapshot) {
         mutableState.update { state ->
             val status = computeStatus(state.copy(seenRecently = snapshot.seenRecently))
+            val displayProximity = computeDisplayProximity(snapshot.proximity, snapshot.seenRecently)
             state.copy(
                 proximity = snapshot.proximity,
+                displayProximity = displayProximity,
                 rawProximity = snapshot.rawScore,
                 smoothedProximity = snapshot.smoothedScore,
                 hitsPerWindow = snapshot.hitsPerWindow,
