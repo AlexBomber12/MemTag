@@ -384,9 +384,10 @@ private fun ProximityMeter(
     isRunning: Boolean,
     modifier: Modifier = Modifier,
 ) {
+    val uiScore = rescaleProximityUiScore(proximity)
     val animatedProgress by
         animateFloatAsState(
-            targetValue = proximity / 100f,
+            targetValue = uiScore / 100f,
             animationSpec = tween(durationMillis = 200),
             label = "proximityProgress",
         )
